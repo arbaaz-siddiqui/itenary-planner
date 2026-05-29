@@ -1,0 +1,42 @@
+# Secrets
+.env
+.env.*
+!.env.example
+.secrets.baseline
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+*.egg-info/
+build/
+dist/
+
+# Virtual envs
+.venv/
+venv/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Project
+data/samples/
+*.db
+*.db-journal
+whatsapp_state*
+benchmark_results.xlsx
+benchmark_results.xlsx.lock
+.streamlit/
+*.log
+.claude/
+
+
+
+# Ignore all JSON files
+*.json
