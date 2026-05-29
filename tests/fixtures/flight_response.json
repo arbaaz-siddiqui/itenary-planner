@@ -1,0 +1,637 @@
+{
+  "id": null,
+  "success": true,
+  "data": {
+    "pricedItineraries": [
+      {
+        "itinerarySourceCode": "MSQkMCQkQW1hZGV1cyQkYzgyZmEzMjctNGE0YS00NTRkLWJiZTYtNDNhM2RjMjJjNDY4",
+        "airItineraryPricingInfo": {
+          "fareSourceCode": "MSQkMCQkQW1hZGV1cyQkYzgyZmEzMjctNGE0YS00NTRkLWJiZTYtNDNhM2RjMjJjNDY4",
+          "fareType": "",
+          "isRefundable": "No",
+          "corporateId": "",
+          "itinTotalFare": {
+            "baseFare": {
+              "amount": 198.57489113009999,
+              "currencyCode": "INR"
+            },
+            "totalTax": {
+              "amount": 70.9279458222,
+              "currencyCode": "INR"
+            },
+            "totalFare": {
+              "amount": 269.5028369523,
+              "currencyCode": "INR"
+            }
+          },
+          "ptC_FareBreakdowns": [
+            {
+              "baggageInfo": [
+                "7kg"
+              ],
+              "cabinBaggageInfo": [
+                "sb"
+              ],
+              "fareBasisCodes": [
+                "SU1YXF2I"
+              ],
+              "fareTypeCodes": [
+                "RP"
+              ],
+              "fareTypeCodesName": [
+                "Published fares"
+              ],
+              "passengerFare": {
+                "baseFare": {
+                  "amount": 198.57489113009999,
+                  "currencyCode": "INR"
+                },
+                "totalTax": {
+                  "amount": 70.9279458222,
+                  "currencyCode": "INR"
+                },
+                "totalFare": {
+                  "amount": 269.5028369523,
+                  "currencyCode": "INR"
+                }
+              },
+              "passengerTypeQuantity": {
+                "code": "ADT",
+                "quantity": 1
+              },
+              "penaltiesInfo": [
+                {
+                  "allowed": false,
+                  "amount": 0,
+                  "currencyCode": "INR",
+                  "penaltyType": "TICKETS ARE NON-REFUNDABLE LAST TKT DTE 26MAY26  - SEE ADV PURCHASE ",
+                  "lastTickitingDate": "26/05/2026"
+                }
+              ]
+            }
+          ]
+        },
+        "directionInd": "oneway",
+        "originDestinationOptions": [
+          {
+            "flightSegments": [
+              {
+                "segmentOptionKey": "",
+                "arrivalAirportLocationCode": "AMD",
+                "arrivalAirportName": "Ahmedabad Airport",
+                "arrivalAirportCity": "Ahmedabad",
+                "arrivalAirportCountry": "India",
+                "arrivalAirportlatitude": "23.0700000000",
+                "arrivalAirportlongitude": "72.6200000000",
+                "arrivalDateTime": "2026-07-11T13:20:00",
+                "cabinClass": "M",
+                "cabinClassText": "Economy Standard",
+                "cabinClassRBD": "S",
+                "departureAirportLocationCode": "DEL",
+                "departureAirportName": "Indira Gandhi International Airport",
+                "departureAirportCity": "Delhi",
+                "departureAirportCountry": "India",
+                "departureAirportlatitude": "28.5600000000",
+                "departureAirportlongitude": "77.0900000000",
+                "departureDateTime": "2026-07-11T11:40:00",
+                "flightNumber": "2715",
+                "journeyDuration": 1205,
+                "marketingAirlineCode": "AI",
+                "marketingAirlineName": "Air India Limited",
+                "operatingAirline": {
+                  "code": "AI",
+                  "flightNumber": "2715",
+                  "operatingAirlineName": "Air India Limited",
+                  "airlinelogoPath": "/Flightlogos/AI.svg"
+                },
+                "stopQuantity": 1,
+                "departureTerminal": "3",
+                "arrivalTerminal": "2",
+                "connectIn": null,
+                "seatsRemaining": 9,
+                "totalDays": null,
+                "passengerType": "ADT",
+                "direction": 0,
+                "originaldepdate": "110726",
+                "originalarrte": "110726",
+                "originaldepme": "1140",
+                "originalarrme": "1320",
+                "airLineCode": "AI",
+                "onlyArrivalAirportLocationCode": "AMD",
+                "onlyDepartureAirportLocationCode": "DEL",
+                "luggageInfo": "7kg",
+                "cabinLuggageInfo": "sb",
+                "aircraft": "AirBus",
+                "airlinelogoPath": "/Flightlogos/AI.svg",
+                "layoverTimeInMinute": 0
+              },
+              {
+                "segmentOptionKey": "",
+                "arrivalAirportLocationCode": "BOM",
+                "arrivalAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+                "arrivalAirportCity": "Mumbai",
+                "arrivalAirportCountry": "India",
+                "arrivalAirportlatitude": "19.1000000000",
+                "arrivalAirportlongitude": "72.8700000000",
+                "arrivalDateTime": "2026-07-12T07:45:00",
+                "cabinClass": "M",
+                "cabinClassText": "Economy Standard",
+                "cabinClassRBD": "S",
+                "departureAirportLocationCode": "AMD",
+                "departureAirportName": "Ahmedabad Airport",
+                "departureAirportCity": "Ahmedabad",
+                "departureAirportCountry": "India",
+                "departureAirportlatitude": "23.0700000000",
+                "departureAirportlongitude": "72.6200000000",
+                "departureDateTime": "2026-07-12T06:00:00",
+                "flightNumber": "2918",
+                "journeyDuration": 1205,
+                "marketingAirlineCode": "AI",
+                "marketingAirlineName": "Air India Limited",
+                "operatingAirline": {
+                  "code": "AI",
+                  "flightNumber": "2918",
+                  "operatingAirlineName": "Air India Limited",
+                  "airlinelogoPath": "/Flightlogos/AI.svg"
+                },
+                "stopQuantity": 1,
+                "departureTerminal": "2",
+                "arrivalTerminal": "2",
+                "connectIn": null,
+                "seatsRemaining": 9,
+                "totalDays": null,
+                "passengerType": "ADT",
+                "direction": 0,
+                "originaldepdate": "120726",
+                "originalarrte": "120726",
+                "originaldepme": "0600",
+                "originalarrme": "0745",
+                "airLineCode": "AI",
+                "onlyArrivalAirportLocationCode": "BOM",
+                "onlyDepartureAirportLocationCode": "AMD",
+                "luggageInfo": "7kg",
+                "cabinLuggageInfo": "sb",
+                "aircraft": "AirBus",
+                "airlinelogoPath": "/Flightlogos/AI.svg",
+                "layoverTimeInMinute": 1000
+              }
+            ]
+          }
+        ],
+        "providerName": "Techno_Flight"
+      },
+      {
+        "itinerarySourceCode": "MiQkMSQkUEtGYXJlJCRjODJmYTMyNy00YTRhLTQ1NGQtYmJlNi00M2EzZGMyMmM0NjgkJHJZd2s4V2d2b0ZCZFd3NkNmYlRmT05UWXN5dXpwOCtvQVoxeTdLa0JCWFE5LzJZZHJvclZyMWVsRWhnUEFabDZwSnRsQXQ2MDBLd255dnBVYlduNk0xME1oY0NLWWRFMnhTTDZ6eXloallmb3FCQ3BiaEJ6R25aSmozRjd3cmFvZXppeitHOW1LMVhuYmt3cjcyc3FYeUVHRDg4YllPV0ZQVUNYTHNCczBEUmsydnUzQTIwbEJiUnl4N3REZXpWbXRZTXQ2c0lTZkxsSTIzck84QkdpNnFKTXMwYjZ4bUEvRzlySlp5empGQTFwSXc4Y2JJL3ZjbFZCWFdyVGY3bzhZdElId25oSUNYSFZrdWxOWWtodTcvL0ZhWE00b241MGhRK1FSMEVBSDhFSGdFTlczcWJQY3VSc0xqOW1kVUty",
+        "airItineraryPricingInfo": {
+          "fareSourceCode": "MiQkMSQkUEtGYXJlJCRjODJmYTMyNy00YTRhLTQ1NGQtYmJlNi00M2EzZGMyMmM0NjgkJHJZd2s4V2d2b0ZCZFd3NkNmYlRmT05UWXN5dXpwOCtvQVoxeTdLa0JCWFE5LzJZZHJvclZyMWVsRWhnUEFabDZwSnRsQXQ2MDBLd255dnBVYlduNk0xME1oY0NLWWRFMnhTTDZ6eXloallmb3FCQ3BiaEJ6R25aSmozRjd3cmFvZXppeitHOW1LMVhuYmt3cjcyc3FYeUVHRDg4YllPV0ZQVUNYTHNCczBEUmsydnUzQTIwbEJiUnl4N3REZXpWbXRZTXQ2c0lTZkxsSTIzck84QkdpNnFKTXMwYjZ4bUEvRzlySlp5empGQTFwSXc4Y2JJL3ZjbFZCWFdyVGY3bzhZdElId25oSUNYSFZrdWxOWWtodTcvL0ZhWE00b241MGhRK1FSMEVBSDhFSGdFTlczcWJQY3VSc0xqOW1kVUty",
+          "fareType": "webfare",
+          "isRefundable": "nonrefundable",
+          "corporateId": null,
+          "itinTotalFare": {
+            "baseFare": {
+              "amount": 275.669602,
+              "currencyCode": "USD"
+            },
+            "totalTax": {
+              "amount": 3.709225,
+              "currencyCode": "USD"
+            },
+            "totalFare": {
+              "amount": 279.378827,
+              "currencyCode": "USD"
+            }
+          },
+          "ptC_FareBreakdowns": [
+            {
+              "baggageInfo": [
+                "15kg"
+              ],
+              "cabinBaggageInfo": [
+                "7kg"
+              ],
+              "fareBasisCodes": [
+                "YOW"
+              ],
+              "fareTypeCodes": null,
+              "fareTypeCodesName": null,
+              "passengerFare": {
+                "baseFare": {
+                  "amount": 275.669602,
+                  "currencyCode": "USD"
+                },
+                "totalTax": {
+                  "amount": 3.709225,
+                  "currencyCode": "USD"
+                },
+                "totalFare": {
+                  "amount": 279.378827,
+                  "currencyCode": "USD"
+                }
+              },
+              "passengerTypeQuantity": {
+                "code": "ADT",
+                "quantity": 1
+              },
+              "penaltiesInfo": []
+            }
+          ]
+        },
+        "directionInd": "oneway",
+        "originDestinationOptions": [
+          {
+            "flightSegments": [
+              {
+                "segmentOptionKey": null,
+                "arrivalAirportLocationCode": "BOM",
+                "arrivalAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+                "arrivalAirportCity": "Mumbai",
+                "arrivalAirportCountry": "India",
+                "arrivalAirportlatitude": "19.1000000000",
+                "arrivalAirportlongitude": "72.8700000000",
+                "arrivalDateTime": "2026-07-11T13:15:00",
+                "cabinClass": null,
+                "cabinClassText": "ECONOMY",
+                "cabinClassRBD": "R",
+                "departureAirportLocationCode": "DEL",
+                "departureAirportName": "Indira Gandhi International Airport",
+                "departureAirportCity": "Delhi",
+                "departureAirportCountry": "India",
+                "departureAirportlatitude": "28.5600000000",
+                "departureAirportlongitude": "77.0900000000",
+                "departureDateTime": "2026-07-11T11:00:00",
+                "flightNumber": "6047",
+                "journeyDuration": 135,
+                "marketingAirlineCode": "6E",
+                "marketingAirlineName": "IndiGo",
+                "operatingAirline": {
+                  "code": "6E",
+                  "flightNumber": "6047",
+                  "operatingAirlineName": "IndiGo",
+                  "airlinelogoPath": "/Flightlogos/6E.svg"
+                },
+                "stopQuantity": 1,
+                "departureTerminal": "1",
+                "arrivalTerminal": null,
+                "connectIn": null,
+                "seatsRemaining": 1,
+                "totalDays": null,
+                "passengerType": null,
+                "direction": 0,
+                "originaldepdate": null,
+                "originalarrte": null,
+                "originaldepme": null,
+                "originalarrme": null,
+                "airLineCode": null,
+                "onlyArrivalAirportLocationCode": null,
+                "onlyDepartureAirportLocationCode": null,
+                "luggageInfo": null,
+                "cabinLuggageInfo": "SB",
+                "aircraft": "",
+                "airlinelogoPath": "/Flightlogos/6E.svg",
+                "layoverTimeInMinute": 0
+              }
+            ]
+          }
+        ],
+        "providerName": null
+      },
+      {
+        "itinerarySourceCode": "MiQkMyQkUEtGYXJlJCRjODJmYTMyNy00YTRhLTQ1NGQtYmJlNi00M2EzZGMyMmM0NjgkJGhzbU1SdTZ5am9rNlUxcGc4cWpTZ3ZzZ2huRTc4OFNUREJvWXIzRlJFbXdudTdyRWxzNXpIN2dTOXB1aWQzZmpZcVR3aThGL295OElzem1zKzRjdVRjUmpxTStMZVFyR0x3eVBSZjRYcG9IVEVKYTRZTGVjSjRiVjZ0cDVXNkhRdjNMTDI3dGJ6REc5MSsxNGh6TnBocVVFMjg1K1FxYU1hWjBsa0s3YnhlOW92MFlVbHJXcWtyZ28vTUhMUTFIY2NIaTJEcW9CSmczMVo0dWxnSndweVBmOFBlS0lDZWFtTzZQYS9Sd2FpVHFrZGlxaTBWYjczalRtNE10SDlwZWpZQWtPTWxaOFlHUXFlaWttNGdQSFhSK3BJWENiRjFEZTREUUVpMnRFVHFVdldMbzErZXlSb1ZUbkwrRUxCVE9rdWJFblUrOFFjN0pqbTVwbjVMd0FxTXZ4ZVI2OGtvaGF1Tjc1bll4aHdyWnBGQm9KcGtYQi9TTWRRalRuekM5VklhczNuVTUvdGNHb29ac0NQZFE2cHc9PQ==",
+        "airItineraryPricingInfo": {
+          "fareSourceCode": "MiQkMyQkUEtGYXJlJCRjODJmYTMyNy00YTRhLTQ1NGQtYmJlNi00M2EzZGMyMmM0NjgkJGhzbU1SdTZ5am9rNlUxcGc4cWpTZ3ZzZ2huRTc4OFNUREJvWXIzRlJFbXdudTdyRWxzNXpIN2dTOXB1aWQzZmpZcVR3aThGL295OElzem1zKzRjdVRjUmpxTStMZVFyR0x3eVBSZjRYcG9IVEVKYTRZTGVjSjRiVjZ0cDVXNkhRdjNMTDI3dGJ6REc5MSsxNGh6TnBocVVFMjg1K1FxYU1hWjBsa0s3YnhlOW92MFlVbHJXcWtyZ28vTUhMUTFIY2NIaTJEcW9CSmczMVo0dWxnSndweVBmOFBlS0lDZWFtTzZQYS9Sd2FpVHFrZGlxaTBWYjczalRtNE10SDlwZWpZQWtPTWxaOFlHUXFlaWttNGdQSFhSK3BJWENiRjFEZTREUUVpMnRFVHFVdldMbzErZXlSb1ZUbkwrRUxCVE9rdWJFblUrOFFjN0pqbTVwbjVMd0FxTXZ4ZVI2OGtvaGF1Tjc1bll4aHdyWnBGQm9KcGtYQi9TTWRRalRuekM5VklhczNuVTUvdGNHb29ac0NQZFE2cHc9PQ==",
+          "fareType": "public",
+          "isRefundable": "refundable",
+          "corporateId": null,
+          "itinTotalFare": {
+            "baseFare": {
+              "amount": 289.13408875,
+              "currencyCode": "USD"
+            },
+            "totalTax": {
+              "amount": 82.01096475,
+              "currencyCode": "USD"
+            },
+            "totalFare": {
+              "amount": 371.1450535,
+              "currencyCode": "USD"
+            }
+          },
+          "ptC_FareBreakdowns": [
+            {
+              "baggageInfo": [
+                "15kg",
+                "15kg"
+              ],
+              "cabinBaggageInfo": [
+                "7kg",
+                "7kg"
+              ],
+              "fareBasisCodes": [
+                "SU1YXRII",
+                "SU1YXRII"
+              ],
+              "fareTypeCodes": null,
+              "fareTypeCodesName": null,
+              "passengerFare": {
+                "baseFare": {
+                  "amount": 289.13408875,
+                  "currencyCode": "USD"
+                },
+                "totalTax": {
+                  "amount": 82.01096475,
+                  "currencyCode": "USD"
+                },
+                "totalFare": {
+                  "amount": 371.1450535,
+                  "currencyCode": "USD"
+                }
+              },
+              "passengerTypeQuantity": {
+                "code": "ADT",
+                "quantity": 1
+              },
+              "penaltiesInfo": []
+            }
+          ]
+        },
+        "directionInd": "oneway",
+        "originDestinationOptions": [
+          {
+            "flightSegments": [
+              {
+                "segmentOptionKey": null,
+                "arrivalAirportLocationCode": "UDR",
+                "arrivalAirportName": "Maharana Pratap Airport",
+                "arrivalAirportCity": "Udaipur",
+                "arrivalAirportCountry": "India",
+                "arrivalAirportlatitude": "24.6200000000",
+                "arrivalAirportlongitude": "73.8900000000",
+                "arrivalDateTime": "2026-07-11T13:10:00",
+                "cabinClass": null,
+                "cabinClassText": "ECONOMY",
+                "cabinClassRBD": "S",
+                "departureAirportLocationCode": "DEL",
+                "departureAirportName": "Indira Gandhi International Airport",
+                "departureAirportCity": "Delhi",
+                "departureAirportCountry": "India",
+                "departureAirportlatitude": "28.5600000000",
+                "departureAirportlongitude": "77.0900000000",
+                "departureDateTime": "2026-07-11T11:50:00",
+                "flightNumber": "1737",
+                "journeyDuration": 80,
+                "marketingAirlineCode": "AI",
+                "marketingAirlineName": "Air India Limited",
+                "operatingAirline": {
+                  "code": "AI",
+                  "flightNumber": "1737",
+                  "operatingAirlineName": "Air India Limited",
+                  "airlinelogoPath": "/Flightlogos/AI.svg"
+                },
+                "stopQuantity": 2,
+                "departureTerminal": "2",
+                "arrivalTerminal": null,
+                "connectIn": null,
+                "seatsRemaining": 2,
+                "totalDays": null,
+                "passengerType": null,
+                "direction": 0,
+                "originaldepdate": null,
+                "originalarrte": null,
+                "originaldepme": null,
+                "originalarrme": null,
+                "airLineCode": null,
+                "onlyArrivalAirportLocationCode": null,
+                "onlyDepartureAirportLocationCode": null,
+                "luggageInfo": null,
+                "cabinLuggageInfo": "SB",
+                "aircraft": "",
+                "airlinelogoPath": "/Flightlogos/AI.svg",
+                "layoverTimeInMinute": 0
+              },
+              {
+                "segmentOptionKey": null,
+                "arrivalAirportLocationCode": "BOM",
+                "arrivalAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+                "arrivalAirportCity": "Mumbai",
+                "arrivalAirportCountry": "India",
+                "arrivalAirportlatitude": "19.1000000000",
+                "arrivalAirportlongitude": "72.8700000000",
+                "arrivalDateTime": "2026-07-11T18:15:00",
+                "cabinClass": null,
+                "cabinClassText": "ECONOMY",
+                "cabinClassRBD": "S",
+                "departureAirportLocationCode": "UDR",
+                "departureAirportName": "Maharana Pratap Airport",
+                "departureAirportCity": "Udaipur",
+                "departureAirportCountry": "India",
+                "departureAirportlatitude": "24.6200000000",
+                "departureAirportlongitude": "73.8900000000",
+                "departureDateTime": "2026-07-11T16:35:00",
+                "flightNumber": "2596",
+                "journeyDuration": 100,
+                "marketingAirlineCode": "AI",
+                "marketingAirlineName": "Air India Limited",
+                "operatingAirline": {
+                  "code": "AI",
+                  "flightNumber": "2596",
+                  "operatingAirlineName": "Air India Limited",
+                  "airlinelogoPath": "/Flightlogos/AI.svg"
+                },
+                "stopQuantity": 2,
+                "departureTerminal": "",
+                "arrivalTerminal": null,
+                "connectIn": null,
+                "seatsRemaining": 2,
+                "totalDays": null,
+                "passengerType": null,
+                "direction": 0,
+                "originaldepdate": null,
+                "originalarrte": null,
+                "originaldepme": null,
+                "originalarrme": null,
+                "airLineCode": null,
+                "onlyArrivalAirportLocationCode": null,
+                "onlyDepartureAirportLocationCode": null,
+                "luggageInfo": null,
+                "cabinLuggageInfo": "SB",
+                "aircraft": "",
+                "airlinelogoPath": "/Flightlogos/AI.svg",
+                "layoverTimeInMinute": 0
+              }
+            ]
+          }
+        ],
+        "providerName": null
+      },
+      {
+        "itinerarySourceCode": "MiQkMCQkUEtGYXJlJCRjODJmYTMyNy00YTRhLTQ1NGQtYmJlNi00M2EzZGMyMmM0NjgkJHJZd2s4V2d2b0ZCZFd3NkNmYlRmT05UWXN5dXpwOCtvQVoxeTdLa0JCWFE5LzJZZHJvclZyMWVsRWhnUEFabDY0UkprR2dQMlU2cktIbzR0a2lVa2IrV1VqODVYdjBReDNBR1lqK3JRWElGaXprUUZ5SHBTSHJZRm5QSWxOTUFaL2pMOGlNVlJBczVDQ2Jlem5JclhOYnpSemFTREs1a2kwN1ViaXdIdVI3T0hMMmVUQ25NelUyRE1sTllIY3lXUHlCem4zVTVyZDdoZHdlTCt1UkdOenpuUXhqQktHYWJMei9ENXpQY09GeWVSTlAyODNTRWFjUGxWYnpOaW5od2NQNmNGZ01TVzlJdFAyYkhhYjlTaHNKbXdZRU01VEgrUXorU2FMRHVzWDNZd2lPSVhxUk1MNUN2cVRuVzV2UGNWTW1qSkpLOW1MOXd5Z0szY25RS0E5cVloY1YrTVltcEFqb1FoTXdLeWFuaWptQzJiZEgxKzNSZkVtSXpwaGNuQy92blJTdDlMT25TWDJPL3lrOCtZZUE9PQ==",
+        "airItineraryPricingInfo": {
+          "fareSourceCode": "MiQkMCQkUEtGYXJlJCRjODJmYTMyNy00YTRhLTQ1NGQtYmJlNi00M2EzZGMyMmM0NjgkJHJZd2s4V2d2b0ZCZFd3NkNmYlRmT05UWXN5dXpwOCtvQVoxeTdLa0JCWFE5LzJZZHJvclZyMWVsRWhnUEFabDY0UkprR2dQMlU2cktIbzR0a2lVa2IrV1VqODVYdjBReDNBR1lqK3JRWElGaXprUUZ5SHBTSHJZRm5QSWxOTUFaL2pMOGlNVlJBczVDQ2Jlem5JclhOYnpSemFTREs1a2kwN1ViaXdIdVI3T0hMMmVUQ25NelUyRE1sTllIY3lXUHlCem4zVTVyZDdoZHdlTCt1UkdOenpuUXhqQktHYWJMei9ENXpQY09GeWVSTlAyODNTRWFjUGxWYnpOaW5od2NQNmNGZ01TVzlJdFAyYkhhYjlTaHNKbXdZRU01VEgrUXorU2FMRHVzWDNZd2lPSVhxUk1MNUN2cVRuVzV2UGNWTW1qSkpLOW1MOXd5Z0szY25RS0E5cVloY1YrTVltcEFqb1FoTXdLeWFuaWptQzJiZEgxKzNSZkVtSXpwaGNuQy92blJTdDlMT25TWDJPL3lrOCtZZUE9PQ==",
+          "fareType": "webfare",
+          "isRefundable": "nonrefundable",
+          "corporateId": null,
+          "itinTotalFare": {
+            "baseFare": {
+              "amount": 275.669602,
+              "currencyCode": "USD"
+            },
+            "totalTax": {
+              "amount": 3.709225,
+              "currencyCode": "USD"
+            },
+            "totalFare": {
+              "amount": 279.378827,
+              "currencyCode": "USD"
+            }
+          },
+          "ptC_FareBreakdowns": [
+            {
+              "baggageInfo": [
+                "0pc",
+                "0pc"
+              ],
+              "cabinBaggageInfo": [
+                "7kg",
+                "7kg"
+              ],
+              "fareBasisCodes": [
+                "YOW",
+                "YOW"
+              ],
+              "fareTypeCodes": null,
+              "fareTypeCodesName": null,
+              "passengerFare": {
+                "baseFare": {
+                  "amount": 275.669602,
+                  "currencyCode": "USD"
+                },
+                "totalTax": {
+                  "amount": 3.709225,
+                  "currencyCode": "USD"
+                },
+                "totalFare": {
+                  "amount": 279.378827,
+                  "currencyCode": "USD"
+                }
+              },
+              "passengerTypeQuantity": {
+                "code": "ADT",
+                "quantity": 1
+              },
+              "penaltiesInfo": []
+            }
+          ]
+        },
+        "directionInd": "oneway",
+        "originDestinationOptions": [
+          {
+            "flightSegments": [
+              {
+                "segmentOptionKey": null,
+                "arrivalAirportLocationCode": "IDR",
+                "arrivalAirportName": "Devi Ahilya Bai Holkar Airport",
+                "arrivalAirportCity": "Indore",
+                "arrivalAirportCountry": "India",
+                "arrivalAirportlatitude": "22.7300000000",
+                "arrivalAirportlongitude": "75.8100000000",
+                "arrivalDateTime": "2026-07-11T06:25:00",
+                "cabinClass": null,
+                "cabinClassText": "ECONOMY",
+                "cabinClassRBD": "R",
+                "departureAirportLocationCode": "DEL",
+                "departureAirportName": "Indira Gandhi International Airport",
+                "departureAirportCity": "Delhi",
+                "departureAirportCountry": "India",
+                "departureAirportlatitude": "28.5600000000",
+                "departureAirportlongitude": "77.0900000000",
+                "departureDateTime": "2026-07-11T04:55:00",
+                "flightNumber": "6490",
+                "journeyDuration": 90,
+                "marketingAirlineCode": "6E",
+                "marketingAirlineName": "IndiGo",
+                "operatingAirline": {
+                  "code": "6E",
+                  "flightNumber": "6490",
+                  "operatingAirlineName": "IndiGo",
+                  "airlinelogoPath": "/Flightlogos/6E.svg"
+                },
+                "stopQuantity": 2,
+                "departureTerminal": "1",
+                "arrivalTerminal": null,
+                "connectIn": null,
+                "seatsRemaining": 1,
+                "totalDays": null,
+                "passengerType": null,
+                "direction": 0,
+                "originaldepdate": null,
+                "originalarrte": null,
+                "originaldepme": null,
+                "originalarrme": null,
+                "airLineCode": null,
+                "onlyArrivalAirportLocationCode": null,
+                "onlyDepartureAirportLocationCode": null,
+                "luggageInfo": null,
+                "cabinLuggageInfo": "SB",
+                "aircraft": "",
+                "airlinelogoPath": "/Flightlogos/6E.svg",
+                "layoverTimeInMinute": 0
+              },
+              {
+                "segmentOptionKey": null,
+                "arrivalAirportLocationCode": "NMI",
+                "arrivalAirportName": null,
+                "arrivalAirportCity": null,
+                "arrivalAirportCountry": null,
+                "arrivalAirportlatitude": null,
+                "arrivalAirportlongitude": null,
+                "arrivalDateTime": "2026-07-11T10:10:00",
+                "cabinClass": null,
+                "cabinClassText": "ECONOMY",
+                "cabinClassRBD": "R",
+                "departureAirportLocationCode": "IDR",
+                "departureAirportName": "Devi Ahilya Bai Holkar Airport",
+                "departureAirportCity": "Indore",
+                "departureAirportCountry": "India",
+                "departureAirportlatitude": "22.7300000000",
+                "departureAirportlongitude": "75.8100000000",
+                "departureDateTime": "2026-07-11T09:05:00",
+                "flightNumber": "295",
+                "journeyDuration": 65,
+                "marketingAirlineCode": "6E",
+                "marketingAirlineName": "IndiGo",
+                "operatingAirline": {
+                  "code": "6E",
+                  "flightNumber": "295",
+                  "operatingAirlineName": "IndiGo",
+                  "airlinelogoPath": "/Flightlogos/6E.svg"
+                },
+                "stopQuantity": 2,
+                "departureTerminal": "",
+                "arrivalTerminal": null,
+                "connectIn": null,
+                "seatsRemaining": 1,
+                "totalDays": null,
+                "passengerType": null,
+                "direction": 0,
+                "originaldepdate": null,
+                "originalarrte": null,
+                "originaldepme": null,
+                "originalarrme": null,
+                "airLineCode": null,
+                "onlyArrivalAirportLocationCode": null,
+                "onlyDepartureAirportLocationCode": null,
+                "luggageInfo": null,
+                "cabinLuggageInfo": "SB",
+                "aircraft": "",
+                "airlinelogoPath": "/Flightlogos/6E.svg",
+                "layoverTimeInMinute": 0
+              }
+            ]
+          }
+        ],
+        "providerName": null
+      }
+    ]
+  },
+  "error": []
+}

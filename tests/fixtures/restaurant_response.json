@@ -1,0 +1,271 @@
+{
+  "statusCode": 200,
+  "error": null,
+  "result": {
+    "list": [
+      {
+        "restaurantId": 1,
+        "restaurantName": "Kathiyawadi Thali Restaurant Dubai",
+        "restaurantNameDefault": "Kathiyawadi Thali Restaurant Dubai",
+        "rating": "4.4",
+        "address": {
+          "countryId": 213,
+          "cityId": 244520,
+          "fullAddress": "",
+          "country": "United Arab Emirates",
+          "city": "Dubai, Dubai, United Arab Emirates",
+          "cityNameDefault": "Dubai, Dubai, United Arab Emirates",
+          "countryNameDefault": "United Arab Emirates"
+        },
+        "description": "<div>If you are searching for an authentic Kathiyawadi vegetarian dining experience in Dubai, Kathiyawadi Thali Restaurant in Al Kifaf is your destination. Rooted in the bold, rustic, and intensely flavourful culinary traditions of the Kathiyawad region of Gujarat, this restaurant brings the true taste of Saurashtra to the heart of Dubai.</div><div><br></div><div>Kathiyawadi cuisine is known for its generous use of whole spices, lentils, and farm-fresh ingredients — producing dishes that are deeply satisfying, wholesome, and unmistakably authentic. At Kathiyawadi Thali Restaurant, every plate is a reflection of this proud culinary heritage, served with warmth and the generous spirit that defines Kathiyawadi hospitality.</div>",
+        "coordinates": {
+          "latitude": 1,
+          "longitude": 1
+        },
+        "review": {
+          "rating": "4.4",
+          "reviewCount": "<p>Very Good</p>"
+        },
+        "restaurantType": {
+          "restaurantTypeId": 1,
+          "restaurantTypeName": "Vegetarian"
+        },
+        "foodType": {
+          "foodTypeId": 1,
+          "foodTypeName": "Kathiyawadi Gujarati"
+        },
+        "operatingHours": {
+          "openingTime": "12:00 PM",
+          "closingTime": "11:15 PM"
+        },
+        "menuFilePath": "",
+        "restaurantImagePath": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/1/bddeb784-ddfb-473d-aa31-6c910b35667c_IMG-20250226-WA0046_R.webp",
+        "priceStarts": {
+          "perPersonPrice": 56.0,
+          "currency": "AED ",
+          "discount": {
+            "perPersonDiscountedPrice": 10.0
+          }
+        },
+        "distanceFromSearchedEntity": "",
+        "seatingCapacity": 0,
+        "promoText": "",
+        "tags": {
+          "tagName": "",
+          "description": ""
+        },
+        "imageInfoList": [
+          {
+            "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/1/bddeb784-ddfb-473d-aa31-6c910b35667c_IMG-20250226-WA0046_R.webp",
+            "caption": "",
+            "category": ""
+          },
+          {
+            "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/1/b1f128ac-108e-4f27-a82a-9fdb2a0623cb_IMG-20250226-WA0044_R.webp",
+            "caption": "",
+            "category": ""
+          },
+          {
+            "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/1/9e0eb512-a2e8-4564-8f46-b67314a2a1be_IMG-20250226-WA0045_R.webp",
+            "caption": "",
+            "category": ""
+          },
+          {
+            "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/1/6002213b-e55a-44f6-a4c2-09cdcc9ba6d7_IMG-20250226-WA0047_R.webp",
+            "caption": "",
+            "category": ""
+          },
+          {
+            "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/1/d14c9e9c-743a-4401-a038-9a782b4a6152_Kathiyawadi1_R.webp",
+            "caption": "",
+            "category": ""
+          }
+        ],
+        "cancellationPolicy": [],
+        "seoMeta": []
+      },
+      {
+        "restaurantId": 2,
+        "restaurantName": "Atithi Veg Restaurant in Dubai",
+        "restaurantNameDefault": "Atithi Veg Restaurant in Dubai",
+        "rating": "4.5",
+        "address": {
+          "countryId": 213,
+          "cityId": 244520,
+          "fullAddress": "772R+QGR - Dubai - United Arab Emirates",
+          "country": "United Arab Emirates",
+          "city": "Dubai, Dubai, United Arab Emirates",
+          "cityNameDefault": "Dubai, Dubai, United Arab Emirates",
+          "countryNameDefault": "United Arab Emirates"
+        },
+        "description": "<p><b>Atithi Veg Restaurant in Al Mankhool, Dubai</b>, is a pure vegetarian restaurant that serves various cuisines. Located in the heart of Bur Dubai, it has quickly built a loyal following among Indian expats, families, and vegetarian food lovers from across the globe.</p><p>At GujjuTours, we make it effortless for you to <b>book a table at Atithi Veg Dubai</b>. Whether you are planning a family dinner, a business lunch, or a special celebration, our team is ready to assist. Explore the Atithi Veg menu, check availability, and secure your reservation — all in one place at GujjuTours.</p>",
+        "coordinates": {
+          "latitude": 25.2519875,
+          "longitude": 55.2912656
+        },
+        "review": {
+          "rating": "4.5",
+          "reviewCount": ""
+        },
+        "restaurantType": {
+          "restaurantTypeId": 1,
+          "restaurantTypeName": "Vegetarian"
+        },
+        "foodType": {
+          "foodTypeId": 9,
+          "foodTypeName": "Italian"
+        },
+        "operatingHours": {
+          "openingTime": "07:30 AM",
+          "closingTime": "11:45 PM"
+        },
+        "menuFilePath": "",
+        "restaurantImagePath": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/2/d4248fac-65c8-41e6-9eb7-99a907cd2937_AtithiVegRestaurantinDubai_R.webp",
+        "priceStarts": {
+          "perPersonPrice": 13.0,
+          "currency": "AED ",
+          "discount": {
+            "perPersonDiscountedPrice": 10.0
+          }
+        },
+        "distanceFromSearchedEntity": "",
+        "seatingCapacity": 180,
+        "promoText": "",
+        "tags": {
+          "tagName": "",
+          "description": ""
+        },
+        "imageInfoList": [
+          {
+            "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/2/d4248fac-65c8-41e6-9eb7-99a907cd2937_AtithiVegRestaurantinDubai_R.webp",
+            "caption": "",
+            "category": ""
+          }
+        ],
+        "cancellationPolicy": [],
+        "seoMeta": []
+      },
+      {
+        "restaurantId": 3,
+        "restaurantName": "Rangoli Restaurant Dubai",
+        "restaurantNameDefault": "Rangoli Restaurant Dubai",
+        "rating": "4.0",
+        "address": {
+          "countryId": 213,
+          "cityId": 244520,
+          "fullAddress": "10 4A St - Al Karama - Dubai - United Arab Emirates",
+          "country": "United Arab Emirates",
+          "city": "Dubai, Dubai, United Arab Emirates",
+          "cityNameDefault": "Dubai, Dubai, United Arab Emirates",
+          "countryNameDefault": "United Arab Emirates"
+        },
+        "description": "<p>If you are searching for a restaurant in Dubai that specialises in pure vegetarian Indian food, Rangoli Restaurant is a top choice. Located in Bur Dubai, it is a trusted destination for families, tourists, and anyone following a vegetarian or Jain diet. Known for its homestyle cooking, warm service, and a wide variety of dishes spanning multiple Indian culinary traditions, Rangoli makes you feel at home with every meal.</p>",
+        "coordinates": {
+          "latitude": 25.252258,
+          "longitude": 55.3043508
+        },
+        "review": {
+          "rating": "4.4",
+          "reviewCount": ""
+        },
+        "restaurantType": {
+          "restaurantTypeId": 1,
+          "restaurantTypeName": "Vegetarian"
+        },
+        "foodType": {
+          "foodTypeId": 26,
+          "foodTypeName": "Indian Main Course"
+        },
+        "operatingHours": {
+          "openingTime": "07:30 AM",
+          "closingTime": "11:45 PM"
+        },
+        "menuFilePath": "",
+        "restaurantImagePath": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/3/efd1187a-9db4-441d-9b84-27a0253e3a04_rangoli-restaurant_R.webp",
+        "priceStarts": {
+          "perPersonPrice": 46.0,
+          "currency": "AED ",
+          "discount": {
+            "perPersonDiscountedPrice": 10.0
+          }
+        },
+        "distanceFromSearchedEntity": "",
+        "seatingCapacity": 0,
+        "promoText": "",
+        "tags": {
+          "tagName": "",
+          "description": ""
+        },
+        "imageInfoList": [
+          {
+            "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/3/efd1187a-9db4-441d-9b84-27a0253e3a04_rangoli-restaurant_R.webp",
+            "caption": "",
+            "category": ""
+          }
+        ],
+        "cancellationPolicy": [],
+        "seoMeta": []
+      }
+    ],
+    "filters": {
+      "restaurantType": [
+        {
+          "id": 1,
+          "name": "Vegetarian"
+        }
+      ],
+      "restaurantFoodType": [
+        {
+          "foodTypeId": 1,
+          "foodType": "Kathiyawadi Gujarati"
+        },
+        {
+          "foodTypeId": 9,
+          "foodType": "Italian"
+        },
+        {
+          "foodTypeId": 10,
+          "foodType": "Salads And Raitas"
+        },
+        {
+          "foodTypeId": 12,
+          "foodType": "Snacks"
+        },
+        {
+          "foodTypeId": 14,
+          "foodType": "Pulav And Biryanis"
+        },
+        {
+          "foodTypeId": 17,
+          "foodType": "Soups"
+        },
+        {
+          "foodTypeId": 19,
+          "foodType": "Indian Chaat"
+        },
+        {
+          "foodTypeId": 21,
+          "foodType": "Vegetables"
+        },
+        {
+          "foodTypeId": 25,
+          "foodType": "Chinese Main Course"
+        },
+        {
+          "foodTypeId": 27,
+          "foodType": "Continental Starters"
+        },
+        {
+          "foodTypeId": 28,
+          "foodType": "Chinese Starters"
+        },
+        {
+          "foodTypeId": 26,
+          "foodType": "Indian Main Course"
+        }
+      ]
+    },
+    "totalServices": 3,
+    "slug": null
+  }
+}

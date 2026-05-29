@@ -1,7 +1,9 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "pip install -e ."
- 
+# Install/build steps are defined in nixpacks.toml (installs from requirements.txt).
+# No buildCommand here — `pip install -e .` fails because Nixpacks copies only
+# pyproject.toml before the source tree, so the package build can't find modules.
+
 [deploy]
 startCommand = "uvicorn surfaces.whatsapp_app:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/health"

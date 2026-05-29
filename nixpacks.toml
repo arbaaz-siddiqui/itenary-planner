@@ -1,0 +1,24 @@
+# Override Nixpacks' default Python detection.
+#
+# By default Nixpacks sees pyproject.toml and runs `pip install .` during the
+# install phase — but at that point only pyproject.toml has been copied into
+# /app, so every module/package is "not found" and the wheel build fails.
+#
+# Instead we install dependencies from requirements.txt and run the app
+# directly against the copied source tree (no packaging/wheel build needed).
+
+[phases.setup]
+nixPkgs = ["python312", "gcc"]
+
+[phases.install]
+cmds = [
+  "python -m venv --copies /opt/venv",
+  ". /opt/venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt",
+]
+
+# No build phase — the app runs from source, nothing to compile.
+[phases.build]
+cmds = []
+
+[start]
+cmd = "uvicorn surfaces.whatsapp_app:app --host 0.0.0.0 --port $PORT"

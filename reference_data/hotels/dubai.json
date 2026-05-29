@@ -1,0 +1,45 @@
+{
+  "_README": "Dubai hotel master list. Maps supplier hotel IDs to display names + areas. When the supplier search returns an ID NOT in this list, the parser falls back to 'Hotel #<id>'. CLIENT_PLACEHOLDER: ask Tanvir/Technoheaven for the full hotel master list and add entries here.",
+  "_meta": {
+    "city": "Dubai",
+    "country_id": 213,
+    "city_id": 244520,
+    "placeholder_data": false,
+    "confirmed_real_ids": [
+      206,
+      509
+    ]
+  },
+  "hotels": [
+    {
+      "id": 206,
+      "name": "Citymax Bur Dubai",
+      "area": "Bur Dubai",
+      "stars": 3,
+      "budget_tier": "budget",
+      "amenities": [
+        "wifi",
+        "pool",
+        "restaurant"
+      ],
+      "kid_friendly": true,
+      "halal_food": true,
+      "_placeholder": false
+    },
+    {
+      "id": 509,
+      "name": "Rove Downtown",
+      "area": "Downtown",
+      "stars": 3,
+      "budget_tier": "mid",
+      "amenities": [
+        "wifi",
+        "gym",
+        "pool"
+      ],
+      "kid_friendly": true,
+      "halal_food": true,
+      "_placeholder": false
+    }
+  ]
+}

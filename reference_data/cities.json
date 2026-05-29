@@ -1,0 +1,145 @@
+{
+  "_README": "City reference data for ActivityLinker booking API.",
+  "country_aliases": {
+    "India": 105,
+    "UAE": 213,
+    "United Arab Emirates": 213,
+    "Singapore": 191,
+    "Thailand": 207,
+    "Malaysia": 130
+  },
+  "default_dubai_airport": {
+    "lat": 25.2532,
+    "lng": 55.3657,
+    "place_id": "DXB",
+    "name": "Dubai International Airport (DXB)"
+  },
+  "cities": {
+    "dubai": {
+      "name": "Dubai",
+      "city_id": 244520,
+      "country_id": 213,
+      "country_name": "UAE",
+      "iata": "DXB",
+      "lat": 25.2048,
+      "lng": 55.2708
+    },
+    "delhi": {
+      "name": "Delhi",
+      "city_id": null,
+      "country_id": 105,
+      "country_name": "India",
+      "iata": "DEL",
+      "lat": 28.5562,
+      "lng": 77.1
+    },
+    "mumbai": {
+      "name": "Mumbai",
+      "city_id": null,
+      "country_id": 105,
+      "country_name": "India",
+      "iata": "BOM",
+      "lat": 19.0896,
+      "lng": 72.8656
+    },
+    "bangalore": {
+      "name": "Bangalore",
+      "city_id": null,
+      "country_id": 105,
+      "country_name": "India",
+      "iata": "BLR",
+      "lat": 13.1979,
+      "lng": 77.7063
+    },
+    "chennai": {
+      "name": "Chennai",
+      "city_id": null,
+      "country_id": 105,
+      "country_name": "India",
+      "iata": "MAA",
+      "lat": 12.9941,
+      "lng": 80.1709
+    },
+    "hyderabad": {
+      "name": "Hyderabad",
+      "city_id": null,
+      "country_id": 105,
+      "country_name": "India",
+      "iata": "HYD",
+      "lat": 17.2403,
+      "lng": 78.4294
+    },
+    "kolkata": {
+      "name": "Kolkata",
+      "city_id": null,
+      "country_id": 105,
+      "country_name": "India",
+      "iata": "CCU",
+      "lat": 22.6547,
+      "lng": 88.4467
+    },
+    "pune": {
+      "name": "Pune",
+      "city_id": null,
+      "country_id": 105,
+      "country_name": "India",
+      "iata": "PNQ",
+      "lat": 18.5821,
+      "lng": 73.9197
+    },
+    "ahmedabad": {
+      "name": "Ahmedabad",
+      "city_id": null,
+      "country_id": 105,
+      "country_name": "India",
+      "iata": "AMD",
+      "lat": 23.0772,
+      "lng": 72.6347
+    },
+    "kochi": {
+      "name": "Kochi",
+      "city_id": null,
+      "country_id": 105,
+      "country_name": "India",
+      "iata": "COK",
+      "lat": 10.152,
+      "lng": 76.4019
+    },
+    "goa": {
+      "name": "Goa",
+      "city_id": null,
+      "country_id": 105,
+      "country_name": "India",
+      "iata": "GOI",
+      "lat": 15.3808,
+      "lng": 73.8314
+    },
+    "indore": {
+      "name": "Indore",
+      "city_id": null,
+      "country_id": 105,
+      "country_name": "India",
+      "iata": "IDR",
+      "lat": 22.7218,
+      "lng": 75.8011
+    },
+    "jaipur": {
+      "name": "Jaipur",
+      "city_id": null,
+      "country_id": 105,
+      "country_name": "India",
+      "iata": "JAI",
+      "lat": 26.8242,
+      "lng": 75.8122
+    },
+    "lucknow": {
+      "name": "Lucknow",
+      "city_id": null,
+      "country_id": 105,
+      "country_name": "India",
+      "iata": "LKO",
+      "lat": 26.7606,
+      "lng": 80.8893
+    }
+  }
+}

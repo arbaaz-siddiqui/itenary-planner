@@ -1,0 +1,149 @@
+{
+  "statusCode": 200,
+  "error": null,
+  "result": {
+    "visas": [
+      {
+        "visaId": 3,
+        "name": "Dubai Tourist Visa",
+        "visaType": "Tourist Visa",
+        "visaTypeId": 1,
+        "countryName": "United Arab Emirates",
+        "options": [
+          {
+            "visaOptionId": 10,
+            "visaOptionName": "30 Days Single Entry Tourist Visa",
+            "processingTime": "3-4 Working Days",
+            "entryType": "Single",
+            "validityPeriod": "58 Days From Date Of Issue",
+            "stayPeriod": "30 Days",
+            "isEvisa": true,
+            "visaRates": [
+              {
+                "rateKey": "_5OddMG10p",
+                "visaMasterId": 3,
+                "visaOptionId": 10,
+                "processTypeId": 1,
+                "processType": "Normal",
+                "fareInfo": []
+              }
+            ],
+            "requiredDocuments": [
+              {
+                "applicantType": "Passport Copy",
+                "isRequired": true
+              },
+              {
+                "applicantType": "Passport Size Photograph",
+                "isRequired": true
+              },
+              {
+                "applicantType": "UAE Visa Application Form",
+                "isRequired": true
+              }
+            ]
+          },
+          {
+            "visaOptionId": 11,
+            "visaOptionName": "30 Days Multiple Entry Tourist Visa",
+            "processingTime": "3-4 Working Days",
+            "entryType": "Multiple",
+            "validityPeriod": "58 Days From Date Of Issue",
+            "stayPeriod": "30 Days",
+            "isEvisa": true,
+            "visaRates": [
+              {
+                "rateKey": "Qf9Uqzq1lm",
+                "visaMasterId": 3,
+                "visaOptionId": 11,
+                "processTypeId": 1,
+                "processType": "Normal",
+                "fareInfo": []
+              }
+            ],
+            "requiredDocuments": [
+              {
+                "applicantType": "Passport Copy",
+                "isRequired": true
+              },
+              {
+                "applicantType": "Passport Size Photograph",
+                "isRequired": true
+              },
+              {
+                "applicantType": "UAE Visa Application Form",
+                "isRequired": true
+              }
+            ]
+          },
+          {
+            "visaOptionId": 12,
+            "visaOptionName": "60 Days Single Entry Tourist Visa",
+            "processingTime": "3-4 Working Days",
+            "entryType": "Single",
+            "validityPeriod": "58 Days From Date Of Issue",
+            "stayPeriod": "60 Days",
+            "isEvisa": true,
+            "visaRates": [
+              {
+                "rateKey": "y9axPkxoBN",
+                "visaMasterId": 3,
+                "visaOptionId": 12,
+                "processTypeId": 1,
+                "processType": "Normal",
+                "fareInfo": []
+              }
+            ],
+            "requiredDocuments": [
+              {
+                "applicantType": "Passport Copy",
+                "isRequired": true
+              },
+              {
+                "applicantType": "Passport Size Photograph",
+                "isRequired": true
+              },
+              {
+                "applicantType": "UAE Visa Application Form",
+                "isRequired": true
+              }
+            ]
+          },
+          {
+            "visaOptionId": 13,
+            "visaOptionName": "60 Days Multiple Entry Tourist Visa",
+            "processingTime": "3-4 Working Days",
+            "entryType": "Multiple",
+            "validityPeriod": "58 Days From Date Of Issue",
+            "stayPeriod": "60 Days",
+            "isEvisa": true,
+            "visaRates": [
+              {
+                "rateKey": "YTGAMfvPNO",
+                "visaMasterId": 3,
+                "visaOptionId": 13,
+                "processTypeId": 1,
+                "processType": "Normal",
+                "fareInfo": []
+              }
+            ],
+            "requiredDocuments": [
+              {
+                "applicantType": "Passport Copy",
+                "isRequired": true
+              },
+              {
+                "applicantType": "Passport Size Photograph",
+                "isRequired": true
+              },
+              {
+                "applicantType": "UAE Visa Application Form",
+                "isRequired": true
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

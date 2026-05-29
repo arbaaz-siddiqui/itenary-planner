@@ -1,0 +1,250 @@
+{
+  "AvailabilityRS": {
+    "SearchKey": "GT-021_99cea_272003993689351936",
+    "Count": 2,
+    "Currency": "AED",
+    "HotelResult": [
+      {
+        "StartPrice": 526.4,
+        "HotelId": 509,
+        "HotelOption": [
+          {
+            "HotelOptionId": "0|509|2|0",
+            "SupplierName": "ean_pkg",
+            "MinPrice": 526.4,
+            "IsCombineRoom": true,
+            "HotelRooms": [
+              [
+                {
+                  "RoomNo": "1",
+                  "RoomTypeName": "Standard Double Room, 1 King Bed 1 King Bed- Non Refundable",
+                  "MealName": "Room Only",
+                  "Price": 526.4,
+                  "SupplierCurrency": "USD",
+                  "BookingStatus": "Available",
+                  "RoomToken": "MHwwfDB8MA==",
+                  "MappedMealName": "Room Only",
+                  "CancellationPolicy": [
+                    {
+                      "FromDate": "05-26-2026",
+                      "ToDate": "11-20-2026",
+                      "CancellationPrice": 526.4,
+                      "daysBeforeCheckIn": null,
+                      "isNRF": false
+                    }
+                  ]
+                }
+              ],
+              [
+                {
+                  "RoomNo": "1",
+                  "RoomTypeName": "Standard Twin Room 2 Twin Beds- Non Refundable",
+                  "MealName": "Room Only",
+                  "Price": 526.4,
+                  "SupplierCurrency": "USD",
+                  "BookingStatus": "Available",
+                  "RoomToken": "MHwwfDF8MA==",
+                  "MappedMealName": "Room Only",
+                  "CancellationPolicy": [
+                    {
+                      "FromDate": "05-26-2026",
+                      "ToDate": "11-20-2026",
+                      "CancellationPrice": 526.4,
+                      "daysBeforeCheckIn": null,
+                      "isNRF": false
+                    }
+                  ]
+                }
+              ]
+            ]
+          },
+          {
+            "HotelOptionId": "0|509|1|1",
+            "SupplierName": "ean_b2b",
+            "MinPrice": 526.4,
+            "IsCombineRoom": true,
+            "HotelRooms": [
+              [
+                {
+                  "RoomNo": "1",
+                  "RoomTypeName": "Standard Double Room, 1 King Bed 1 King Bed- Non Refundable",
+                  "MealName": "Room Only",
+                  "Price": 526.4,
+                  "SupplierCurrency": "USD",
+                  "BookingStatus": "Available",
+                  "RoomToken": "MHwxfDB8MA==",
+                  "MappedMealName": "Room Only",
+                  "CancellationPolicy": [
+                    {
+                      "FromDate": "05-26-2026",
+                      "ToDate": "11-20-2026",
+                      "CancellationPrice": 526.4,
+                      "daysBeforeCheckIn": null,
+                      "isNRF": false
+                    }
+                  ]
+                }
+              ],
+              [
+                {
+                  "RoomNo": "1",
+                  "RoomTypeName": "Standard Twin Room 2 Twin Beds- Non Refundable",
+                  "MealName": "Room Only",
+                  "Price": 526.4,
+                  "SupplierCurrency": "USD",
+                  "BookingStatus": "Available",
+                  "RoomToken": "MHwxfDF8MA==",
+                  "MappedMealName": "Room Only",
+                  "CancellationPolicy": [
+                    {
+                      "FromDate": "05-26-2026",
+                      "ToDate": "11-20-2026",
+                      "CancellationPrice": 526.4,
+                      "daysBeforeCheckIn": null,
+                      "isNRF": false
+                    }
+                  ]
+                }
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "StartPrice": 693.36,
+        "HotelId": 206,
+        "HotelOption": [
+          {
+            "HotelOptionId": "1|206|2|0",
+            "SupplierName": "ean_pkg",
+            "MinPrice": 693.36,
+            "IsCombineRoom": true,
+            "HotelRooms": [
+              [
+                {
+                  "RoomNo": "1",
+                  "RoomTypeName": "Superior Double Room 1 Queen Bed",
+                  "MealName": "Room Only",
+                  "Price": 693.36,
+                  "SupplierCurrency": "USD",
+                  "BookingStatus": "Available",
+                  "RoomToken": "MXwwfDB8MA==",
+                  "MappedMealName": "Room Only",
+                  "CancellationPolicy": [
+                    {
+                      "FromDate": "05-26-2026",
+                      "ToDate": "11-12-2026",
+                      "CancellationPrice": 0,
+                      "daysBeforeCheckIn": null,
+                      "isNRF": false
+                    },
+                    {
+                      "FromDate": "11-13-2026",
+                      "ToDate": "11-20-2026",
+                      "CancellationPrice": 693.36,
+                      "daysBeforeCheckIn": null,
+                      "isNRF": false
+                    }
+                  ]
+                }
+              ],
+              [
+                {
+                  "RoomNo": "1",
+                  "RoomTypeName": "Superior Twin Room 2 Twin Beds",
+                  "MealName": "Room Only",
+                  "Price": 693.36,
+                  "SupplierCurrency": "USD",
+                  "BookingStatus": "Available",
+                  "RoomToken": "MXwwfDF8MA==",
+                  "MappedMealName": "Room Only",
+                  "CancellationPolicy": [
+                    {
+                      "FromDate": "05-26-2026",
+                      "ToDate": "11-12-2026",
+                      "CancellationPrice": 0,
+                      "daysBeforeCheckIn": null,
+                      "isNRF": false
+                    },
+                    {
+                      "FromDate": "11-13-2026",
+                      "ToDate": "11-20-2026",
+                      "CancellationPrice": 693.36,
+                      "daysBeforeCheckIn": null,
+                      "isNRF": false
+                    }
+                  ]
+                }
+              ]
+            ]
+          },
+          {
+            "HotelOptionId": "1|206|1|1",
+            "SupplierName": "ean_b2b",
+            "MinPrice": 693.36,
+            "IsCombineRoom": true,
+            "HotelRooms": [
+              [
+                {
+                  "RoomNo": "1",
+                  "RoomTypeName": "Superior Double Room 1 Queen Bed",
+                  "MealName": "Room Only",
+                  "Price": 693.36,
+                  "SupplierCurrency": "USD",
+                  "BookingStatus": "Available",
+                  "RoomToken": "MXwxfDB8MA==",
+                  "MappedMealName": "Room Only",
+                  "CancellationPolicy": [
+                    {
+                      "FromDate": "05-26-2026",
+                      "ToDate": "11-12-2026",
+                      "CancellationPrice": 0,
+                      "daysBeforeCheckIn": null,
+                      "isNRF": false
+                    },
+                    {
+                      "FromDate": "11-13-2026",
+                      "ToDate": "11-20-2026",
+                      "CancellationPrice": 693.36,
+                      "daysBeforeCheckIn": null,
+                      "isNRF": false
+                    }
+                  ]
+                }
+              ],
+              [
+                {
+                  "RoomNo": "1",
+                  "RoomTypeName": "Superior Twin Room 2 Twin Beds",
+                  "MealName": "Room Only",
+                  "Price": 693.36,
+                  "SupplierCurrency": "USD",
+                  "BookingStatus": "Available",
+                  "RoomToken": "MXwxfDF8MA==",
+                  "MappedMealName": "Room Only",
+                  "CancellationPolicy": [
+                    {
+                      "FromDate": "05-26-2026",
+                      "ToDate": "11-12-2026",
+                      "CancellationPrice": 0,
+                      "daysBeforeCheckIn": null,
+                      "isNRF": false
+                    },
+                    {
+                      "FromDate": "11-13-2026",
+                      "ToDate": "11-20-2026",
+                      "CancellationPrice": 693.36,
+                      "daysBeforeCheckIn": null,
+                      "isNRF": false
+                    }
+                  ]
+                }
+              ]
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "Error": []
+}

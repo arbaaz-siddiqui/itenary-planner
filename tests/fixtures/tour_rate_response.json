@@ -1,0 +1,34 @@
+{
+  "statusCode": 200,
+  "error": null,
+  "result": [
+    {
+      "tourID": 1,
+      "finalRate": 40,
+      "currencyCode": "AED",
+      "discountType": "",
+      "discountValue": 0.0
+    },
+    {
+      "tourID": 55,
+      "finalRate": 30.9,
+      "currencyCode": "AED",
+      "discountType": "",
+      "discountValue": 0.0
+    },
+    {
+      "tourID": 58,
+      "finalRate": 1030,
+      "currencyCode": "AED",
+      "discountType": "",
+      "discountValue": 0.0
+    },
+    {
+      "tourID": 60,
+      "finalRate": 164.8,
+      "currencyCode": "AED",
+      "discountType": "",
+      "discountValue": 0.0
+    }
+  ]
+}
