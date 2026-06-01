@@ -347,6 +347,11 @@ def _transfer_payload(
     adults: int = 1,
     unique_key: str | None = None,
 ) -> dict[str, Any]:
+    # The transfer API rejects an empty returnDate with HTTP 400
+    # ("Search data cannot be null"), even for one-way searches. When no
+    # return date is supplied, fall back to the departure date — isRoundTrip=0
+    # still tells the supplier this is one-way, so the return value is ignored.
+    effective_return_date = return_date or departure_date
     payload: dict[str, Any] = {
         "fromLongitude": from_lng,
         "fromLatitude": from_lat,
@@ -354,7 +359,7 @@ def _transfer_payload(
         "toLatitude": to_lat,
         "departureDate": departure_date,
         "departureTime": departure_time,
-        "returnDate": return_date or "",
+        "returnDate": effective_return_date,
         "returnTime": return_time,
         "isRoundTrip": 1 if is_round_trip else 0,
         "fromType": from_type,
@@ -480,13 +485,15 @@ def call_restaurant_search(
 ) -> dict[str, Any]:
     """List restaurants for a city + date.
 
-    search_date format from client: dd-mm-yyyy (e.g. '06-06-2026').
+    SearchDate format: MM-DD-YYYY. The staging API validates this strictly
+    ("SearchDate is required, must be in MM-DD-YYYY format ...") — the Postman
+    sample '06-06-2026' only worked because day==month made it ambiguous.
     Caller passes ISO yyyy-mm-dd; we convert.
     """
     payload: dict[str, Any] = {
         "cityid": city_id,
         "GuestInfo": {"Adults": adults, "Children": children},
-        "SearchDate": to_dd_mm_yyyy(search_date),
+        "SearchDate": to_mm_dd_yyyy(search_date),
     }
     try:
         return get_client().post(RESTAURANT_LIST_PATH, json=payload, headers=base_headers())
@@ -506,7 +513,7 @@ def call_restaurant_details(
     payload: dict[str, Any] = {
         "cityid": city_id,
         "GuestInfo": {"Adults": adults, "Children": children},
-        "SearchDate": to_dd_mm_yyyy(search_date),
+        "SearchDate": to_mm_dd_yyyy(search_date),
     }
     try:
         return get_client().post(path, json=payload, headers=base_headers())
@@ -533,6 +540,9 @@ def call_visa_info(
     """Visa list/details. Payload mirrors client's VisaList/Details sample:
     - guestInfo uses lowercase 'adults' / 'children'
     - agentMarkupType is int 0
+    - checkInDate is MM-DD-YYYY: the API validates strictly ("CheckInDate ...
+      must be in MM-DD-YYYY format ..."); the Postman sample '10-10-2026' only
+      passed because day==month made it ambiguous.
     """
     if not citizen_id:
         citizen_id = country_id  # client sample sets it equal to countryId
@@ -541,7 +551,7 @@ def call_visa_info(
         "nationalityId": nationality_id,
         "citizenId": citizen_id,
         "visaTypeId": visa_type_id,
-        "checkInDate": to_dd_mm_yyyy(travel_date),
+        "checkInDate": to_mm_dd_yyyy(travel_date),
         "guestInfo": {"adults": adults, "children": children},
         "agentMarkupType": 0,
         "agentMarkup": 0,

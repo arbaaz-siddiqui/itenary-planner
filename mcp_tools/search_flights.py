@@ -78,9 +78,26 @@ def _impl(
             expected_destination=dest_iata,
             max_results=max_results,
         )
+
+        # The flight API returns prices for the FULL party as searched
+        # (Quantity=2 → returned price covers 2 adults). Indian travel agents
+        # quote per-person, so we surface both the per-adult and total.
+        pax_count = max(1, adults + children)  # avoid div-by-zero
+        opts_out = []
+        for o in options:
+            d = o.model_dump()
+            per_adult = round(o.price_inr / pax_count, 2) if pax_count else o.price_inr
+            d["price_total_inr"] = o.price_inr
+            d["price_per_adult_inr"] = per_adult
+            d["pax_count"] = pax_count
+            opts_out.append(d)
+
         return {
-            "options": [o.model_dump() for o in options],
+            "options": opts_out,
             "cheapest_price_inr": options[0].price_inr if options else None,
+            "cheapest_price_per_adult_inr": (
+                round(options[0].price_inr / pax_count, 2) if options and pax_count else None
+            ),
             "total_results": len(options),
             "search_params": {
                 "origin": origin_city,
@@ -89,6 +106,7 @@ def _impl(
                 "return_date": return_date,
                 "adults": adults,
                 "children": children,
+                "pax_count": pax_count,
             },
         }
     except TripPlannerError as e:

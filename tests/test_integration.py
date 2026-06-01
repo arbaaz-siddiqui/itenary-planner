@@ -229,15 +229,17 @@ def test_hotel_payload_matches_postman() -> None:
 
 
 @responses.activate
-def test_restaurant_payload_uses_dd_mm_yyyy() -> None:
+def test_restaurant_payload_uses_mm_dd_yyyy() -> None:
     responses.post(
         f"{BASE_URL}/api/restaurant/v1/restaurants",
         json={"result": {"list": []}},
         status=200,
     )
+    # Use a date where day != month so the format is unambiguous. The staging
+    # API rejects dd-mm-yyyy: "SearchDate ... must be in MM-DD-YYYY format".
     call_restaurant_search(
         city_id=244520,
-        search_date="2026-06-06",
+        search_date="2026-07-31",
         adults=1,
         children=0,
     )
@@ -245,7 +247,7 @@ def test_restaurant_payload_uses_dd_mm_yyyy() -> None:
     assert sent["cityid"] == 244520
     assert sent["GuestInfo"]["Adults"] == 1
     assert sent["GuestInfo"]["Children"] == 0
-    assert sent["SearchDate"] == "06-06-2026"  # dd-mm-yyyy
+    assert sent["SearchDate"] == "07-31-2026"  # mm-dd-yyyy
 
 
 @responses.activate
@@ -255,10 +257,12 @@ def test_visa_payload_uses_lowercase_guest_info() -> None:
         json={"result": {"visaOptions": []}},
         status=200,
     )
+    # day != month so the format is unambiguous. The staging API rejects
+    # dd-mm-yyyy: "CheckInDate ... must be in MM-DD-YYYY format".
     call_visa_info(
         country_id=213,
         nationality_id=213,
-        travel_date="2026-10-10",
+        travel_date="2026-10-25",
         visa_type_id=1,
         adults=1,
         children=1,
@@ -268,7 +272,7 @@ def test_visa_payload_uses_lowercase_guest_info() -> None:
     assert sent["nationalityId"] == 213
     assert sent["citizenId"] == 213  # defaults to country_id
     assert sent["visaTypeId"] == 1
-    assert sent["checkInDate"] == "10-10-2026"
+    assert sent["checkInDate"] == "10-25-2026"  # mm-dd-yyyy
     assert sent["guestInfo"]["adults"] == 1  # lowercase
     assert sent["guestInfo"]["children"] == 1  # lowercase
     assert sent["agentMarkupType"] == 0  # int
@@ -336,6 +340,32 @@ def test_transfer_search_uses_a_o_codes() -> None:
         {"TransferRateTypeId": 1, "Count": 1, "transferRateTypeName": "Adult"}
     ]
     assert sent["agtMkpType"] == 0
+
+
+@responses.activate
+def test_transfer_search_oneway_falls_back_to_departure_date() -> None:
+    # The staging API rejects an empty returnDate with HTTP 400
+    # ("Search data cannot be null") even for one-way searches. When no
+    # return_date is given we must send the departure date, not "".
+    responses.post(
+        f"{BASE_URL}/api/transferservices/TransferList",
+        json={"result": []},
+        status=200,
+    )
+    call_transfer_search(
+        from_lat=25.2515,
+        from_lng=55.3683,
+        to_lat=25.2145,
+        to_lng=55.3032,
+        from_place_id="ChIJaQ4...",
+        to_place_id="ChIJB1z...",
+        departure_date="2026-06-25",
+        is_round_trip=False,
+        adults=1,
+    )
+    sent = json.loads(responses.calls[0].request.body)
+    assert sent["returnDate"] == "2026-06-25"  # NOT empty
+    assert sent["isRoundTrip"] == 0  # still one-way
 
 
 @responses.activate

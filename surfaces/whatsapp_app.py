@@ -100,10 +100,12 @@ def send_whatsapp(to_phone: str, body: str) -> None:
 # =============================================================================
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # Keep startup cheap so the server binds and /health responds immediately —
+    # platform healthchecks (Railway/Render) have tight windows. The LLM agent
+    # is lazy-loaded (and lru_cached) on the first /whatsapp request instead of
+    # warm-loaded here, so a slow build or a missing API key can't block boot
+    # or fail the deploy's healthcheck.
     configure_logging(prod=True)
-    log.info("whatsapp_service_starting")
-    get_whatsapp_agent()  # warm-load
-    get_twilio_settings()  # surface config errors early
     log.info("whatsapp_service_ready")
     yield
     log.info("whatsapp_service_stopping")

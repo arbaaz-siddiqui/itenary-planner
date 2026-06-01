@@ -59,7 +59,12 @@ def check_floor_tool(
     visa_inr: float = 0.0,
     transfer_inr: float = 0.0,
 ) -> dict[str, Any]:
-    """Compute minimum viable trip cost and check budget feasibility."""
+    """Compute minimum viable trip cost and check budget feasibility.
+
+    Returns explicit feasibility + over-budget gap so the agent doesn't have
+    to interpret a signed "headroom" number (which it has historically gotten
+    wrong, dropping the sign).
+    """
     floor = compute_floor_price(
         cheapest_flight_inr=cheapest_flight_inr,
         cheapest_hotel_inr=cheapest_hotel_inr,
@@ -67,13 +72,27 @@ def check_floor_tool(
         transfer_inr=transfer_inr,
     )
     feasible = is_budget_feasible(budget_inr=budget_inr, floor_inr=floor)
-    headroom = round(budget_inr - floor, 2)
+    gap = round(budget_inr - floor, 2)  # signed: positive = headroom, negative = over budget
+    is_over = gap < 0
     return {
+        "budget_inr": round(budget_inr, 2),
         "floor_inr": floor,
         "floor_display": format_inr(floor),
         "is_feasible": feasible,
-        "headroom_inr": headroom,
-        "headroom_display": format_inr(headroom),
+        # Only populate one of these. Never both.
+        "headroom_inr": gap if not is_over else 0.0,
+        "headroom_display": format_inr(gap) if not is_over else None,
+        "over_by_inr": abs(gap) if is_over else 0.0,
+        "over_by_display": format_inr(abs(gap)) if is_over else None,
+        "status": "OVER_BUDGET" if is_over else "WITHIN_BUDGET",
+        "recommended_action": (
+            f"Trip floor is {format_inr(floor)}, which is {format_inr(abs(gap))} "
+            f"over the {format_inr(budget_inr)} budget. Suggest dropping a night, "
+            f"cheaper flight/hotel, or raising the budget."
+            if is_over
+            else f"Floor {format_inr(floor)} fits in budget {format_inr(budget_inr)}. "
+            f"{format_inr(gap)} left for tours, transfers, meals."
+        ),
     }
 
 
@@ -102,15 +121,30 @@ def apply_selection_tool(
 
 @tool
 def compute_remaining_budget_tool(budget_total_inr: float, spent_inr: float) -> dict[str, Any]:
-    """Return remaining budget = max(0, total - spent)."""
-    remaining = max(0.0, round(budget_total_inr - spent_inr, 2))
+    """Compute budget remaining after spending. Reports over-budget honestly.
+
+    Returns a SIGNED remaining value (can be negative) so the caller can see
+    when a trip is over budget. Do NOT clamp to zero — that hides the gap
+    from the LLM and leads to math errors like "₹0 remaining" when the
+    customer is actually ₹58,000 over budget.
+    """
+    remaining = round(budget_total_inr - spent_inr, 2)
+    is_over = remaining < 0
     return {
-        "remaining_inr": remaining,
+        "budget_total_inr": round(budget_total_inr, 2),
+        "spent_inr": round(spent_inr, 2),
+        "remaining_inr": remaining,  # SIGNED — negative when over budget
         "remaining_display": format_inr(remaining),
-        "is_over_budget": spent_inr > budget_total_inr,
-        "percent_used": round(
-            min(100.0, (spent_inr / budget_total_inr * 100) if budget_total_inr > 0 else 0),
-            1,
+        "is_over_budget": is_over,
+        "over_by_inr": abs(remaining) if is_over else 0.0,
+        "over_by_display": format_inr(abs(remaining)) if is_over else None,
+        "status": "OVER_BUDGET" if is_over else "WITHIN_BUDGET",
+        "recommended_action": (
+            f"Trip is over budget by {format_inr(abs(remaining))}. "
+            "Suggest one of: drop a night, choose cheaper flight/hotel, "
+            "or stretch budget."
+            if is_over
+            else f"On track. {format_inr(remaining)} remaining for tours, transfers, meals."
         ),
     }
 
