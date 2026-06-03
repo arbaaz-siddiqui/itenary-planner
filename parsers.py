@@ -1,7 +1,7 @@
-"""parsers — All 7 API response parsers.
+"""parsers — All API response parsers.
 
-Pure functions. Input: raw API JSON. Output: list of Pydantic models.
-No I/O, no business logic, no side effects.
+Pure functions. Input: raw API JSON. Output: Pydantic models or normalized
+dicts. No I/O, no business logic, no side effects.
 
 Sections (search by `# ===`):
     # === flight
@@ -11,6 +11,7 @@ Sections (search by `# ===`):
     # === restaurant
     # === visa
     # === package
+    # === hotel static content
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from core import (
     HotelNormalizationError,
     HotelOption,
     HotelRoom,
+    HotelStaticNormalizationError,
     InvalidSettingError,
     PenaltyInfo,
     RestaurantNormalizationError,
@@ -939,3 +941,335 @@ def parse_package_response(
     # Sort: priced packages first (cheapest → expensive), then on-request
     out.sort(key=lambda x: (not x["pricing_available"], x["price_inr"]))
     return out[:max_results] if max_results else out
+
+
+# =============================================================================
+# === hotel static content (cities, static data, descriptions, guest reviews)
+# =============================================================================
+# These six endpoints are detail/content surfaces, not priced search. Their
+# exact JSON shapes vary by supplier and aren't pinned in the collection
+# (empty `response: []`), so the parsers below are deliberately shape-tolerant:
+# they probe the common envelope keys, normalize to plain dicts, and degrade
+# gracefully on missing fields rather than raising. Callers get clean,
+# predictable output regardless of which envelope the supplier returns.
+
+
+def _first_present(obj: Any, *keys: str) -> Any:
+    """Return obj[key] for the first key present (case-insensitive on dicts)."""
+    if not isinstance(obj, dict):
+        return None
+    lower = {str(k).lower(): v for k, v in obj.items()}
+    for key in keys:
+        if key in obj:
+            return obj[key]
+        if key.lower() in lower:
+            return lower[key.lower()]
+    return None
+
+
+def _unwrap_result(raw: Any) -> Any:
+    """Peel the common response envelope to the meaningful payload.
+
+    Hotel-static endpoints variously nest the body under Result/result/Data/
+    Response. Returns the innermost recognized payload, else the input.
+    """
+    if not isinstance(raw, dict):
+        return raw
+    payload = _first_present(raw, "Result", "result", "Data", "data", "Response", "response")
+    return payload if payload is not None else raw
+
+
+def parse_hotel_cities_response(
+    raw: dict[str, Any], *, max_results: int | None = None
+) -> list[dict[str, Any]]:
+    """Normalize GetCitiesWithHotel into [{city_id, city_name, country_name, ...}]."""
+    if not isinstance(raw, dict):
+        raise HotelStaticNormalizationError("Expected dict response", missing_field="root")
+    payload = _unwrap_result(raw)
+    cities = _first_present(payload, "Cities", "CityList", "cities", "list") or payload
+    if isinstance(cities, dict):
+        cities = _first_present(cities, "Cities", "CityList", "list") or []
+    if not isinstance(cities, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for c in cities:
+        if not isinstance(c, dict):
+            continue
+        city_id = _safe_int(_first_present(c, "CityID", "CityId", "cityId", "cityid"))
+        if city_id is None:
+            continue
+        out.append(
+            {
+                "city_id": city_id,
+                "city_name": str(_first_present(c, "CityName", "cityName", "name") or "").strip(),
+                "country_name": str(
+                    _first_present(c, "CountryName", "countryName", "country") or ""
+                ).strip(),
+                "country_id": _safe_int(_first_present(c, "CountryID", "CountryId", "countryId")),
+                "state_name": str(_first_present(c, "StateName", "stateName") or "").strip(),
+            }
+        )
+    return out[:max_results] if max_results else out
+
+
+def parse_hotel_static_data_response(
+    raw: dict[str, Any], *, max_results: int | None = None
+) -> list[dict[str, Any]]:
+    """Normalize hotel static-data list responses (GetHotelStaticDataOptimize,
+    gethotelstaticdatalistsuboptimize_v1_Address, GetStaticDataByCity).
+
+    Returns one normalized dict per hotel with the fields most useful to a
+    detail surface: id, name, stars, address/coords, rating/review counts,
+    images, amenities/facilities — all best-effort.
+    """
+    if not isinstance(raw, dict):
+        raise HotelStaticNormalizationError("Expected dict response", missing_field="root")
+    payload = _unwrap_result(raw)
+    hotels = _first_present(
+        payload, "Hotels", "HotelList", "HotelStaticData", "hotels", "list"
+    )
+    if hotels is None and isinstance(payload, list):
+        hotels = payload
+    if not isinstance(hotels, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for h in hotels:
+        norm = _parse_hotel_static_record(h)
+        if norm is not None:
+            out.append(norm)
+    return out[:max_results] if max_results else out
+
+
+def _parse_hotel_static_record(h: Any) -> dict[str, Any] | None:
+    if not isinstance(h, dict):
+        return None
+    hotel_id = _safe_int(_first_present(h, "HotelId", "HotelID", "hotelId", "hotelid", "id"))
+    if hotel_id is None:
+        return None
+    address = _first_present(h, "Address", "address") or {}
+    if isinstance(address, dict):
+        full_address = _strip_html(
+            _first_present(address, "FullAddress", "fullAddress", "Address", "address")
+        )
+        city = str(_first_present(address, "City", "city") or "")
+        country = str(_first_present(address, "Country", "country") or "")
+        latitude = _first_present(address, "Latitude", "latitude", "Lat")
+        longitude = _first_present(address, "Longitude", "longitude", "Long", "Lng")
+    else:
+        full_address = _strip_html(address)
+        city = str(_first_present(h, "City", "city") or "")
+        country = str(_first_present(h, "Country", "country") or "")
+        latitude = _first_present(h, "Latitude", "latitude")
+        longitude = _first_present(h, "Longitude", "longitude")
+
+    facilities = _first_present(h, "Facilities", "Amenities", "facilities", "amenities") or []
+    if isinstance(facilities, str):
+        facilities = [f.strip() for f in facilities.split(",") if f.strip()]
+    elif isinstance(facilities, list):
+        facilities = [
+            (
+                _strip_html(_first_present(f, "Name", "name") or "")
+                if isinstance(f, dict)
+                else _strip_html(f)
+            )
+            for f in facilities
+        ]
+        facilities = [f for f in facilities if f]
+    else:
+        facilities = []
+
+    images = _first_present(h, "Images", "ImageList", "images", "HotelImages") or []
+    image_urls: list[str] = []
+    if isinstance(images, list):
+        for img in images:
+            if isinstance(img, dict):
+                url = _first_present(img, "Url", "URL", "url", "ImagePath", "imagePath", "Path")
+            else:
+                url = img
+            if url:
+                image_urls.append(str(url))
+
+    return {
+        "hotel_id": hotel_id,
+        "hotel_name": str(
+            _first_present(h, "HotelName", "hotelName", "Name", "name") or f"Hotel {hotel_id}"
+        ).strip(),
+        "stars": float(_first_present(h, "StarRating", "starRating", "Stars", "Rating") or 0),
+        "rating": float(_first_present(h, "Rating", "GuestRating", "rating", "ReviewRating") or 0),
+        "reviews_count": int(
+            _first_present(h, "ReviewCount", "reviewCount", "ReviewsCount", "TotalReviews") or 0
+        ),
+        "full_address": full_address,
+        "city": city,
+        "country": country,
+        "latitude": _try_float(latitude),
+        "longitude": _try_float(longitude),
+        "description": _strip_html(
+            _first_present(h, "Description", "description", "HotelDescription", "ShortDescription")
+        ),
+        "facilities": facilities,
+        "image_urls": image_urls,
+        "phone": str(_first_present(h, "Phone", "PhoneNo", "phone", "ContactNo") or ""),
+    }
+
+
+def parse_hotel_descriptions_response(
+    raw: dict[str, Any], *, max_results: int | None = None
+) -> list[dict[str, Any]]:
+    """Normalize GetPropertyDescriptions into [{hotel_id, description, sections}]."""
+    if not isinstance(raw, dict):
+        raise HotelStaticNormalizationError("Expected dict response", missing_field="root")
+    payload = _unwrap_result(raw)
+    items = _first_present(
+        payload, "PropertyDescriptions", "Descriptions", "Hotels", "list", "descriptions"
+    )
+    if items is None and isinstance(payload, list):
+        items = payload
+    if not isinstance(items, list):
+        # Some suppliers return a single object rather than a list. Only treat
+        # it as one description when it actually carries description content —
+        # an empty/unrecognized envelope must yield [] (not a phantom record).
+        if isinstance(payload, dict) and (
+            _first_present(payload, "HotelId", "HotelID", "hotelId", "id") is not None
+            or _first_present(payload, "Description", "description", "PropertyDescription", "Text")
+        ):
+            items = [payload]
+        else:
+            items = []
+    out: list[dict[str, Any]] = []
+    for d in items:
+        if not isinstance(d, dict):
+            continue
+        hotel_id = _safe_int(_first_present(d, "HotelId", "HotelID", "hotelId", "id"))
+        sections: list[dict[str, str]] = []
+        raw_sections = _first_present(d, "Sections", "Descriptions", "sections") or []
+        if isinstance(raw_sections, list):
+            for s in raw_sections:
+                if isinstance(s, dict):
+                    title = str(_first_present(s, "Title", "Type", "title", "type") or "").strip()
+                    text = _strip_html(_first_present(s, "Text", "Description", "text", "value"))
+                    if text:
+                        sections.append({"title": title, "text": text})
+        out.append(
+            {
+                "hotel_id": hotel_id,
+                "description": _strip_html(
+                    _first_present(d, "Description", "description", "PropertyDescription", "Text")
+                ),
+                "sections": sections,
+            }
+        )
+    return out[:max_results] if max_results else out
+
+
+def parse_hotel_guest_review_response(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize GetHotelGuestReview into a single review-summary dict."""
+    if not isinstance(raw, dict):
+        raise HotelStaticNormalizationError("Expected dict response", missing_field="root")
+    payload = _unwrap_result(raw)
+    if not isinstance(payload, dict):
+        payload = {}
+    reviews_raw = _first_present(payload, "Reviews", "GuestReviews", "reviews", "list") or []
+    reviews: list[dict[str, Any]] = []
+    if isinstance(reviews_raw, list):
+        for r in reviews_raw:
+            if not isinstance(r, dict):
+                continue
+            reviews.append(
+                {
+                    "rating": float(_first_present(r, "Rating", "rating", "Score") or 0),
+                    "title": str(_first_present(r, "Title", "title") or "").strip(),
+                    "comment": _strip_html(
+                        _first_present(r, "Comment", "Review", "comment", "Text")
+                    ),
+                    "reviewer": str(
+                        _first_present(r, "ReviewerName", "GuestName", "reviewer", "Name") or ""
+                    ).strip(),
+                    "date": str(_first_present(r, "ReviewDate", "Date", "date") or ""),
+                }
+            )
+    return {
+        "hotel_id": _safe_int(_first_present(payload, "HotelId", "HotelID", "hotelId")),
+        "average_rating": float(
+            _first_present(payload, "AverageRating", "OverallRating", "Rating", "averageRating")
+            or 0
+        ),
+        "total_reviews": int(
+            _first_present(payload, "TotalReviews", "ReviewCount", "totalReviews", "Count")
+            or len(reviews)
+        ),
+        "reviews": reviews,
+    }
+
+
+def _try_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+# =============================================================================
+# === currency (rate of exchange)
+# =============================================================================
+def parse_currency_roe_response(raw: Any) -> dict[str, Any]:
+    """Normalize an /api/Currency/ROE/{code} response.
+
+    The live supplier shape (confirmed against staging) is a single record for
+    the requested currency, carrying buying/selling rates:
+
+        {"statusCode": 200, "result": {
+            "currencyId": 2, "currencyCode": "INR",
+            "buyingROE": 0.0388350711, "sellingROE": 26.2674940975}}
+
+    Here `sellingROE` is INR-per-1-unit-of-the-base-supplier-currency (i.e. the
+    AED→INR sell rate the customer is charged at), and `buyingROE` is its
+    reciprocal (≈ 1/26.27). Returns a normalized dict:
+
+        {"currency_code": "INR", "buying_roe": 0.0388, "selling_roe": 26.27,
+         "rate": 26.27}
+
+    `rate` is the customer-facing INR-per-base-unit figure (sellingROE, falling
+    back to 1/buyingROE). Unparseable / empty responses yield {} so the caller
+    can fall back to the manual FX rate rather than crash.
+    """
+    payload = _unwrap_result(raw)
+
+    # Some shapes wrap the record in a list — take the first usable entry.
+    if isinstance(payload, list):
+        for entry in payload:
+            parsed = parse_currency_roe_response(entry)
+            if parsed:
+                return parsed
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+
+    selling = _try_float(
+        _first_present(payload, "sellingROE", "SellingROE", "sellingRoe", "sellRate")
+    )
+    buying = _try_float(_first_present(payload, "buyingROE", "BuyingROE", "buyingRoe", "buyRate"))
+    # Generic single-rate shapes ({"rate": ...} / {"roe": ...}) as a fallback.
+    flat = _try_float(_first_present(payload, "rate", "Rate", "roe", "ROE", "exchangeRate", "value"))
+
+    rate: float | None = None
+    if selling is not None and selling > 0:
+        rate = selling
+    elif buying is not None and buying > 0:
+        rate = 1.0 / buying
+    elif flat is not None and flat > 0:
+        rate = flat
+
+    if rate is None:
+        return {}
+
+    code = _first_present(payload, "currencyCode", "CurrencyCode", "currency", "code")
+    return {
+        "currency_code": str(code).strip().upper() if code else None,
+        "buying_roe": buying,
+        "selling_roe": selling,
+        "rate": rate,
+    }

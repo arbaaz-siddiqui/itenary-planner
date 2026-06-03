@@ -6,6 +6,9 @@ import pytest
 
 from rules import (
     BUDGET_HANDOFF_THRESHOLD_INR,
+    BUDGET_SCOPE_ALL_INCLUSIVE,
+    BUDGET_SCOPE_EXCLUDES_FLIGHTS,
+    BUDGET_SCOPE_EXCLUDES_FLIGHTS_AND_HOTEL,
     GROUP_SIZE_HANDOFF_THRESHOLD,
     add_selection,
     apply_agency_markup,
@@ -16,15 +19,20 @@ from rules import (
     apply_peak_season_surcharge,
     apply_tourism_dirham,
     compute_floor_price,
+    compute_hotel_block_cost,
     compute_refund,
     compute_remaining_budget,
+    floor_for_scope,
     gst_breakdown,
     is_budget_feasible,
     is_peak_date,
+    price_group,
     remove_selection,
+    resolve_party,
     should_hand_off,
     suggest_restaurants,
     suggest_uae_airport,
+    sum_trip_total,
     total_spent,
 )
 
@@ -488,3 +496,167 @@ class TestCurrencyConversion:
             assert o.currency_original == "AED"
             ratio = o.price_per_adult_inr / o.price_original
             assert 20 <= ratio <= 26
+
+
+# =============================================================================
+# Party resolution — the "6 people, 2 kids" bug
+# =============================================================================
+class TestResolveParty:
+    def test_total_minus_children_is_adults(self) -> None:
+        """'6 people, 2 children' = 4 adults + 2 children — NOT 6 adults + 2."""
+        r = resolve_party(total_people=6, children=2, child_ages=[5, 7])
+        assert r["adults"] == 4
+        assert r["children"] == 2
+        assert r["party_total"] == 6
+
+    def test_summary_reads_back_the_split(self) -> None:
+        r = resolve_party(total_people=6, children=2, child_ages=[5, 7])
+        assert "4 adults" in r["summary"]
+        assert "2 children" in r["summary"]
+        assert "6 travellers" in r["summary"]
+
+    def test_explicit_adults_count(self) -> None:
+        r = resolve_party(adults=4, children=2, child_ages=[5, 7])
+        assert r["adults"] == 4
+        assert r["party_total"] == 6
+
+    def test_infants_counted_separately(self) -> None:
+        r = resolve_party(total_people=4, children=2, child_ages=[1, 6])
+        assert r["infants"] == 1
+        assert "infant" in r["summary"]
+
+    def test_all_adults(self) -> None:
+        r = resolve_party(total_people=3)
+        assert r["adults"] == 3
+        assert r["children"] == 0
+
+    def test_children_exceed_total_raises(self) -> None:
+        with pytest.raises(ValueError):
+            resolve_party(total_people=2, children=3)
+
+    def test_total_mismatch_with_explicit_adults_raises(self) -> None:
+        with pytest.raises(ValueError):
+            resolve_party(total_people=6, adults=6, children=2)
+
+    def test_zero_adults_raises(self) -> None:
+        with pytest.raises(ValueError):
+            resolve_party(total_people=2, children=2, child_ages=[5, 7])
+
+    def test_ages_length_mismatch_raises(self) -> None:
+        with pytest.raises(ValueError):
+            resolve_party(total_people=6, children=2, child_ages=[5])
+
+
+# =============================================================================
+# Per-adult → group total (with child discounts)
+# =============================================================================
+class TestPriceGroup:
+    def test_adults_only(self) -> None:
+        r = price_group(per_adult_inr=2500, adults=4)
+        assert r["group_total_inr"] == 10000.0
+
+    def test_applies_child_discounts(self) -> None:
+        """4 adults + child(5)@50% + child(7)@75% at ₹2500/adult."""
+        r = price_group(per_adult_inr=2500, adults=4, children=2, child_ages=[5, 7])
+        # 4*2500 + 1250 + 1875 = 13125
+        assert r["adults_subtotal_inr"] == 10000.0
+        assert r["children_subtotal_inr"] == 3125.0
+        assert r["group_total_inr"] == 13125.0
+
+    def test_missing_ages_charges_full_fare_and_flags(self) -> None:
+        r = price_group(per_adult_inr=2500, adults=2, children=1)
+        assert r["group_total_inr"] == 7500.0
+        assert r["ages_assumed_full_fare"] is True
+
+    def test_negative_price_raises(self) -> None:
+        with pytest.raises(ValueError):
+            price_group(per_adult_inr=-1, adults=1)
+
+
+# =============================================================================
+# Hotel room-block cost
+# =============================================================================
+class TestHotelBlockCost:
+    def test_three_rooms_three_nights(self) -> None:
+        r = compute_hotel_block_cost(per_room_per_night_inr=3727.56, rooms=3, nights=3)
+        # 3727.56 * 3 = 11182.68 per room; * 3 rooms = 33548.04
+        assert r["per_room_total_inr"] == 11182.68
+        assert r["block_total_inr"] == 33548.04
+
+    def test_zero_rooms_raises(self) -> None:
+        with pytest.raises(ValueError):
+            compute_hotel_block_cost(per_room_per_night_inr=1000, rooms=0, nights=3)
+
+    def test_zero_nights_raises(self) -> None:
+        with pytest.raises(ValueError):
+            compute_hotel_block_cost(per_room_per_night_inr=1000, rooms=1, nights=0)
+
+
+# =============================================================================
+# Line-item trip total
+# =============================================================================
+class TestSumTripTotal:
+    def test_sums_components(self) -> None:
+        r = sum_trip_total(
+            [
+                {"label": "Flights", "amount_inr": 224934},
+                {"label": "Hotel", "amount_inr": 33548},
+            ]
+        )
+        assert r["total_inr"] == 258482.0
+        assert len(r["line_items"]) == 2
+
+    def test_empty_is_zero(self) -> None:
+        assert sum_trip_total([])["total_inr"] == 0.0
+
+    def test_ignores_malformed_amounts(self) -> None:
+        r = sum_trip_total([{"label": "X", "amount_inr": "oops"}, {"label": "Y", "amount_inr": 100}])
+        assert r["total_inr"] == 100.0
+
+
+# =============================================================================
+# Budget scope → floor
+# =============================================================================
+class TestFloorForScope:
+    def test_all_inclusive_includes_everything(self) -> None:
+        floor = floor_for_scope(
+            cheapest_flight_inr=224934,
+            cheapest_hotel_inr=33548,
+            visa_inr=0,
+            transfer_inr=0,
+            budget_scope=BUDGET_SCOPE_ALL_INCLUSIVE,
+        )
+        # (224934 + 33548) * 1.05 = 271406.1
+        assert floor == 271406.1
+
+    def test_excludes_flights_drops_flight(self) -> None:
+        floor = floor_for_scope(
+            cheapest_flight_inr=224934,
+            cheapest_hotel_inr=33548,
+            visa_inr=0,
+            transfer_inr=0,
+            budget_scope=BUDGET_SCOPE_EXCLUDES_FLIGHTS,
+        )
+        # 33548 * 1.05 = 35225.4
+        assert floor == 35225.4
+
+    def test_excludes_flights_and_hotel(self) -> None:
+        floor = floor_for_scope(
+            cheapest_flight_inr=224934,
+            cheapest_hotel_inr=33548,
+            visa_inr=5000,
+            transfer_inr=2000,
+            budget_scope=BUDGET_SCOPE_EXCLUDES_FLIGHTS_AND_HOTEL,
+        )
+        # (5000 + 2000) * 1.05 = 7350.0
+        assert floor == 7350.0
+
+    def test_unknown_scope_falls_back_to_all_inclusive(self) -> None:
+        floor = floor_for_scope(
+            cheapest_flight_inr=100000,
+            cheapest_hotel_inr=20000,
+            visa_inr=0,
+            transfer_inr=0,
+            budget_scope="garbage",
+        )
+        assert floor == round(120000 * 1.05, 2)

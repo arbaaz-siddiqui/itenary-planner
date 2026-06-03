@@ -1,9 +1,16 @@
 """booking_api — All HTTP interactions with the Technoheaven booking API."""
 
 from booking_api.endpoints import (
+    call_currency_roe,
     call_flight_details,
     call_flight_search,
     call_hotel_availability,
+    call_hotel_cities,
+    call_hotel_descriptions,
+    call_hotel_guest_review,
+    call_hotel_property_info,
+    call_hotel_static_by_city,
+    call_hotel_static_data,
     call_list_packages,
     call_package_rates,
     call_package_static_data,
@@ -20,9 +27,16 @@ from booking_api.http_client import BookingApiClient, get_client
 
 __all__ = [
     "BookingApiClient",
+    "call_currency_roe",
     "call_flight_details",
     "call_flight_search",
     "call_hotel_availability",
+    "call_hotel_cities",
+    "call_hotel_descriptions",
+    "call_hotel_guest_review",
+    "call_hotel_property_info",
+    "call_hotel_static_by_city",
+    "call_hotel_static_data",
     "call_list_packages",
     "call_package_rates",
     "call_package_static_data",

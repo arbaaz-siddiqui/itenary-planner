@@ -28,12 +28,25 @@ def _impl(
     adults: int = 2,
     children: int = 0,
     child_ages: list[int] | None = None,
+    rooms: list[dict[str, Any]] | None = None,
     nationality: str = "India",
     min_stars: float = 0,
     max_stars: float = 5,
     max_results: int = 5,
 ) -> dict[str, Any]:
-    """Search hotels in the destination city. Returns options + per-night pricing."""
+    """Search hotels in the destination city. Returns options + per-night pricing.
+
+    Occupancy — two ways to specify:
+    - For a single room, pass flat `adults` / `children` / `child_ages`.
+    - For multiple rooms (e.g. a family of 4 split as 2+2, or 3+1), pass
+      `rooms` as a list of per-room dicts, each with `adults`, `children`,
+      and `child_ages`. Example for 4 adults + 2 kids (ages 5, 8) in 2 rooms:
+        rooms=[{"adults": 2, "children": 1, "child_ages": [5]},
+               {"adults": 2, "children": 1, "child_ages": [8]}]
+      When `rooms` is given it takes precedence over the flat args. ALWAYS
+      confirm the room split with the customer before searching — never guess
+      how many rooms 4+ guests want.
+    """
     try:
         city = resolve_city(destination_city)
         if city is None or not city.get("city_id"):
@@ -55,11 +68,13 @@ def _impl(
                 "error_type": "MissingReferenceData",
             }
         nights = nights_between(check_in, check_out)
+        room_count = len(rooms) if rooms else 1
         raw = call_hotel_availability(
             hotel_ids=hotel_ids,
             city_id=city_id,
             check_in=check_in,
             check_out=check_out,
+            rooms=rooms,
             adults=adults,
             children=children,
             child_ages=child_ages,
@@ -80,6 +95,7 @@ def _impl(
             "cheapest_price_inr": options[0].price_inr if options else None,
             "nights": nights,
             "per_night_inr": options[0].per_night_inr if options else None,
+            "room_count": room_count,
             "total_results": len(options),
             "search_params": {
                 "destination": destination_city,
@@ -87,6 +103,8 @@ def _impl(
                 "check_out": check_out,
                 "adults": adults,
                 "children": children,
+                "rooms": rooms,
+                "room_count": room_count,
             },
         }
     except TripPlannerError as e:

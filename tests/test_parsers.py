@@ -15,6 +15,7 @@ from itertools import pairwise
 import pytest
 
 from parsers import (
+    parse_currency_roe_response,
     parse_flight_response,
     parse_hotel_response,
     parse_restaurant_response,
@@ -381,3 +382,47 @@ class TestVisaParser:
         assert len(options) == 1
         assert options[0].visa_id == 99
         assert options[0].pricing_available is True
+
+
+# =============================================================================
+# Currency ROE
+# =============================================================================
+class TestCurrencyRoeParser:
+    """The live /api/Currency/ROE/INR shape (confirmed against staging) is a
+    single record with buyingROE/sellingROE. `rate` is the customer-facing
+    sellingROE (INR per 1 base unit)."""
+
+    def test_live_buying_selling_shape(self) -> None:
+        raw = {
+            "statusCode": 200,
+            "error": None,
+            "result": {
+                "currencyId": 2,
+                "currencyCode": "INR",
+                "buyingROE": 0.0388350711,
+                "sellingROE": 26.2674940975,
+            },
+        }
+        parsed = parse_currency_roe_response(raw)
+        assert parsed["currency_code"] == "INR"
+        assert parsed["rate"] == pytest.approx(26.2674940975)
+        assert parsed["selling_roe"] == pytest.approx(26.2674940975)
+        assert parsed["buying_roe"] == pytest.approx(0.0388350711)
+
+    def test_falls_back_to_reciprocal_of_buying(self) -> None:
+        """When only buyingROE is present, rate = 1/buyingROE."""
+        parsed = parse_currency_roe_response({"result": {"buyingROE": 0.04}})
+        assert parsed["rate"] == pytest.approx(25.0)
+
+    def test_generic_flat_rate_shape(self) -> None:
+        parsed = parse_currency_roe_response({"currencyCode": "INR", "rate": 23.5})
+        assert parsed["rate"] == pytest.approx(23.5)
+
+    def test_list_wrapped(self) -> None:
+        parsed = parse_currency_roe_response([{"sellingROE": 24.0, "currencyCode": "INR"}])
+        assert parsed["rate"] == pytest.approx(24.0)
+
+    @pytest.mark.parametrize("raw", [{}, [], None, 22.5, {"result": {}}, {"result": []}])
+    def test_unparseable_yields_empty(self, raw: object) -> None:
+        """Empty/garbage → {} so the caller can fall back to the manual rate."""
+        assert parse_currency_roe_response(raw) == {}

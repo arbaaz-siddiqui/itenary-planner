@@ -1,6 +1,6 @@
 """All booking API endpoint functions.
 
-14 endpoints total:
+20 endpoints total:
   Search/List (9):
     - call_flight_search
     - call_hotel_availability
@@ -17,6 +17,13 @@
     - call_transfer_details
     - call_restaurant_details
     - call_package_static_data
+  Hotel static content (6) — separate Hotels-only token:
+    - call_hotel_cities
+    - call_hotel_static_by_city
+    - call_hotel_static_data
+    - call_hotel_property_info
+    - call_hotel_descriptions
+    - call_hotel_guest_review
 
 Each function:
 - Builds payload matching the client's Postman collection EXACTLY
@@ -30,13 +37,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from booking_api.headers import base_headers, flight_list_headers, flight_search_headers
+from booking_api.headers import (
+    base_headers,
+    currency_roe_headers,
+    flight_list_headers,
+    flight_search_headers,
+    hotel_static_headers,
+)
 from booking_api.http_client import get_client
 from core import (
     BookingApiError,
+    CurrencyRoeFailed,
     FlightDetailsFailed,
     FlightSearchFailed,
     HotelSearchFailed,
+    HotelStaticDataFailed,
     PackageDetailsFailed,
     PackageSearchFailed,
     RestaurantDetailsFailed,
@@ -65,6 +80,14 @@ VISA_LIST_PATH = "/api/visa/v1/visas"
 PACKAGE_LIST_PATH = "/api/staticpackageservices/staticpackage/packagelist"
 PACKAGE_RATE_PATH = "/api/staticpackageservices/staticpackage/packagerate"
 PACKAGE_STATIC_DATA_PATH = "/api/staticpackageservices/staticpackage/packagestaticdata"
+# Hotel static-content endpoints (separate Hotels-only token; see headers.py).
+HOTEL_CITIES_PATH = "/api/xconnect/GetCitiesWithHotel"
+HOTEL_STATIC_BY_CITY_PATH = "/api/xconnect/GetStaticDataByCity"
+HOTEL_STATIC_OPTIMIZE_PATH = "/api/xconnect/GetHotelStaticDataOptimize"
+HOTEL_STATIC_LIST_ADDRESS_PATH = "/api/xconnect/gethotelstaticdatalistsuboptimize_v1_Address"
+HOTEL_DESCRIPTIONS_PATH = "/api/xconnect/GetPropertyDescriptions"
+HOTEL_GUEST_REVIEW_PATH = "/api/xconnect/GetHotelGuestReview"
+CURRENCY_ROE_PATH_TPL = "/api/Currency/ROE/{code}"
 
 
 # =============================================================================
@@ -165,12 +188,56 @@ def call_flight_details(
 # =============================================================================
 # Hotels
 # =============================================================================
+def _build_hotel_rooms(
+    *,
+    rooms: list[dict[str, Any]] | None,
+    adults: int,
+    children: int,
+    child_ages: list[int] | None,
+) -> list[dict[str, Any]]:
+    """Build the supplier's Rooms[] array.
+
+    Accepts a structured `rooms` list (per-room occupancy) and normalizes each
+    entry to {RoomNo, NoofAdults, NoOfChild, ChildAge}. Tolerates either
+    snake_case keys (adults/children/child_ages) or the supplier's own keys.
+    Falls back to a single room from the flat args when `rooms` is empty.
+    """
+    if not rooms:
+        return [
+            {
+                "RoomNo": 1,
+                "NoofAdults": adults,
+                "NoOfChild": children,
+                "ChildAge": list(child_ages or []),
+            }
+        ]
+
+    api_rooms: list[dict[str, Any]] = []
+    for idx, r in enumerate(rooms, start=1):
+        r = r or {}
+        room_adults = int(r.get("adults", r.get("NoofAdults", r.get("noofAdults", 2))) or 0)
+        ages_raw = r.get("child_ages", r.get("ChildAge", r.get("childAge", []))) or []
+        ages = [int(a) for a in ages_raw]
+        # children count: explicit value wins, else infer from the ages list
+        room_children = int(r.get("children", r.get("NoOfChild", r.get("noOfChild", len(ages)))) or 0)
+        api_rooms.append(
+            {
+                "RoomNo": idx,
+                "NoofAdults": room_adults,
+                "NoOfChild": room_children,
+                "ChildAge": ages,
+            }
+        )
+    return api_rooms
+
+
 def call_hotel_availability(
     *,
     hotel_ids: list[int],
     city_id: int,
     check_in: str,
     check_out: str,
+    rooms: list[dict[str, Any]] | None = None,
     adults: int = 2,
     children: int = 0,
     child_ages: list[int] | None = None,
@@ -185,23 +252,27 @@ def call_hotel_availability(
     - Nationality as country name (not country_id)
     - IsMobile/IsSearch as int
     - mm-dd-yyyy dates
+
+    Occupancy:
+    - Pass a structured `rooms` list to book multiple rooms with different
+      per-room occupancy, e.g.
+        [{"adults": 2, "children": 1, "child_ages": [5]}, {"adults": 2}]
+      Each entry maps to the supplier's Rooms[] shape (RoomNo / NoofAdults /
+      NoOfChild / ChildAge). RoomNo is assigned automatically (1-based).
+    - If `rooms` is omitted, falls back to a single room built from the flat
+      `adults` / `children` / `child_ages` args (backward compatible).
     """
     from core import nights_between
 
     nights = nights_between(check_in, check_out)
     hotel_ids_str = ",".join(str(hid) for hid in hotel_ids)
-    rooms = [
-        {
-            "RoomNo": 1,
-            "NoofAdults": adults,
-            "NoOfChild": children,
-            "ChildAge": child_ages or [],
-        }
-    ]
+    api_rooms = _build_hotel_rooms(
+        rooms=rooms, adults=adults, children=children, child_ages=child_ages
+    )
     payload: dict[str, Any] = {
         "Token": "",
         "Request": {
-            "Rooms": rooms,
+            "Rooms": api_rooms,
             "CityID": str(city_id),
             "CheckInDate": to_mm_dd_yyyy(check_in),
             "CheckOutDate": to_mm_dd_yyyy(check_out),
@@ -728,3 +799,206 @@ def call_package_static_data(*, package_id: int) -> dict[str, Any]:
         raise PackageDetailsFailed(
             f"Package static-data call failed: {e}", endpoint=PACKAGE_STATIC_DATA_PATH
         ) from e
+
+
+# =============================================================================
+# Hotel static content (cities, static data, descriptions, guest reviews)
+# =============================================================================
+# These six endpoints back the hotel detail surfaces. They are signed with the
+# dedicated Hotels-only account token (`hotel_static_headers`), which carries
+# the booking permissions the static endpoints require. Payloads mirror the
+# N8N-Technoheven V1 collection exactly — note the `Request` envelope and the
+# `IsMobile` int that wraps most of them.
+
+
+def call_hotel_cities(*, city_name: str) -> dict[str, Any]:
+    """Look up bookable cities by name (GetCitiesWithHotel).
+
+    Returns the supplier's city records (incl. CityID) so callers can resolve
+    a free-text city to the numeric CityID the search/static endpoints need.
+    """
+    payload: dict[str, Any] = {"Request": {"CityName": city_name}}
+    try:
+        return get_client().post(
+            HOTEL_CITIES_PATH, json=payload, headers=hotel_static_headers()
+        )
+    except Exception as e:
+        if isinstance(e, BookingApiError):
+            raise
+        raise HotelStaticDataFailed(
+            f"GetCitiesWithHotel call failed: {e}", endpoint=HOTEL_CITIES_PATH
+        ) from e
+
+
+def call_hotel_static_by_city(
+    *, city_id: int, location_id: str = "", lookup_type: str = "city"
+) -> dict[str, Any]:
+    """List hotel IDs for a city (or location) — GetStaticDataByCity.
+
+    `lookup_type` is "city" (use city_id) or "location" (use location_id).
+    """
+    payload: dict[str, Any] = {
+        "Request": {
+            "CityID": str(city_id),
+            "Type": lookup_type,
+            "LocationId": location_id,
+        }
+    }
+    try:
+        return get_client().post(
+            HOTEL_STATIC_BY_CITY_PATH, json=payload, headers=hotel_static_headers()
+        )
+    except Exception as e:
+        if isinstance(e, BookingApiError):
+            raise
+        raise HotelStaticDataFailed(
+            f"GetStaticDataByCity call failed: {e}", endpoint=HOTEL_STATIC_BY_CITY_PATH
+        ) from e
+
+
+def call_hotel_static_data(
+    *,
+    hotel_ids: list[int] | str,
+    city_id: int = 0,
+    language_id: int = 0,
+    show_rooms: bool = False,
+) -> dict[str, Any]:
+    """Rating/review + core static data for one or more hotels.
+
+    GetHotelStaticDataOptimize. `hotel_ids` accepts a list or a pre-joined
+    comma-separated string ("176,177,...").
+    """
+    hotel_ids_str = (
+        hotel_ids if isinstance(hotel_ids, str) else ",".join(str(h) for h in hotel_ids)
+    )
+    payload: dict[str, Any] = {
+        "IsMobile": 1,
+        "Request": {
+            "CityId": str(city_id),
+            "HotelIDs": hotel_ids_str,
+            "LanguageId": language_id,
+            "IsShowRooms": 1 if show_rooms else 0,
+        },
+    }
+    try:
+        return get_client().post(
+            HOTEL_STATIC_OPTIMIZE_PATH, json=payload, headers=hotel_static_headers()
+        )
+    except Exception as e:
+        if isinstance(e, BookingApiError):
+            raise
+        raise HotelStaticDataFailed(
+            f"GetHotelStaticDataOptimize call failed: {e}", endpoint=HOTEL_STATIC_OPTIMIZE_PATH
+        ) from e
+
+
+def call_hotel_property_info(
+    *,
+    hotel_ids: list[int] | str,
+    city_id: int = 0,
+    language_id: int = 0,
+    show_rooms: bool = False,
+) -> dict[str, Any]:
+    """Property info incl. addresses for a batch of hotels.
+
+    gethotelstaticdatalistsuboptimize_v1_Address.
+    """
+    hotel_ids_str = (
+        hotel_ids if isinstance(hotel_ids, str) else ",".join(str(h) for h in hotel_ids)
+    )
+    payload: dict[str, Any] = {
+        "IsMobile": 1,
+        "Request": {
+            "CityId": str(city_id),
+            "HotelIDs": hotel_ids_str,
+            "LanguageId": language_id,
+            "IsShowRooms": 1 if show_rooms else 0,
+        },
+    }
+    try:
+        return get_client().post(
+            HOTEL_STATIC_LIST_ADDRESS_PATH, json=payload, headers=hotel_static_headers()
+        )
+    except Exception as e:
+        if isinstance(e, BookingApiError):
+            raise
+        raise HotelStaticDataFailed(
+            f"HotelPropertyInfo call failed: {e}", endpoint=HOTEL_STATIC_LIST_ADDRESS_PATH
+        ) from e
+
+
+def call_hotel_descriptions(
+    *,
+    hotel_ids: list[int] | str,
+    city_id: int = 0,
+    language_id: int = 0,
+    show_rooms: bool = True,
+) -> dict[str, Any]:
+    """Long-form property descriptions — GetPropertyDescriptions.
+
+    NOTE: this endpoint's payload uses `HotelIds` (lowercase 's'), unlike the
+    sibling endpoints which use `HotelIDs`. Mirrors the collection exactly.
+    """
+    hotel_ids_str = (
+        hotel_ids if isinstance(hotel_ids, str) else ",".join(str(h) for h in hotel_ids)
+    )
+    payload: dict[str, Any] = {
+        "IsMobile": 1,
+        "Request": {
+            "CityId": str(city_id),
+            "HotelIds": hotel_ids_str,
+            "LanguageId": language_id,
+            "IsShowRooms": 1 if show_rooms else 0,
+        },
+        "token": "",
+    }
+    try:
+        return get_client().post(
+            HOTEL_DESCRIPTIONS_PATH, json=payload, headers=hotel_static_headers()
+        )
+    except Exception as e:
+        if isinstance(e, BookingApiError):
+            raise
+        raise HotelStaticDataFailed(
+            f"GetPropertyDescriptions call failed: {e}", endpoint=HOTEL_DESCRIPTIONS_PATH
+        ) from e
+
+
+def call_hotel_guest_review(*, hotel_id: int) -> dict[str, Any]:
+    """Aggregated guest reviews for a single hotel — GetHotelGuestReview."""
+    payload: dict[str, Any] = {"Request": {"HotelId": hotel_id}}
+    try:
+        return get_client().post(
+            HOTEL_GUEST_REVIEW_PATH, json=payload, headers=hotel_static_headers()
+        )
+    except Exception as e:
+        if isinstance(e, BookingApiError):
+            raise
+        raise HotelStaticDataFailed(
+            f"GetHotelGuestReview call failed: {e}", endpoint=HOTEL_GUEST_REVIEW_PATH
+        ) from e
+
+
+# =============================================================================
+# Currency — rate of exchange (ROE)
+# =============================================================================
+def call_currency_roe(*, target_currency: str = "INR") -> dict[str, Any]:
+    """Live rate of exchange for `target_currency` — GET /api/Currency/ROE/{code}.
+
+    Mirrors the N8N-Technoheven V1 collection's ROE request: a GET signed with
+    the antiforgery `RequestVerificationToken` (see currency_roe_headers). The
+    `{code}` is the customer-facing currency (INR for Indian customers); the
+    response carries the supplier-currency-to-`code` rate(s).
+
+    Returns the raw JSON; rate extraction happens in parsers. Raises
+    CurrencyRoeFailed on unexpected errors — callers that have a manual FX rate
+    to fall back to should catch it rather than surface it to the customer.
+    """
+    code = (target_currency or "INR").strip().upper()
+    path = CURRENCY_ROE_PATH_TPL.format(code=code)
+    try:
+        return get_client().get(path, headers=currency_roe_headers())
+    except Exception as e:
+        if isinstance(e, BookingApiError):
+            raise
+        raise CurrencyRoeFailed(f"Currency ROE call failed: {e}", endpoint=path) from e

@@ -13,7 +13,16 @@ from typing import Any
 from langchain_core.tools import BaseTool, tool
 
 from core import format_inr
-from rules import compute_floor_price, is_budget_feasible
+from rules import (
+    BUDGET_SCOPE_ALL_INCLUSIVE,
+    compute_floor_price,
+    compute_hotel_block_cost,
+    floor_for_scope,
+    is_budget_feasible,
+    price_group,
+    resolve_party,
+    sum_trip_total,
+)
 
 
 # =============================================================================
@@ -58,26 +67,46 @@ def check_floor_tool(
     cheapest_hotel_inr: float,
     visa_inr: float = 0.0,
     transfer_inr: float = 0.0,
+    budget_scope: str = BUDGET_SCOPE_ALL_INCLUSIVE,
 ) -> dict[str, Any]:
     """Compute minimum viable trip cost and check budget feasibility.
 
     Returns explicit feasibility + over-budget gap so the agent doesn't have
     to interpret a signed "headroom" number (which it has historically gotten
     wrong, dropping the sign).
+
+    `budget_scope` MUST reflect what the customer's stated budget covers — ASK
+    them before calling:
+      - "all_inclusive"               → budget covers flights + hotel + everything
+      - "excludes_flights"            → budget is hotel + on-ground only (they book flights)
+      - "excludes_flights_and_hotel"  → budget is tours/transfers/visa only
+    The feasibility verdict is measured against the floor for THAT scope, while
+    `full_floor_inr` always reports the complete flight+hotel+visa+transfer floor
+    for reference.
     """
-    floor = compute_floor_price(
+    full_floor = compute_floor_price(
         cheapest_flight_inr=cheapest_flight_inr,
         cheapest_hotel_inr=cheapest_hotel_inr,
         visa_inr=visa_inr,
         transfer_inr=transfer_inr,
+    )
+    floor = floor_for_scope(
+        cheapest_flight_inr=cheapest_flight_inr,
+        cheapest_hotel_inr=cheapest_hotel_inr,
+        visa_inr=visa_inr,
+        transfer_inr=transfer_inr,
+        budget_scope=budget_scope,
     )
     feasible = is_budget_feasible(budget_inr=budget_inr, floor_inr=floor)
     gap = round(budget_inr - floor, 2)  # signed: positive = headroom, negative = over budget
     is_over = gap < 0
     return {
         "budget_inr": round(budget_inr, 2),
+        "budget_scope": budget_scope,
         "floor_inr": floor,
         "floor_display": format_inr(floor),
+        "full_floor_inr": full_floor,
+        "full_floor_display": format_inr(full_floor),
         "is_feasible": feasible,
         # Only populate one of these. Never both.
         "headroom_inr": gap if not is_over else 0.0,
@@ -147,6 +176,104 @@ def compute_remaining_budget_tool(budget_total_inr: float, spent_inr: float) -> 
             else f"On track. {format_inr(remaining)} remaining for tours, transfers, meals."
         ),
     }
+
+
+@tool
+def resolve_party_tool(
+    total_people: int | None = None,
+    adults: int | None = None,
+    children: int = 0,
+    child_ages: list[int] | None = None,
+) -> dict[str, Any]:
+    """Resolve a loosely-stated headcount into an exact adult/child/infant split.
+
+    USE THIS whenever the customer gives a headcount — especially a bare total
+    like "6 people" with "2 kids". That means 4 ADULTS + 2 children, NOT
+    6 adults + 2 children. Do NOT do this subtraction in your head; you have
+    gotten it inverted before.
+
+    Pass `total_people` + `children` (adults are derived), OR an explicit
+    `adults` count. Always read back the returned `summary` to confirm the
+    split with the customer before searching flights/hotels.
+    """
+    try:
+        return resolve_party(
+            total_people=total_people,
+            adults=adults,
+            children=children,
+            child_ages=child_ages,
+        )
+    except ValueError as e:
+        return {"error": True, "message": str(e)}
+
+
+@tool
+def price_group_tool(
+    per_adult_inr: float,
+    adults: int,
+    children: int = 0,
+    child_ages: list[int] | None = None,
+) -> dict[str, Any]:
+    """Convert a per-adult price into a group total, applying child discounts.
+
+    Tours, restaurants, and visas are quoted PER ADULT. To get the group total
+    for 4 adults + 2 children (ages 5, 7) you must apply each child's age-tier
+    discount and sum — never multiply per_adult by the headcount in your head.
+    Pass child_ages so discounts apply; without ages, children are charged at
+    full adult fare (and `ages_assumed_full_fare` is True — ask for ages).
+
+    Returns group_total_inr plus a per-head breakdown.
+    """
+    try:
+        result = price_group(
+            per_adult_inr=per_adult_inr,
+            adults=adults,
+            children=children,
+            child_ages=child_ages,
+        )
+    except ValueError as e:
+        return {"error": True, "message": str(e)}
+    result["group_total_display"] = format_inr(result["group_total_inr"])
+    return result
+
+
+@tool
+def compute_hotel_block_cost_tool(
+    per_room_per_night_inr: float,
+    rooms: int,
+    nights: int,
+) -> dict[str, Any]:
+    """Total hotel cost for a block of identical rooms = rooms x nights x rate.
+
+    USE THIS for any "3 rooms for 3 nights" math. Pass the per-room-per-night
+    rate (hotels are priced per room, not per person — do not divide by party
+    size). For rooms at different rates, call this once per rate or use
+    sum_trip_total with one line per room type.
+    """
+    try:
+        result = compute_hotel_block_cost(
+            per_room_per_night_inr=per_room_per_night_inr,
+            rooms=rooms,
+            nights=nights,
+        )
+    except ValueError as e:
+        return {"error": True, "message": str(e)}
+    result["block_total_display"] = format_inr(result["block_total_inr"])
+    return result
+
+
+@tool
+def sum_trip_total_tool(line_items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Sum named line items into ONE inclusive trip total, deterministically.
+
+    USE THIS any time you state a combined trip cost (flights + hotel + tours +
+    transfers + visa). Never add the components in your head — that produced
+    three different totals in one conversation. Each line item is
+    {"label": "Flights", "amount_inr": 224934}. Quote the returned total_inr.
+    """
+    result = sum_trip_total(line_items)
+    result["total_display"] = format_inr(result["total_inr"])
+    return result
 
 
 # CLIENT_PLACEHOLDER: review and expand
@@ -267,13 +394,19 @@ def compose_customer_payment_summary_tool(
 # =============================================================================
 def _build_all_tools() -> list[BaseTool]:
     # Import MCP tools here (they have decorator side effects)
+    from mcp_tools.get_exchange_rate import get_exchange_rate_tool
     from mcp_tools.get_flight_details import get_flight_details_tool
+    from mcp_tools.get_hotel_description import get_hotel_description_tool
+    from mcp_tools.get_hotel_info import get_hotel_info_tool
+    from mcp_tools.get_hotel_reviews import get_hotel_reviews_tool
     from mcp_tools.get_package_details import get_package_details_tool
     from mcp_tools.get_restaurant_details import get_restaurant_details_tool
     from mcp_tools.get_tour_details import get_tour_details_tool
     from mcp_tools.get_transfer_details import get_transfer_details_tool
     from mcp_tools.get_visa_info import get_visa_info_tool
+    from mcp_tools.list_city_hotels import list_city_hotels_tool
     from mcp_tools.list_packages import list_packages_tool
+    from mcp_tools.lookup_hotel_city import lookup_hotel_city_tool
     from mcp_tools.search_flights import search_flights_tool
     from mcp_tools.search_hotels import search_hotels_tool
     from mcp_tools.search_restaurants import search_restaurants_tool
@@ -289,15 +422,26 @@ def _build_all_tools() -> list[BaseTool]:
         search_restaurants_tool,
         get_visa_info_tool,
         list_packages_tool,
+        get_exchange_rate_tool,
         # Detail tools (MCP-exposed)
         get_flight_details_tool,
         get_tour_details_tool,
         get_transfer_details_tool,
         get_restaurant_details_tool,
         get_package_details_tool,
+        # Hotel static-content tools (MCP-exposed; Hotels-only token)
+        lookup_hotel_city_tool,
+        list_city_hotels_tool,
+        get_hotel_info_tool,
+        get_hotel_description_tool,
+        get_hotel_reviews_tool,
         # Plain tools (agent-only)
         collect_guest_info_tool,
+        resolve_party_tool,
         check_floor_tool,
+        price_group_tool,
+        compute_hotel_block_cost_tool,
+        sum_trip_total_tool,
         apply_selection_tool,
         compute_remaining_budget_tool,
         get_destination_tips_tool,

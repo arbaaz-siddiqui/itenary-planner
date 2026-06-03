@@ -134,6 +134,20 @@ class PackageDetailsFailed(BookingApiError):
     code = "PACKAGE_DETAILS_FAILED"
 
 
+class HotelStaticDataFailed(BookingApiError):
+    """Any hotel static-content endpoint failure (cities, static data,
+    descriptions, guest reviews)."""
+
+    code = "HOTEL_STATIC_DATA_FAILED"
+
+
+class CurrencyRoeFailed(BookingApiError):
+    """The /api/Currency/ROE rate-of-exchange lookup failed. Callers may fall
+    back to the manual FX rate in CurrencySettings rather than surface this."""
+
+    code = "CURRENCY_ROE_FAILED"
+
+
 # --- Normalization errors ---
 class NormalizationError(TripPlannerError):
     code = "NORMALIZATION_ERROR"
@@ -164,6 +178,10 @@ class RestaurantNormalizationError(NormalizationError):
 
 class VisaNormalizationError(NormalizationError):
     code = "VISA_NORMALIZATION_ERROR"
+
+
+class HotelStaticNormalizationError(NormalizationError):
+    code = "HOTEL_STATIC_NORMALIZATION_ERROR"
 
 
 # --- Business rule errors ---

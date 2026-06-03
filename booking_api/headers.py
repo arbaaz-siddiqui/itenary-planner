@@ -27,6 +27,23 @@ def base_headers() -> dict[str, str]:
     }
 
 
+def hotel_static_headers() -> dict[str, str]:
+    """Headers for hotel static-content endpoints (/api/xconnect/...).
+
+    These use the separate Hotels-only account token and an
+    `x-accept-language` hint, per the collection's hotel-static requests.
+    """
+    s = get_booking_api_settings()
+    return {
+        "Authorization": f"Bearer {s.hotel_static_bearer()}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+        "X-Trace-Id": _new_trace_id(),
+        "x-accept-language": "en",
+    }
+
+
 def flight_search_headers() -> dict[str, str]:
     """Headers for /api/Flight/search."""
     s = get_booking_api_settings()
@@ -41,6 +58,28 @@ def flight_search_headers() -> dict[str, str]:
         "X-Accept-Language": "ar",
         "X-Tenant-Id": s.flight_search_tenant_id,
     }
+
+
+def currency_roe_headers() -> dict[str, str]:
+    """Headers for /api/Currency/ROE/{code}.
+
+    Per the Postman collection this endpoint authenticates with an antiforgery
+    `RequestVerificationToken` rather than the Bearer token. That token expires,
+    so it's supplied via env (BOOKING_ROE_VERIFICATION_TOKEN). When it's unset we
+    fall back to the Bearer token so a single-credential setup still attempts the
+    call; if the server rejects it, the caller falls back to the manual FX rate.
+    """
+    s = get_booking_api_settings()
+    headers = {
+        "accept": "*/*",
+        "X-Requested-With": "XMLHttpRequest",
+        "X-Trace-Id": _new_trace_id(),
+    }
+    if s.roe_verification_token:
+        headers["RequestVerificationToken"] = s.roe_verification_token
+    else:
+        headers["Authorization"] = f"Bearer {s.token}"
+    return headers
 
 
 def flight_list_headers() -> dict[str, str]:

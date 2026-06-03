@@ -593,6 +593,264 @@ def is_budget_feasible(*, budget_inr: float, floor_inr: float) -> bool:
 
 
 # =============================================================================
+# === BUDGET — scope of the customer's stated budget
+# =============================================================================
+# When a customer says "my budget is ₹2.7L", they may mean different things:
+# the all-in number, or "₹2.7L on TOP of flights/hotel I'll handle". The agent
+# must ask. These constants name the three scopes; the floor check then compares
+# the budget only against the components it's meant to cover.
+BUDGET_SCOPE_ALL_INCLUSIVE: Final[str] = "all_inclusive"
+BUDGET_SCOPE_EXCLUDES_FLIGHTS: Final[str] = "excludes_flights"
+BUDGET_SCOPE_EXCLUDES_FLIGHTS_AND_HOTEL: Final[str] = "excludes_flights_and_hotel"
+
+_VALID_BUDGET_SCOPES: Final[frozenset[str]] = frozenset(
+    {
+        BUDGET_SCOPE_ALL_INCLUSIVE,
+        BUDGET_SCOPE_EXCLUDES_FLIGHTS,
+        BUDGET_SCOPE_EXCLUDES_FLIGHTS_AND_HOTEL,
+    }
+)
+
+
+def floor_for_scope(
+    *,
+    cheapest_flight_inr: float,
+    cheapest_hotel_inr: float,
+    visa_inr: float,
+    transfer_inr: float,
+    budget_scope: str,
+    safety_margin_percent: float = 5.0,
+) -> float:
+    """Compute the floor the budget must clear, given what the budget covers.
+
+    The full floor is always flight + hotel + visa + transfer (+ margin). But if
+    the customer's budget EXCLUDES flights (they'll book those separately), the
+    budget should only be measured against hotel + visa + transfer. This keeps
+    the over/under-budget verdict honest for the scope the customer actually meant.
+    """
+    if budget_scope not in _VALID_BUDGET_SCOPES:
+        budget_scope = BUDGET_SCOPE_ALL_INCLUSIVE
+
+    flight = cheapest_flight_inr
+    hotel = cheapest_hotel_inr
+    if budget_scope == BUDGET_SCOPE_EXCLUDES_FLIGHTS:
+        flight = 0.0
+    elif budget_scope == BUDGET_SCOPE_EXCLUDES_FLIGHTS_AND_HOTEL:
+        flight = 0.0
+        hotel = 0.0
+
+    base = flight + hotel + visa_inr + transfer_inr
+    return round(base * (1 + safety_margin_percent / 100), 2)
+
+
+# =============================================================================
+# === BUDGET — party resolution (headcount → adult/child/infant split)
+# =============================================================================
+def resolve_party(
+    *,
+    total_people: int | None = None,
+    adults: int | None = None,
+    children: int = 0,
+    child_ages: list[int] | None = None,
+) -> dict[str, object]:
+    """Turn a loosely-stated headcount into an exact adult/child/infant split.
+
+    Customers say "6 people, 2 kids" — which means 4 ADULTS + 2 children, NOT
+    "6 adults + 2 children". The agent has historically gotten this inverted.
+    This function does the arithmetic deterministically.
+
+    Provide EITHER total_people (and children) — adults are derived as
+    total_people - children — OR an explicit adults count. Infants (under 2)
+    are counted from child_ages and reported separately, since most APIs price
+    them as lap infants.
+
+    Returns a dict with the resolved counts plus a human-readable `summary`
+    the agent should confirm back to the customer before searching.
+
+    Raises ValueError on contradictory input (e.g. more children than people,
+    or child_ages length not matching children).
+    """
+    ages = list(child_ages or [])
+
+    if adults is None:
+        if total_people is None:
+            raise ValueError("Provide either total_people or adults")
+        if children < 0:
+            raise ValueError("children cannot be negative")
+        if children > total_people:
+            raise ValueError(
+                f"children ({children}) cannot exceed total_people ({total_people})"
+            )
+        adults = total_people - children
+    else:
+        if adults < 0 or children < 0:
+            raise ValueError("adults and children cannot be negative")
+        if total_people is not None and total_people != adults + children:
+            raise ValueError(
+                f"total_people ({total_people}) != adults ({adults}) + children ({children})"
+            )
+
+    if adults < 1:
+        raise ValueError("At least one adult is required")
+
+    if ages and len(ages) != children:
+        raise ValueError(
+            f"child_ages length ({len(ages)}) must equal children ({children})"
+        )
+    for a in ages:
+        if not (0 <= a <= 17):
+            raise ValueError(f"Invalid child age: {a} (expected 0-17)")
+
+    infants = sum(1 for a in ages if a < 2)
+    party_total = adults + children
+
+    # Human-readable confirmation line.
+    parts = [f"{adults} adult" + ("s" if adults != 1 else "")]
+    if children:
+        if ages:
+            ages_str = ", ".join(str(a) for a in sorted(ages))
+            parts.append(f"{children} child" + ("ren" if children != 1 else "") + f" (ages {ages_str})")
+        else:
+            parts.append(f"{children} child" + ("ren" if children != 1 else ""))
+    summary = " + ".join(parts) + f" = {party_total} travellers"
+    if infants:
+        summary += f" ({infants} infant" + ("s" if infants != 1 else "") + " under 2)"
+
+    return {
+        "adults": adults,
+        "children": children,
+        "infants": infants,
+        "child_ages": sorted(ages),
+        "party_total": party_total,
+        "billable_for_flights": adults + children,  # infants usually lap-priced separately
+        "summary": summary,
+    }
+
+
+# =============================================================================
+# === PRICING — per-person ↔ group total (applies child age discounts)
+# =============================================================================
+def price_group(
+    *,
+    per_adult_inr: float,
+    adults: int,
+    children: int = 0,
+    child_ages: list[int] | None = None,
+) -> dict[str, object]:
+    """Compute a group total from a per-adult price, applying child discounts.
+
+    Tours / restaurants / visas are quoted per adult. A group of 4 adults +
+    2 children (ages 5, 7) does NOT cost 6x per_adult — children get the
+    age-tier discount (see apply_child_discount / CHILD_AGE_TIERS). This does
+    that multiply-and-sum so the agent never does it by hand.
+
+    Returns adults_subtotal, children_subtotal, the group total, and a per-head
+    breakdown for transparency.
+    """
+    if per_adult_inr < 0:
+        raise ValueError("per_adult_inr cannot be negative")
+    if adults < 0 or children < 0:
+        raise ValueError("adults and children cannot be negative")
+
+    ages = list(child_ages or [])
+    if ages and len(ages) != children:
+        raise ValueError(
+            f"child_ages length ({len(ages)}) must equal children ({children})"
+        )
+
+    adults_subtotal = round(per_adult_inr * adults, 2)
+
+    child_lines: list[dict[str, object]] = []
+    children_subtotal = 0.0
+    # If ages are unknown, fall back to charging children at full adult fare
+    # (conservative — never under-quote). Better to ask for ages.
+    effective_ages = ages if ages else [99] * children
+    for age in effective_ages:
+        price = apply_child_discount(per_adult_inr, age)
+        children_subtotal += price
+        child_lines.append({"age": age if age != 99 else None, "price_inr": round(price, 2)})
+    children_subtotal = round(children_subtotal, 2)
+
+    group_total = round(adults_subtotal + children_subtotal, 2)
+    return {
+        "per_adult_inr": round(per_adult_inr, 2),
+        "adults": adults,
+        "children": children,
+        "adults_subtotal_inr": adults_subtotal,
+        "children_subtotal_inr": children_subtotal,
+        "child_lines": child_lines,
+        "group_total_inr": group_total,
+        "ages_assumed_full_fare": not ages and children > 0,
+    }
+
+
+# =============================================================================
+# === PRICING — hotel room-block cost (rooms x nights)
+# =============================================================================
+def compute_hotel_block_cost(
+    *,
+    per_room_per_night_inr: float,
+    rooms: int,
+    nights: int,
+) -> dict[str, object]:
+    """Total hotel cost for a block of identical rooms over a stay.
+
+    rooms x nights x per-room-per-night. 3 rooms over 3 nights is exactly the
+    kind of small multiply the agent has fumbled — make it a tool call.
+
+    For rooms at DIFFERENT rates, call sum_trip_total with one hotel line per
+    distinct room type instead.
+    """
+    if per_room_per_night_inr < 0:
+        raise ValueError("per_room_per_night_inr cannot be negative")
+    if rooms < 1:
+        raise ValueError("rooms must be at least 1")
+    if nights < 1:
+        raise ValueError("nights must be at least 1")
+
+    per_room_total = round(per_room_per_night_inr * nights, 2)
+    block_total = round(per_room_total * rooms, 2)
+    return {
+        "per_room_per_night_inr": round(per_room_per_night_inr, 2),
+        "rooms": rooms,
+        "nights": nights,
+        "per_room_total_inr": per_room_total,
+        "block_total_inr": block_total,
+    }
+
+
+# =============================================================================
+# === BUDGET — deterministic line-item trip total
+# =============================================================================
+def sum_trip_total(line_items: list[dict[str, object]]) -> dict[str, object]:
+    """Sum named line items into ONE inclusive trip total, deterministically.
+
+    Each line item is {"label": str, "amount_inr": number}. This exists so the
+    agent never adds flights + hotel + tours + transfers + visa in its head
+    (which produced three different totals in one conversation). The returned
+    `total_inr` is the single number to quote.
+    """
+    cleaned: list[dict[str, object]] = []
+    total = 0.0
+    for item in line_items or []:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or "Item")
+        try:
+            amount = float(item.get("amount_inr") or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        amount = round(amount, 2)
+        total += amount
+        cleaned.append({"label": label, "amount_inr": amount})
+    total = round(total, 2)
+    return {
+        "line_items": cleaned,
+        "total_inr": total,
+    }
+
+
+# =============================================================================
 # === BUDGET — selections
 # =============================================================================
 def add_selection(

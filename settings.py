@@ -28,6 +28,17 @@ class BookingApiSettings(BaseSettings):
       - flight_list tenant: GET-flight-details endpoint only
       - flight_search tenant: flight search endpoint only
 
+    Two bearer tokens are used (per the N8N-Technoheven V1 Postman collection):
+      - `token` (main): all booking/search endpoints — visa, restaurant,
+        package, flight, tour, transfer, hotel availability. The collection's
+        main token (agentId 21 / GT-021) carries every serviceType.
+      - `hotel_static_token`: the hotel *static-content* endpoints
+        (GetCitiesWithHotel, GetStaticDataByCity, GetHotelStaticDataOptimize,
+        gethotelstaticdatalistsuboptimize_v1_Address, GetPropertyDescriptions,
+        GetHotelGuestReview). The collection signs these with a separate
+        Hotels-only account (agentId 2 / GT-002) that holds the booking
+        permissions those endpoints require.
+
     These come from the client's Postman collection. If Technoheaven rotates
     them, override via env without touching code.
     """
@@ -37,6 +48,13 @@ class BookingApiSettings(BaseSettings):
         default="https://stagingapi.gujjutours.com", validation_alias="BOOKING_BASE_URL"
     )
     token: str = Field(default="", validation_alias="BOOKING_TOKEN")
+    # Hotel static-content endpoints use a separate Hotels-only account token.
+    # Falls back to the main token when unset so a single-token setup still works.
+    hotel_static_token: str = Field(default="", validation_alias="BOOKING_HOTEL_STATIC_TOKEN")
+
+    def hotel_static_bearer(self) -> str:
+        """Token for hotel static-content endpoints (falls back to main token)."""
+        return self.hotel_static_token or self.token
     tenant_id: str = Field(
         default="A29CD3EE-D050-A34A-3A53-3A20E4FAF5F3",
         validation_alias="BOOKING_TENANT_ID",
@@ -53,6 +71,12 @@ class BookingApiSettings(BaseSettings):
         default="newinstance.activitylinker.com",
         validation_alias="FLIGHT_LIST_CUSTOM_HOST",
     )
+    # The /api/Currency/ROE/{code} endpoint authenticates with an antiforgery
+    # `RequestVerificationToken` header (not the Bearer token) in the Postman
+    # collection. That token expires, so it's configurable via env. When unset,
+    # the ROE call falls back to the Bearer token, and if the call fails entirely
+    # the caller falls back to the manual FX rate in CurrencySettings.
+    roe_verification_token: str = Field(default="", validation_alias="BOOKING_ROE_VERIFICATION_TOKEN")
 
 
 @lru_cache(maxsize=1)
@@ -133,6 +157,10 @@ class CurrencySettings(BaseSettings):
     eur_to_inr: float = Field(default=91.0, validation_alias="EUR_TO_INR")
     gbp_to_inr: float = Field(default=107.0, validation_alias="GBP_TO_INR")
     sgd_to_inr: float = Field(default=63.0, validation_alias="SGD_TO_INR")
+    # Supplier prices arrive mostly in AED; this is the currency whose live ROE
+    # the agent quotes to the (INR) customer. The manual aed_to_inr above is the
+    # fallback when the live /api/Currency/ROE call is unavailable.
+    roe_base_currency: str = Field(default="AED", validation_alias="ROE_BASE_CURRENCY")
 
     def as_rate_map(self) -> dict[str, float]:
         return {
