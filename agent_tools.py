@@ -389,6 +389,91 @@ def compose_customer_payment_summary_tool(
     }
 
 
+@tool
+def generate_itinerary_pdf_tool(
+    destination: str = "Dubai",
+    origin_city: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    nights: int | None = None,
+    party_summary: str = "",
+    customer_name: str = "",
+    reference: str = "",
+    overview: str = "",
+    day_plans: list[dict[str, Any]] | None = None,
+    components: list[dict[str, Any]] | None = None,
+    inclusions: list[str] | None = None,
+    exclusions: list[str] | None = None,
+    total_inr: float | None = None,
+    payment_schedule: list[dict[str, Any]] | None = None,
+    notes: list[str] | None = None,
+) -> dict[str, Any]:
+    """Generate the branded, downloadable itinerary PDF once the customer is happy.
+
+    CALL THIS when the customer confirms they like the plan ("looks good",
+    "send it", "can I get this in writing", "share the itinerary"). It renders
+    the Gujju Tours letterhead (header + footer on every page) with the trip
+    laid out clearly, saves it, and returns a download link.
+
+    Use ONLY real numbers you already obtained from search/pricing tools — never
+    invent figures here. Money fields are INR. Pass `amount_inr: null` for any
+    service that is On Request.
+
+    Args:
+        destination/origin_city/start_date/end_date/nights/party_summary: trip facts.
+        customer_name, reference: optional personalization (quote/booking ref).
+        overview: 1-2 sentence intro to the trip.
+        day_plans: [{"title": "Day 1 - Arrival", "items": ["Pickup", "Check-in"]}].
+        components: priced services
+            [{"label": "Flights (Air India)", "detail": "BOM->DXB return, 2 adults",
+              "amount_inr": 217366}]. amount_inr null => "On Request".
+        inclusions/exclusions/notes: lists of plain strings.
+        total_inr: final all-inclusive total.
+        payment_schedule: [{"label": "Deposit", "amount_inr": 78598,
+                            "due_date_iso": "2026-06-10"}].
+
+    Returns:
+        {itinerary_id, download_url (or None), filename, summary} — share the
+        download link with the customer. On WhatsApp the service attaches the
+        PDF automatically when an itinerary_id is produced.
+    """
+    from itinerary_store import public_url_for, save_itinerary_pdf
+
+    data: dict[str, Any] = {
+        "destination": destination,
+        "origin_city": origin_city,
+        "start_date": start_date,
+        "end_date": end_date,
+        "nights": nights,
+        "party_summary": party_summary,
+        "customer_name": customer_name,
+        "reference": reference,
+        "overview": overview,
+        "day_plans": day_plans or [],
+        "components": components or [],
+        "inclusions": inclusions or [],
+        "exclusions": exclusions or [],
+        "total_inr": total_inr,
+        "payment_schedule": payment_schedule or [],
+        "notes": notes or [],
+    }
+    try:
+        itinerary_id, _path = save_itinerary_pdf(data)
+    except Exception as e:  # never crash the turn over a PDF
+        return {"error": True, "message": f"Could not generate the PDF: {e}"}
+
+    url = public_url_for(itinerary_id)
+    return {
+        "itinerary_id": itinerary_id,
+        "download_url": url,
+        "filename": f"{destination}-itinerary.pdf",
+        "summary": (
+            f"Itinerary PDF ready ({destination}, {party_summary or 'your party'})."
+            + (f" Download: {url}" if url else " Available to download in the app.")
+        ),
+    }
+
+
 # =============================================================================
 # Tool registry — ONE place, ALL tools
 # =============================================================================
@@ -446,6 +531,7 @@ def _build_all_tools() -> list[BaseTool]:
         compute_remaining_budget_tool,
         get_destination_tips_tool,
         compose_customer_payment_summary_tool,
+        generate_itinerary_pdf_tool,
     ]
 
 
