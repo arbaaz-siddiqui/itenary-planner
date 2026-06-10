@@ -42,7 +42,7 @@ from core import (
     VisaOption,
     to_inr,
 )
-from settings import get_currency_settings
+from fx import live_rate_map
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
@@ -88,6 +88,30 @@ def _safe_to_inr(amount: Any, currency: str, rates: dict[str, float]) -> float |
 # bogus pricing without filtering legitimate budget domestic fares.
 FLIGHT_PRICE_INR_FLOOR: int = 8000
 
+# Bogus supplier fares are almost always INR-LABELED and implausibly low — e.g. a
+# DEL↔DXB round-trip for 2 adults coming back as ₹9,206 (₹4,603/adult) or even
+# ₹2,801. A real India↔Gulf round-trip is ~₹18,000+/adult even in low season, so
+# any INR-labeled fare under this PER-ADULT floor is a mislabeled/test fare and is
+# dropped. USD/AED fares (converted via live FX) are trusted and skip this check —
+# the mislabeling only happens on the INR-tagged ones.
+FLIGHT_INR_LABELED_PER_ADULT_FLOOR: int = 12000
+
+
+def _is_bogus_flight(opt: FlightOption) -> bool:
+    """True if the fare looks like supplier test/mislabeled data, not a real fare."""
+    # Whole-party floor (any currency) — catches absurdly low totals.
+    if opt.price_inr < FLIGHT_PRICE_INR_FLOOR:
+        return True
+    # INR-labeled fares are the ones the supplier mislabels; hold them to a
+    # realistic per-adult floor. Converted USD/AED fares are trusted.
+    if opt.currency_original.upper() == "INR":
+        per_adult = opt.price_per_adult_inr
+        if per_adult is None and opt.pax_count > 0:
+            per_adult = opt.price_inr / opt.pax_count
+        if per_adult is not None and per_adult < FLIGHT_INR_LABELED_PER_ADULT_FLOOR:
+            return True
+    return False
+
 
 def parse_flight_response(
     raw: dict[str, Any],
@@ -116,13 +140,13 @@ def parse_flight_response(
     expected_dest_upper = expected_destination.upper() if expected_destination else None
     expected_origin_upper = expected_origin.upper() if expected_origin else None
 
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     options: list[FlightOption] = []
     for item in itineraries:
         opt = _parse_flight_itinerary(item, rates)
         if opt is None:
             continue
-        if opt.price_inr < FLIGHT_PRICE_INR_FLOOR:
+        if _is_bogus_flight(opt):
             continue
         # Drop itineraries to/from the wrong airport
         if expected_dest_upper and opt.segments_outbound:
@@ -157,6 +181,21 @@ def _parse_flight_itinerary(item: dict[str, Any], rates: dict[str, float]) -> Fl
     base_fare_inr = _safe_to_inr(itin.get("baseFare", {}).get("amount"), currency, rates)
     total_tax_inr = _safe_to_inr(itin.get("totalTax", {}).get("amount"), currency, rates)
 
+    # Per-adult fare + total pax come straight from the supplier's per-passenger
+    # breakdown — so we quote a REAL per-person number, never total ÷ pax guessed
+    # by the agent. ptC_FareBreakdowns has one entry per passenger type (ADT/CHD/INF).
+    price_per_adult_inr: float | None = None
+    pax_count = 0
+    for b in pricing.get("ptC_FareBreakdowns") or []:
+        if not isinstance(b, dict):
+            continue
+        ptq = b.get("passengerTypeQuantity") or {}
+        qty = _safe_int(ptq.get("quantity")) or 0
+        pax_count += qty
+        if str(ptq.get("code") or "").upper() == "ADT":
+            adt_fare = (b.get("passengerFare") or {}).get("totalFare") or {}
+            price_per_adult_inr = _safe_to_inr(adt_fare.get("amount"), currency, rates)
+
     od_options = item.get("originDestinationOptions") or []
     segs_out = _parse_segments(od_options[0]) if len(od_options) > 0 else []
     segs_ret = _parse_segments(od_options[1]) if len(od_options) > 1 else []
@@ -188,6 +227,8 @@ def _parse_flight_itinerary(item: dict[str, Any], rates: dict[str, float]) -> Fl
         fare_source_code=str(pricing.get("fareSourceCode") or ""),
         itinerary_source_code=str(item.get("itinerarySourceCode") or ""),
         price_inr=price_inr,
+        price_per_adult_inr=price_per_adult_inr,
+        pax_count=pax_count,
         price_original=float(amount),
         currency_original=str(currency),
         base_fare_inr=base_fare_inr,
@@ -314,7 +355,7 @@ def parse_hotel_response(
         return []
 
     response_currency = rs.get("Currency") or "USD"
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     names = hotel_names or {}
     areas = hotel_areas or {}
 
@@ -449,7 +490,7 @@ def parse_tour_response(
                 if tid is not None:
                     rate_map[tid] = r
 
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     options: list[TourOption] = []
     for t in tour_list:
         opt = _parse_tour(t, rate_map, rates, image_base_url)
@@ -535,7 +576,7 @@ def parse_transfer_response(
     result = raw.get("result")
     if not isinstance(result, list):
         return []
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     options: list[TransferOption] = []
     for t in result:
         opt = _parse_transfer(t, rates, image_base_url)
@@ -600,7 +641,7 @@ def parse_restaurant_response(
     items = result.get("list") if isinstance(result, dict) else None
     if not isinstance(items, list):
         return []
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     options: list[RestaurantOption] = []
     for r in items:
         opt = _parse_restaurant(r, rates, image_base_url)
@@ -673,7 +714,7 @@ def parse_visa_response(raw: dict[str, Any], *, max_results: int | None = None) 
     else:
         visas_list = []
 
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     options: list[VisaOption] = []
     for v in visas_list:
         if not isinstance(v, dict):
@@ -862,7 +903,7 @@ def parse_package_response(
     if not isinstance(list_items, list):
         return []
 
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     out: list[dict[str, Any]] = []
     for p in list_items:
         if not isinstance(p, dict):

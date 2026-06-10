@@ -97,6 +97,11 @@ def _impl(
             "per_night_inr": options[0].per_night_inr if options else None,
             "room_count": room_count,
             "total_results": len(options),
+            "pricing_note": (
+                f"Hotel prices are PER ROOM for the whole {nights}-night stay "
+                f"({room_count} room(s) booked), NOT per person. price_inr is the "
+                "room total; per_night_inr is per room per night. Do not divide by pax."
+            ),
             "search_params": {
                 "destination": destination_city,
                 "check_in": check_in,
