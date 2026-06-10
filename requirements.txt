@@ -19,3 +19,4 @@ twilio>=9.3
 pandas>=2.2
 openpyxl>=3.1
 filelock>=3.15
+fpdf2>=2.7
