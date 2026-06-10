@@ -31,6 +31,18 @@ def fake_today() -> str:
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_fx(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests must never hit the live ROE network call: force the static
+    configured FX rate so conversions are deterministic, and clear the cache.
+    A test that wants to exercise the live path can unset this explicitly.
+    """
+    monkeypatch.setenv("FX_DISABLE_LIVE_ROE", "1")
+    import fx
+
+    fx.clear_fx_cache()
+
+
+@pytest.fixture(autouse=True)
 def _clear_settings_caches() -> None:
     """Make sure @lru_cache'd settings don't leak between tests."""
     from settings import clear_all_caches

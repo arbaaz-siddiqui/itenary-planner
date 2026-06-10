@@ -43,6 +43,39 @@ class TestTokenWiring:
         s = self._settings(token="MAIN", hotel_static_token="")
         assert s.hotel_static_bearer() == "MAIN"
 
+    @staticmethod
+    def _jwt(services: list[str]) -> str:
+        """Build an unsigned JWT with a given serviceType claim (for scope check)."""
+        import base64
+        import json
+
+        hdr = base64.urlsafe_b64encode(b'{"alg":"HS256"}').decode().rstrip("=")
+        pl = base64.urlsafe_b64encode(json.dumps({"serviceType": services}).encode())
+        return f"{hdr}.{pl.decode().rstrip('=')}.sig"
+
+    def test_all_services_token_has_no_missing(self) -> None:
+        from settings import BookingApiSettings
+
+        tok = self._jwt(["Hotels", "Flight", "Packages", "Restaurant", "Transfer", "Visa"])
+        s = BookingApiSettings(_env_file=None, BOOKING_TOKEN=tok)
+        assert s.main_token_missing_services() == []
+
+    def test_activities_only_token_flags_missing(self) -> None:
+        """An Activities-only token (the GT-018 mis-config) must be flagged —
+        it silently returns null for hotels otherwise."""
+        from settings import BookingApiSettings
+
+        s = BookingApiSettings(_env_file=None, BOOKING_TOKEN=self._jwt(["Activities"]))
+        missing = s.main_token_missing_services()
+        assert "Hotels" in missing
+        assert "Flight" in missing
+
+    def test_undecodable_token_does_not_false_alarm(self) -> None:
+        from settings import BookingApiSettings
+
+        assert BookingApiSettings(_env_file=None, BOOKING_TOKEN="not.a.jwt").main_token_missing_services() == []
+        assert BookingApiSettings(_env_file=None, BOOKING_TOKEN="").main_token_missing_services() == []
+
     def test_hotel_static_headers_use_hotel_token(self, monkeypatch: Any) -> None:
         import booking_api.headers as headers
 
