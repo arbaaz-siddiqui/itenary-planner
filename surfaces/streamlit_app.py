@@ -60,6 +60,9 @@ def _init_session() -> None:
     st.session_state.setdefault("itinerary_id", None)
     # Set when the user clicks "Generate PDF" so the next run asks the agent.
     st.session_state.setdefault("pdf_request_pending", False)
+    # Last search options rendered as cards ({kind, options}), so a follow-up
+    # like "show me the images" can re-display them without a fresh search.
+    st.session_state.setdefault("last_search", {})
     st.session_state.setdefault("turn_number", 0)
 
 
@@ -71,7 +74,20 @@ CARD_TRIGGER_RE = re.compile(
     r"(flights?|hotels?|tours?|transfers?|restaurants?|visa\s+options?)\s*:",
     re.IGNORECASE,
 )
-USER_DISPLAY_KEYWORDS = ("show me", "list", "compare", "any options", "what are the options")
+USER_DISPLAY_KEYWORDS = (
+    "show me",
+    "list",
+    "compare",
+    "any options",
+    "what are the options",
+    "render",
+    "show the image",
+    "show image",
+    "show pic",
+    "show photo",
+    "with image",
+    "see the image",
+)
 
 
 def _should_render_cards(user_text: str, agent_text: str) -> bool:
@@ -79,6 +95,18 @@ def _should_render_cards(user_text: str, agent_text: str) -> bool:
         return True
     t = (user_text or "").lower()
     return any(kw in t for kw in USER_DISPLAY_KEYWORDS)
+
+
+def _display_signal(tool_calls: list[dict[str, Any]]) -> str | None:
+    """If the agent called display_options_tool this turn, return the requested
+    kind (e.g. 'tour'). This is the explicit, production path for showing cards —
+    the keyword/regex detection above is only a fallback."""
+    for tc in tool_calls:
+        if tc.get("tool_name") == "display_options_tool":
+            out = _coerce_output(tc.get("output"))
+            if isinstance(out, dict) and out.get("display") and out.get("kind"):
+                return str(out["kind"])
+    return None
 
 
 # A rupee amount with at least 3 digits (e.g. ₹2,83,844 or ₹104934) — used to
@@ -141,7 +169,9 @@ def _render_tour(o: dict[str, Any]) -> None:
     with st.container(border=True):
         if o.get("image_url"):
             try:
-                st.image(o["image_url"], use_container_width=True)
+                # Fixed small width — NOT use_container_width (that stretches to
+                # the full card and overrides width, making the image huge).
+                st.image(o["image_url"], width=300)
             except Exception:
                 pass
         c1, c2 = st.columns([3, 1])
@@ -644,13 +674,35 @@ def _process_message(user_message: str) -> None:
             }
         )
 
+        # Always remember this turn's search results so a later "show me the
+        # images" can re-display them without a fresh search.
+        search = extract_search_options(result.response)
+        if search.get("options"):
+            st.session_state.last_search = {
+                "kind": search["kind"],
+                "options": search["options"],
+            }
+
+        # Decide whether to render cards, and of which kind:
+        #  1) explicit display_options_tool call (production path), else
+        #  2) keyword/regex heuristic (fallback).
         cards_payload: dict[str, Any] = {}
-        if _should_render_cards(user_message, assistant_text):
-            search = extract_search_options(result.response)
-            if search.get("options"):
-                cards_payload = {"kind": search["kind"], "options": search["options"]}
-                for opt in search["options"]:
-                    _render_option(search["kind"], opt)
+        signal_kind = _display_signal(tool_calls)
+        render = bool(signal_kind) or _should_render_cards(user_message, assistant_text)
+        if render:
+            if search.get("options") and (not signal_kind or signal_kind == search["kind"]):
+                kind, options = search["kind"], search["options"]
+            else:
+                # Reuse the last rendered set (e.g. "show the images" after a
+                # prior tour search) — prefer the kind the agent asked to show.
+                last = st.session_state.get("last_search") or {}
+                kind, options = last.get("kind"), last.get("options") or []
+                if signal_kind and kind and signal_kind != kind:
+                    options = []  # asked for a kind we have no results for
+            if options and kind:
+                cards_payload = {"kind": kind, "options": options}
+                for opt in options:
+                    _render_option(kind, opt)
 
         st.session_state.chat_history.append(
             {
