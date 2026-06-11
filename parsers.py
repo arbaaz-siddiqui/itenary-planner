@@ -344,6 +344,7 @@ def parse_hotel_response(
     nights: int,
     hotel_names: dict[str, str] | None = None,
     hotel_areas: dict[str, str] | None = None,
+    hotel_stars: dict[str, float] | None = None,
     max_results: int | None = None,
 ) -> list[HotelOption]:
     if not isinstance(raw, dict):
@@ -358,10 +359,11 @@ def parse_hotel_response(
     rates = live_rate_map()
     names = hotel_names or {}
     areas = hotel_areas or {}
+    star_map = hotel_stars or {}
 
     options: list[HotelOption] = []
     for h in hotel_results:
-        opt = _parse_hotel(h, nights, response_currency, rates, names, areas)
+        opt = _parse_hotel(h, nights, response_currency, rates, names, areas, star_map)
         if opt is not None:
             options.append(opt)
     options.sort(key=lambda o: o.price_inr)
@@ -375,6 +377,7 @@ def _parse_hotel(
     rates: dict[str, float],
     names: dict[str, str],
     areas: dict[str, str],
+    star_map: dict[str, float] | None = None,
 ) -> HotelOption | None:
     if not isinstance(h, dict):
         return None
@@ -386,7 +389,11 @@ def _parse_hotel(
     area = areas.get(hotel_id_str, "")
 
     start_price = float(h.get("StartPrice") or 0)
+    # The availability API does NOT return star ratings (sends 0). Fall back to
+    # the reference-data stars so the star filter actually works.
     stars = float(h.get("StarRating") or 0)
+    if stars <= 0 and star_map:
+        stars = float(star_map.get(hotel_id_str, 0) or 0)
 
     rooms: list[HotelRoom] = []
     for opt in h.get("HotelOption") or []:
