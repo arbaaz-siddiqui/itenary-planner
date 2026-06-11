@@ -325,6 +325,34 @@ def get_destination_tips_tool(destination: str = "Dubai") -> dict[str, Any]:
     return {"destination": destination, **tips}
 
 
+_DISPLAYABLE_KINDS = {"flight", "hotel", "tour", "transfer", "restaurant", "visa", "package"}
+
+
+@tool
+def display_options_tool(kind: str) -> dict[str, Any]:
+    """Render the most recent search results for `kind` as visual cards (with
+    images where available) in the web UI.
+
+    Call this when the customer asks to SEE the options visually — "show me",
+    "render the images", "show with pictures", "let me see them", etc. It does
+    not fetch anything; it tells the web surface to display the cards from the
+    latest matching search. On WhatsApp (no UI) it is a harmless no-op.
+
+    Args:
+        kind: one of flight, hotel, tour, transfer, restaurant, visa, package.
+
+    Returns a `{display: True, kind}` signal the web app reads. You still write a
+    short text reply; do NOT paste raw image URLs — the cards show the images.
+    """
+    k = (kind or "").strip().lower().rstrip("s")  # tolerate "tours" -> "tour"
+    if k not in _DISPLAYABLE_KINDS:
+        return {
+            "error": True,
+            "message": f"Cannot display {kind!r}. Supported: {sorted(_DISPLAYABLE_KINDS)}",
+        }
+    return {"display": True, "kind": k}
+
+
 @tool
 def compose_customer_payment_summary_tool(
     total_inr_inclusive: float,
@@ -532,6 +560,7 @@ def _build_all_tools() -> list[BaseTool]:
         get_destination_tips_tool,
         compose_customer_payment_summary_tool,
         generate_itinerary_pdf_tool,
+        display_options_tool,
     ]
 
 
