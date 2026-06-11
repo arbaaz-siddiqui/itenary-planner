@@ -15,6 +15,7 @@ from reference_data_loader import (
     get_hotel_areas,
     get_hotel_ids_for_city,
     get_hotel_names,
+    get_hotel_stars,
     resolve_city,
 )
 
@@ -87,9 +88,30 @@ def _impl(
             nights=nights,
             hotel_names=get_hotel_names(city_key),
             hotel_areas=get_hotel_areas(city_key),
+            hotel_stars=get_hotel_stars(city_key),
             max_results=max_results * 2,
         )
-        options = [o for o in options if min_stars <= o.stars <= max_stars][:max_results]
+        # Filter by stars, but NEVER drop a hotel whose rating is unknown (0):
+        # the availability API omits stars, so an unknown rating must not be
+        # treated as "below min" — that silently zeroed out all results before.
+        before_star_filter = list(options)
+        options = [
+            o for o in options if o.stars <= 0 or min_stars <= o.stars <= max_stars
+        ][:max_results]
+
+        # If the star filter emptied a non-empty result set, tell the agent the
+        # real available star tiers so it can offer them instead of showing 0.
+        note = None
+        if not options and before_star_filter:
+            avail_stars = sorted({o.stars for o in before_star_filter if o.stars > 0})
+            if avail_stars:
+                tiers = ", ".join(f"{int(s)}-star" for s in avail_stars)
+                note = (
+                    f"No hotels matched {int(min_stars)}-{int(max_stars)} star. "
+                    f"Available star tiers for this city/dates: {tiers}. "
+                    "Offer the customer these instead of saying nothing is available."
+                )
+
         return {
             "options": [o.model_dump() for o in options],
             "cheapest_price_inr": options[0].price_inr if options else None,
@@ -97,6 +119,7 @@ def _impl(
             "per_night_inr": options[0].per_night_inr if options else None,
             "room_count": room_count,
             "total_results": len(options),
+            **({"note": note} if note else {}),
             "pricing_note": (
                 f"Hotel prices are PER ROOM for the whole {nights}-night stay "
                 f"({room_count} room(s) booked), NOT per person. price_inr is the "

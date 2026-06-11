@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import sys
 import time
@@ -477,8 +478,16 @@ def stream_and_log(
             node = (metadata or {}).get("langgraph_node")
             if node and node != "agent":
                 continue
+            # Skip text that rides along with a tool-call chunk. Some models
+            # (e.g. Mistral) emit tool-invocation scaffolding as plain text —
+            # "search_hotels{...} // Retry with broader search",
+            # "enumerate_package_details{}" — which must NOT leak into the
+            # customer-facing reply. The real answer streams in the FINAL agent
+            # message, which has no tool_calls.
+            if _safe_attr(msg_chunk, "tool_calls") or _safe_attr(msg_chunk, "tool_call_chunks"):
+                continue
             token = _token_text(msg_chunk)
-            if token:
+            if token and not _looks_like_tool_scaffolding(token):
                 holder.text += token
                 yield token
         elif mode == "updates":
@@ -498,6 +507,26 @@ def stream_and_log(
         latency_seconds=holder.latency_seconds,
         turn_number=turn_number,
     )
+
+
+# Tool-call scaffolding some models leak as plain text, e.g.
+# `search_hotels{"destination_city": ...}`, `// Retry with broader search`,
+# `enumerate_package_details{}`. A token matching this is internal, not a reply.
+_TOOL_NAMES_RE = re.compile(
+    r"\b(search_flights|search_hotels|search_tours|search_restaurants|get_visa_info|"
+    r"list_packages|get_exchange_rate|resolve_party_tool|check_floor_tool|"
+    r"search_airport_transfer_dubai|enumerate_package_details|generate_itinerary_pdf"
+    r"|[a-z_]+_tool)\s*\{",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_tool_scaffolding(token: str) -> bool:
+    """True if a streamed token is leaked tool-call syntax, not a real reply."""
+    t = token.strip()
+    if not t:
+        return False
+    return bool(_TOOL_NAMES_RE.search(t)) or t.startswith("//")
 
 
 def _token_text(msg_chunk: Any) -> str:
