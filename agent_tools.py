@@ -515,6 +515,8 @@ def _build_all_tools() -> list[BaseTool]:
     from mcp_tools.get_package_details import get_package_details_tool
     from mcp_tools.get_restaurant_details import get_restaurant_details_tool
     from mcp_tools.get_tour_details import get_tour_details_tool
+    from mcp_tools.get_tour_option_details import get_tour_option_details_tool
+    from mcp_tools.get_tour_options import get_tour_options_tool
     from mcp_tools.get_transfer_details import get_transfer_details_tool
     from mcp_tools.get_visa_info import get_visa_info_tool
     from mcp_tools.list_city_hotels import list_city_hotels_tool
@@ -539,6 +541,8 @@ def _build_all_tools() -> list[BaseTool]:
         # Detail tools (MCP-exposed)
         get_flight_details_tool,
         get_tour_details_tool,
+        get_tour_options_tool,
+        get_tour_option_details_tool,
         get_transfer_details_tool,
         get_restaurant_details_tool,
         get_package_details_tool,

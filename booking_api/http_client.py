@@ -281,3 +281,19 @@ def get_client() -> BookingApiClient:
         timeout_secs=http.timeout_secs,
         max_retries=http.max_retries,
     )
+
+
+@lru_cache(maxsize=1)
+def get_b2c_client() -> BookingApiClient:
+    """Client for the B2C host (stagingb2c.gujjutours.com). Same token + retry
+    behaviour as the main client, different base URL. Used by the B2C tour
+    endpoints (options, price-check calendar, option details)."""
+    booking = get_booking_api_settings()
+    http = get_http_settings()
+    return BookingApiClient(
+        base_url=booking.b2c_base_url,
+        token=booking.token,
+        tenant_id=booking.tenant_id,
+        timeout_secs=http.timeout_secs,
+        max_retries=http.max_retries,
+    )

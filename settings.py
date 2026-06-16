@@ -47,6 +47,11 @@ class BookingApiSettings(BaseSettings):
     base_url: str = Field(
         default="https://stagingapi.gujjutours.com", validation_alias="BOOKING_BASE_URL"
     )
+    # Some tour endpoints (options, price calendar, option details) live on the
+    # B2C host, not the main B2B api host. Separate base URL, same Bearer token.
+    b2c_base_url: str = Field(
+        default="https://stagingb2c.gujjutours.com", validation_alias="BOOKING_B2C_BASE_URL"
+    )
     token: str = Field(default="", validation_alias="BOOKING_TOKEN")
     # Hotel static-content endpoints use a separate Hotels-only account token.
     # Falls back to the main token when unset so a single-token setup still works.
