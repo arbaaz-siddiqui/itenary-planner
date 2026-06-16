@@ -1019,11 +1019,15 @@ def _unwrap_result(raw: Any) -> Any:
     """Peel the common response envelope to the meaningful payload.
 
     Hotel-static endpoints variously nest the body under Result/result/Data/
-    Response. Returns the innermost recognized payload, else the input.
+    Response, or under `raw` (our http_client wraps a top-level JSON LIST as
+    {"raw": [...]}, which is exactly how GetCitiesWithHotel / GetStaticDataByCity
+    return their arrays). Returns the innermost recognized payload, else input.
     """
     if not isinstance(raw, dict):
         return raw
-    payload = _first_present(raw, "Result", "result", "Data", "data", "Response", "response")
+    payload = _first_present(
+        raw, "Result", "result", "Data", "data", "Response", "response", "raw"
+    )
     return payload if payload is not None else raw
 
 
@@ -1043,13 +1047,25 @@ def parse_hotel_cities_response(
     for c in cities:
         if not isinstance(c, dict):
             continue
-        city_id = _safe_int(_first_present(c, "CityID", "CityId", "cityId", "cityid"))
+        # Real GetCitiesWithHotel item shape (June 2026):
+        #   {Id: 244520, LocationId: "6053839", FullName: "...", Type: "city",
+        #    Name: "Dubai", Rank: 5}
+        # The numeric `Id` IS the CityID used by HotelSearch; `LocationId` +
+        # `Type` feed GetStaticDataByCity. Accept the legacy CityID keys too.
+        city_id = _safe_int(_first_present(c, "CityID", "CityId", "cityId", "cityid", "Id", "id"))
         if city_id is None:
             continue
         out.append(
             {
                 "city_id": city_id,
-                "city_name": str(_first_present(c, "CityName", "cityName", "name") or "").strip(),
+                "location_id": str(
+                    _first_present(c, "LocationId", "locationId", "LocationID") or ""
+                ).strip(),
+                "type": str(_first_present(c, "Type", "type") or "").strip(),
+                "city_name": str(
+                    _first_present(c, "CityName", "cityName", "Name", "name") or ""
+                ).strip(),
+                "full_name": str(_first_present(c, "FullName", "fullName") or "").strip(),
                 "country_name": str(
                     _first_present(c, "CountryName", "countryName", "country") or ""
                 ).strip(),
@@ -1073,8 +1089,17 @@ def parse_hotel_static_data_response(
     if not isinstance(raw, dict):
         raise HotelStaticNormalizationError("Expected dict response", missing_field="root")
     payload = _unwrap_result(raw)
+    # Real shapes: GetHotelStaticDataOptimize -> {"PropertyInfo": [...]},
+    # gethotelstaticdatalistsuboptimize_v1_Address -> {"PropertyAddressInfo": [...]}.
     hotels = _first_present(
-        payload, "Hotels", "HotelList", "HotelStaticData", "hotels", "list"
+        payload,
+        "Hotels",
+        "HotelList",
+        "HotelStaticData",
+        "PropertyInfo",
+        "PropertyAddressInfo",
+        "hotels",
+        "list",
     )
     if hotels is None and isinstance(payload, list):
         hotels = payload
@@ -1109,6 +1134,13 @@ def _parse_hotel_static_record(h: Any) -> dict[str, Any] | None:
         country = str(_first_present(h, "Country", "country") or "")
         latitude = _first_present(h, "Latitude", "latitude")
         longitude = _first_present(h, "Longitude", "longitude")
+    # Flat shape (HotelPropertyInfo / PropertyAddressInfo): hotel_address + lat/long
+    if not full_address:
+        full_address = _strip_html(_first_present(h, "hotel_address", "HotelAddress"))
+    if latitude is None:
+        latitude = _first_present(h, "lat", "Lat")
+    if longitude is None:
+        longitude = _first_present(h, "long", "Long", "lng")
 
     facilities = _first_present(h, "Facilities", "Amenities", "facilities", "amenities") or []
     if isinstance(facilities, str):
