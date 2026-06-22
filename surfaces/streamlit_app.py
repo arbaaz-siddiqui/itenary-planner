@@ -586,6 +586,106 @@ def _render_sidebar() -> None:
 
 
 # =============================================================================
+# Voice tab — place a call + see the full per-call trace
+# =============================================================================
+def _render_voice_tab() -> None:
+    st.subheader("📞 Voice agent")
+    st.caption(
+        "Enter a phone number and place a call. The voice agent (Vapi + Indian "
+        "voice) talks to the caller using THIS planner as its brain. Below you can "
+        "see exactly what was said and which booking APIs were called."
+    )
+
+    try:
+        import voice_service
+    except Exception as e:  # noqa: BLE001
+        st.error(f"voice_service unavailable: {e}")
+        return
+
+    if not voice_service.VAPI_API_KEY:
+        st.warning(
+            "VAPI not configured. Set VAPI_API_KEY / VAPI_ASSISTANT_ID / "
+            "VAPI_PHONE_NUMBER_ID in .env. The voice service must also be running "
+            "and reachable by Vapi via ngrok."
+        )
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        number = st.text_input(
+            "Phone number", value="+91", key="voice_number",
+            help="E.g. +918881310786 or a bare 10-digit Indian number.",
+        )
+    with col2:
+        st.write("")
+        st.write("")
+        get_call = st.button("📞 Get a call", type="primary", use_container_width=True)
+
+    # The voice SERVICE (uvicorn, the URL Vapi hits) runs as a separate process,
+    # so the live trace lives there. Fetch it over HTTP, not from our own import.
+    import os as _os
+
+    svc_url = _os.getenv("VOICE_SERVICE_URL", "http://127.0.0.1:8100")
+
+    if get_call:
+        res = voice_service.place_call(number)
+        if res.get("error"):
+            st.error(f"Call failed: {res['error']}")
+        else:
+            st.success(
+                f"Calling {res.get('number')} now (status: {res.get('status')}). "
+                "Pick up — your phone should ring within a few seconds."
+            )
+
+    st.divider()
+    st.markdown("##### 🔎 Call trace (live)")
+    st.caption(f"Reading trace from the voice service at {svc_url}")
+    if st.button("🔄 Refresh trace"):
+        st.rerun()
+
+    traces: dict[str, Any] = {}
+    try:
+        import urllib.request as _u
+
+        with _u.urlopen(f"{svc_url}/trace", timeout=4) as r:
+            traces = json.loads(r.read().decode())
+    except Exception as e:  # noqa: BLE001
+        st.warning(
+            f"Couldn't reach the voice service /trace at {svc_url} ({e}). "
+            "Is it running? (uvicorn voice_service:app --port 8100)"
+        )
+        return
+    if not traces:
+        st.info("No calls yet. Place a call above, talk to the agent, then refresh.")
+        return
+
+    # Most-recent session first.
+    for session_id, turns in reversed(list(traces.items())):
+        with st.expander(f"Call `{session_id}` — {len(turns)} turns", expanded=True):
+            for i, turn in enumerate(turns, 1):
+                st.markdown(f"**Turn {i}**  ·  _{turn.get('latency_s')}s_")
+                st.markdown(f"🧑 **Caller:** {turn.get('user', '')}")
+                st.markdown(f"🤖 **Agent:** {turn.get('agent', '')}")
+                tools = turn.get("tools") or []
+                if tools:
+                    for t in tools:
+                        st.caption(f"🛠️ tool: `{t.get('tool')}`  input: `{t.get('input')}`")
+                        with st.popover("output"):
+                            st.code(str(t.get("output", ""))[:1500])
+                calls = turn.get("api_calls") or []
+                if calls:
+                    st.caption("🌐 booking APIs called this turn:")
+                    for c in calls:
+                        ep = c.get("url", "").split("gujjutours.com")[-1] or c.get("url", "")
+                        st.caption(
+                            f"   {c.get('method')} {ep} → "
+                            f"{c.get('status_code')} ({c.get('duration_ms')} ms)"
+                        )
+                else:
+                    st.caption("🌐 no booking API calls this turn (conversational only)")
+                st.divider()
+
+
+# =============================================================================
 # Chat
 # =============================================================================
 def _coerce_output(output: Any) -> Any:
@@ -747,39 +847,46 @@ _render_sidebar()
 st.title("🏖️ Dubai Trip Planner")
 st.caption(f"Powered by {describe_current_provider()} · streaming on")
 
-# Empty-state hint so the chat doesn't look broken before the first message.
-if not st.session_state.chat_history:
-    st.info(
-        "👋 Tell me about your Dubai trip — origin city, dates/nights, who's "
-        "travelling, and your budget. Every API and tool call shows live in the "
-        "**🔧 Debug** sidebar so you can see exactly what data each answer is built on.",
-        icon="🧭",
-    )
+chat_tab, voice_tab = st.tabs(["💬 Chat", "📞 Voice"])
 
-# Replay chat history
-for entry in st.session_state.chat_history:
-    with st.chat_message(entry.get("role", "assistant")):
-        st.markdown(entry.get("content", ""))
-        cards = entry.get("cards") or {}
-        kind = cards.get("kind")
-        options = cards.get("options") or []
-        if kind and options:
-            for opt in options:
-                _render_option(kind, opt)
+with chat_tab:
+    # Empty-state hint so the chat doesn't look broken before the first message.
+    if not st.session_state.chat_history:
+        st.info(
+            "👋 Tell me about your Dubai trip — origin city, dates/nights, who's "
+            "travelling, and your budget. Every API and tool call shows live in the "
+            "**🔧 Debug** sidebar so you can see exactly what data each answer is built on.",
+            icon="🧭",
+        )
 
-# "Generate itinerary PDF" button: ask the agent to build it from the confirmed
-# trip details using the generate_itinerary_pdf tool (real, tool-sourced numbers).
-if st.session_state.get("pdf_request_pending"):
-    st.session_state.pdf_request_pending = False
-    _process_message(
-        "Please generate the itinerary PDF now using the trip details we've "
-        "confirmed (origin, dates, party, the flights/hotel/tours/visa we "
-        "discussed, the total, and the payment schedule). Call the "
-        "generate_itinerary_pdf tool with the real numbers — do not invent any."
-    )
-    st.rerun()
+    # Replay chat history
+    for entry in st.session_state.chat_history:
+        with st.chat_message(entry.get("role", "assistant")):
+            st.markdown(entry.get("content", ""))
+            cards = entry.get("cards") or {}
+            kind = cards.get("kind")
+            options = cards.get("options") or []
+            if kind and options:
+                for opt in options:
+                    _render_option(kind, opt)
 
-# Chat input — the single entry point now that Quickstart is gone.
+    # "Generate itinerary PDF" button: build from confirmed trip details using
+    # the generate_itinerary_pdf tool (real, tool-sourced numbers).
+    if st.session_state.get("pdf_request_pending"):
+        st.session_state.pdf_request_pending = False
+        _process_message(
+            "Please generate the itinerary PDF now using the trip details we've "
+            "confirmed (origin, dates, party, the flights/hotel/tours/visa we "
+            "discussed, the total, and the payment schedule). Call the "
+            "generate_itinerary_pdf tool with the real numbers — do not invent any."
+        )
+        st.rerun()
+
+with voice_tab:
+    _render_voice_tab()
+
+# Chat input — must be at top level (Streamlit requires st.chat_input outside
+# tabs/columns). It drives the Chat tab.
 user_input = st.chat_input("Ask me anything about your Dubai trip…")
 if user_input:
     _process_message(user_input)
