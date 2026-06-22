@@ -103,6 +103,8 @@ def load_system_prompt(*, surface: str = "streamlit") -> str:
     ]
     if surface == "whatsapp":
         parts.extend(["", _load_prompt("whatsapp_addendum.md").rstrip()])
+    elif surface == "voice":
+        parts.extend(["", _load_prompt("voice_addendum.md").rstrip()])
     return "\n".join(parts)
 
 
@@ -396,7 +398,17 @@ def invoke_and_log(
     user_message: str,
     turn_number: int = 0,
 ) -> dict[str, Any]:
-    config = {"configurable": {"thread_id": thread_id}}
+    config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+    # On a live phone call, latency is the enemy: a long ReAct loop (many
+    # tool calls) means dead air and the call drops. Cap the loop so a voice
+    # turn can't spiral into a dozen LLM round-trips. ~8 graph steps ≈ 3-4 tool
+    # calls, which keeps a turn under ~15s.
+    if surface == "voice":
+        # ~12 graph steps ≈ 5-6 tool calls: enough to complete ONE real booking
+        # search (resolve party + search + maybe enrich) without spiralling into
+        # the 16-step loops that blew the call's latency budget. Too low (e.g. 8)
+        # cuts the search off before it can hit the booking API at all.
+        config["recursion_limit"] = 12
     start = time.perf_counter()
     response = agent.invoke({"messages": [{"role": "user", "content": user_message}]}, config)
     latency = time.perf_counter() - start

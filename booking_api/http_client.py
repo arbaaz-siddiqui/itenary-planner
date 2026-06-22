@@ -123,10 +123,9 @@ class BookingApiClient:
             attempt += 1
             req_start = time.perf_counter()
             try:
-                logger.info(
-                    "booking_api request",
-                    extra={"method": method, "path": path, "attempt": attempt},
-                )
+                # Plainly visible in the terminal so you can TRACE exactly which
+                # booking API the agent hit on each turn (no assumptions).
+                logger.info("[BOOKING-API] --> %s %s (attempt %d)", method, path, attempt)
                 response = self.session.request(
                     method=method,
                     url=url,
@@ -168,12 +167,15 @@ class BookingApiClient:
                 continue
 
             sc = response.status_code
+            elapsed_ms = (time.perf_counter() - req_start) * 1000
             record_http_request(
                 method=method,
                 url=url,
                 status_code=sc,
-                duration_ms=(time.perf_counter() - req_start) * 1000,
+                duration_ms=elapsed_ms,
             )
+            # Trace the result so you can confirm the call really happened + succeeded.
+            logger.info("[BOOKING-API] <-- %s %s [%d ms]", sc, path, int(elapsed_ms))
             if sc == 401:
                 raise BookingApiUnauthorized(
                     f"401 Unauthorized for {path}",
