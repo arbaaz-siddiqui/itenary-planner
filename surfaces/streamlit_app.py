@@ -597,6 +597,12 @@ def _render_voice_tab() -> None:
     )
 
     try:
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        _root = str(_Path(__file__).resolve().parent.parent)
+        if _root not in _sys.path:
+            _sys.path.insert(0, _root)
         import voice_service
     except Exception as e:  # noqa: BLE001
         st.error(f"voice_service unavailable: {e}")
