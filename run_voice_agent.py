@@ -154,27 +154,54 @@ def tail_planner_log() -> None:
             print("\n(stopped watching)")
 
 
+def _normalize(num: str) -> str:
+    num = num.strip().replace(" ", "").replace("-", "")
+    if not num:
+        return ""
+    if num.startswith("+"):
+        return num
+    # bare 10-digit Indian number -> +91
+    digits = re.sub(r"\D", "", num)
+    if len(digits) == 10:
+        return f"+91{digits}"
+    return f"+{digits}"
+
+
 def main() -> None:
     args = sys.argv[1:]
-    number = DEFAULT_NUMBER
+    number = ""
     do_call = True
+    watch = True
     for a in args:
         if a == "--no-call":
             do_call = False
-        elif a.startswith("+") or a.isdigit():
-            number = a if a.startswith("+") else f"+{a}"
+        elif a == "--no-watch":
+            watch = False
+        elif a.startswith("+") or a.replace(" ", "").replace("-", "").isdigit():
+            number = _normalize(a)
 
     services_ok = check_services()
     if not services_ok:
         print("\nFix the [DOWN] services above, then re-run.")
-        if not do_call:
-            return
-        print("(Calling anyway — it will fail if the chain is broken.)")
 
     if do_call:
+        # Ask for the number if not given on the command line — call ANY number.
+        if not number:
+            try:
+                entered = input(
+                    f"\nNumber to call [Enter for {DEFAULT_NUMBER}]: "
+                ).strip()
+            except EOFError:
+                entered = ""
+            number = _normalize(entered) if entered else DEFAULT_NUMBER
         place_call(number)
 
-    tail_planner_log()
+    if watch:
+        tail_planner_log()
+
+
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":
