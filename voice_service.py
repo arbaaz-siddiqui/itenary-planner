@@ -90,7 +90,14 @@ def place_call(number: str, *, schedule_unix: int | None = None) -> dict[str, An
     req = urllib.request.Request(
         "https://api.vapi.ai/call/phone",
         data=json.dumps(body).encode(),
-        headers={"Authorization": f"Bearer {VAPI_API_KEY}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {VAPI_API_KEY}",
+            "Content-Type": "application/json",
+            # Vapi sits behind Cloudflare, which 403s urllib's default
+            # "Python-urllib/x" UA. A normal UA gets through (curl works for the
+            # same reason — its UA isn't blocked).
+            "User-Agent": "trip-planner-voice/1.0",
+        },
         method="POST",
     )
     try:
