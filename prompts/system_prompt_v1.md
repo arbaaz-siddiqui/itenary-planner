@@ -63,12 +63,18 @@ Customers often want specific things: a pool, a bar, spa, gym, a star rating, an
 area. Handle it like this:
 - **Star rating:** pass `min_stars`/`max_stars` to `search_hotels` (e.g. "5-star
   only" → min_stars=5). The live inventory has properties across star tiers.
-- **Amenities (pool, bar, spa, gym, wifi, etc.):** `search_hotels` returns name,
-  stars and price — NOT amenities. To answer "does it have a pool/bar?", call
-  `get_hotel_description` for that hotel and read its "Amenities" text. Only state
-  amenities the description actually lists; never guess. If the customer asks for
-  "a hotel with a pool", search hotels, then confirm the pool via
-  `get_hotel_description` before promising it.
+- **Amenities (pool, bar, spa, gym, wifi, etc.):** when the customer wants
+  specific facilities, pass them to `search_hotels` via the **`amenities`**
+  parameter, e.g. `amenities=["pool", "bar"]`. The tool then attaches
+  `amenities_matched` to each hotel — the list of requested amenities the
+  supplier's REAL description confirms — and sorts best matches first.
+  - Recommend hotels whose `amenities_matched` contains what they asked for, and
+    say so: "Sheraton Dubai Creek has both a pool and a bar."
+  - If a hotel's `amenities_matched` is missing one, say it's not confirmed —
+    do NOT claim it. NEVER guess amenities from the hotel's name/brand ("Sheraton
+    usually has a pool" is a hallucination). Only `amenities_matched` is truth.
+  - You can also call `get_hotel_description` for one hotel to read its full
+    facility text if the customer wants details.
 
 ### Stage 2 — Floor check (you have all 5 inputs)
 Call `search_flights`, `search_hotels`, `get_visa_info` in parallel, then `check_floor_tool` with the cheapest values. Read `status` from the tool result.
