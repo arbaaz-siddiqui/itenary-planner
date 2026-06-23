@@ -1,0 +1,9 @@
+# Trip Planner — off-white "desert sand + oasis" theme.
+# ground #F6F3EE, warm near-black text, terracotta primary, teal secondary.
+[theme]
+base = "light"
+primaryColor = "#E07A3F"
+backgroundColor = "#F6F3EE"
+secondaryBackgroundColor = "#FBF9F5"
+textColor = "#2A2622"
+font = "sans serif"

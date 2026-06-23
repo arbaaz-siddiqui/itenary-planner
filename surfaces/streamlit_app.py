@@ -39,6 +39,14 @@ from llm import describe_current_provider
 configure_logging(prod=False)
 st.set_page_config(page_title="Dubai Trip Planner", page_icon="🏖️", layout="wide")
 
+# Visual identity: off-white "desert sand + oasis" theme, glass floating navbar,
+# Fraunces/Inter type, soft image-rich cards. (surfaces/ui_theme.py)
+try:
+    from surfaces.ui_theme import inject_theme, placeholder_tile_html
+except ImportError:  # when run as `streamlit run surfaces/streamlit_app.py`
+    from ui_theme import inject_theme, placeholder_tile_html
+inject_theme()
+
 
 def _init_session() -> None:
     if "agent" not in st.session_state:
@@ -147,22 +155,35 @@ def _render_flight(o: dict[str, Any]) -> None:
 
 def _render_hotel(o: dict[str, Any]) -> None:
     with st.container(border=True):
-        c1, c2 = st.columns([3, 1])
-        with c1:
-            star_str = "⭐" * int(o.get("stars", 0))
-            st.markdown(f"**🏨 {o.get('hotel_name') or 'Hotel'}** {star_str}")
-            if o.get("area"):
-                st.caption(f"📍 {o['area']}")
-            if o.get("cheapest_room_type"):
-                st.caption(f"Room: {o['cheapest_room_type']}")
-            if o.get("cheapest_board"):
-                st.caption(f"Board: {o['cheapest_board']}")
-            if o.get("has_free_cancellation"):
-                st.caption("✓ Free cancellation")
-        with c2:
-            st.markdown(f"### {format_inr(o.get('price_inr', 0))}")
-            nights = o.get("nights", 0)
-            st.caption(f"{nights} nights · {format_inr(o.get('per_night_inr', 0))}/night")
+        name = o.get("hotel_name") or "Hotel"
+        stars = int(o.get("stars", 0) or 0)
+        # Supplier API has no hotel photos — show an elegant gradient tile (never
+        # a fake photo), keeping the layout image-rich and consistent with tours.
+        img_col, body_col = st.columns([1, 2])
+        with img_col:
+            st.markdown(
+                placeholder_tile_html(name, kind="hotel", sub="⭐" * stars if stars else ""),
+                unsafe_allow_html=True,
+            )
+        with body_col:
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                star_str = "⭐" * stars
+                st.markdown(f"**🏨 {name}** {star_str}")
+                if o.get("amenities_matched"):
+                    st.caption("✓ " + " · ".join(o["amenities_matched"]))
+                if o.get("area"):
+                    st.caption(f"📍 {o['area']}")
+                if o.get("cheapest_room_type"):
+                    st.caption(f"Room: {o['cheapest_room_type']}")
+                if o.get("cheapest_board"):
+                    st.caption(f"Board: {o['cheapest_board']}")
+                if o.get("has_free_cancellation"):
+                    st.caption("✓ Free cancellation")
+            with c2:
+                st.markdown(f"### {format_inr(o.get('price_inr', 0))}")
+                nights = o.get("nights", 0)
+                st.caption(f"{nights} nights · {format_inr(o.get('per_night_inr', 0))}/night")
 
 
 def _render_tour(o: dict[str, Any]) -> None:
