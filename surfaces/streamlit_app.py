@@ -117,6 +117,17 @@ def _display_signal(tool_calls: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _schedule_signal(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """If the agent called build_trip_schedule_tool this turn, return its days so
+    the chat can render the calendar grid."""
+    for tc in tool_calls:
+        if tc.get("tool_name") == "build_trip_schedule_tool":
+            out = _coerce_output(tc.get("output"))
+            if isinstance(out, dict) and out.get("schedule") and out.get("days"):
+                return out["days"]
+    return None
+
+
 # A rupee amount with at least 3 digits (e.g. ₹2,83,844 or ₹104934) — used to
 # detect when an answer quotes a concrete price so we can flag answers that
 # state prices without having called any pricing tool that turn.
@@ -151,6 +162,18 @@ def _render_flight(o: dict[str, Any]) -> None:
         with c2:
             st.markdown(f"### {format_inr(o.get('price_inr', 0))}")
             st.caption("Total (all pax)")
+
+
+def _render_calendar(days: list[dict[str, Any]]) -> None:
+    """Render the day-by-day schedule as a calendar time-grid (inspiration look)."""
+    import streamlit.components.v1 as components
+
+    try:
+        from surfaces.ui_theme import render_calendar_html
+    except ImportError:
+        from ui_theme import render_calendar_html
+    # height: header (~50) + 15 hours * 56 + padding
+    components.html(render_calendar_html(days), height=940, scrolling=True)
 
 
 def _render_hotel(o: dict[str, Any]) -> None:
@@ -941,11 +964,17 @@ def _process_message(user_message: str) -> None:
                 for opt in options:
                     _render_option(kind, opt)
 
+        # Calendar: if the agent built a schedule this turn, draw the time-grid.
+        schedule_days = _schedule_signal(tool_calls)
+        if schedule_days:
+            _render_calendar(schedule_days)
+
         st.session_state.chat_history.append(
             {
                 "role": "assistant",
                 "content": assistant_text,
                 "cards": cards_payload,
+                "schedule": schedule_days or None,
             }
         )
 
@@ -1006,6 +1035,8 @@ with chat_tab:
             if kind and options:
                 for opt in options:
                     _render_option(kind, opt)
+            if entry.get("schedule"):
+                _render_calendar(entry["schedule"])
 
     # "Generate itinerary PDF" button: build from confirmed trip details using
     # the generate_itinerary_pdf tool (real, tool-sourced numbers).

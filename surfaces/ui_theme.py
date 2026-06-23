@@ -60,17 +60,23 @@ h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
 }
 h1 { font-weight: 600; }
 
+/* Hide Streamlit's own top toolbar/header so our floating navbar owns the top.
+   (The header is a translucent bar that otherwise overlaps the nav pill.) */
+header[data-testid="stHeader"] { background: transparent !important; height: 0 !important; }
+header[data-testid="stHeader"] > * { display: none !important; }
+div[data-testid="stToolbar"] { display: none !important; }
+
 /* push content below the floating navbar */
-.block-container { padding-top: 5.4rem !important; max-width: 1180px; }
+.block-container { padding-top: 5.8rem !important; max-width: 1180px; }
 
 /* ---- floating glassmorphism navbar ---- */
 /* Streamlit's st.tabs becomes the nav: pin it, frost it, pill it. */
 div[data-baseweb="tab-list"] {
   position: fixed;
-  top: 14px;
+  top: 12px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 1000;
+  z-index: 999999;
   gap: 6px;
   padding: 7px;
   background: rgba(251,249,245,.65);
@@ -163,6 +169,82 @@ _CATEGORY_TINT = {
     "visa": ("#4A7C59", "📄"),
     "other": ("#7A726A", "📍"),
 }
+
+
+def _to_minutes(hhmm: str) -> int | None:
+    try:
+        h, m = hhmm.split(":")
+        return int(h) * 60 + int(m)
+    except (ValueError, AttributeError):
+        return None
+
+
+def render_calendar_html(days: list[dict], *, start_hour: int = 8, end_hour: int = 23) -> str:
+    """Build a time-grid calendar (time rows × day columns) from build_trip_schedule
+    output. Mirrors the inspiration: each item is a colored block positioned by its
+    start/end time. Returns a self-contained HTML string for components.html."""
+    if not days:
+        return "<p>No schedule yet.</p>"
+    row_h = 56  # px per hour
+    grid_h = (end_hour - start_hour) * row_h
+    ncols = len(days)
+
+    # time gutter labels
+    gutter = "".join(
+        f"<div style='height:{row_h}px;font:500 11px Inter,sans-serif;color:{PALETTE['muted']};"
+        f"text-align:right;padding-right:8px;transform:translateY(-7px)'>"
+        f"{(h % 12) or 12} {'AM' if h < 12 else 'PM'}</div>"
+        for h in range(start_hour, end_hour)
+    )
+
+    cols_html = ""
+    for d in days:
+        # header
+        date = d.get("date", "")
+        label = d.get("label", "")
+        head = (
+            f"<div style='text-align:center;padding:10px 6px;border-bottom:1px solid {PALETTE['line']}'>"
+            f"<div style='font:600 13px Inter,sans-serif;color:{PALETTE['text']}'>{date}</div>"
+            f"<div style='font:500 11px Inter,sans-serif;color:{PALETTE['muted']}'>{label}</div></div>"
+        )
+        # blocks
+        blocks = ""
+        for it in d.get("items", []):
+            tint, glyph = _CATEGORY_TINT.get(it.get("kind", "other"), _CATEGORY_TINT["other"])
+            s = _to_minutes(it.get("start", "")) or (start_hour * 60)
+            e = _to_minutes(it.get("end", "")) or (s + 60)
+            top = max(0, (s - start_hour * 60) / 60 * row_h)
+            height = max(34, (e - s) / 60 * row_h - 4)
+            time_lbl = it.get("start", "")
+            detail = (
+                f"<div style='font:400 10px Inter;opacity:.85;margin-top:1px;"
+                f"overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{it['detail']}</div>"
+                if it.get("detail") else ""
+            )
+            blocks += (
+                f"<div style='position:absolute;top:{top}px;left:4px;right:4px;height:{height}px;"
+                f"background:{tint};color:#fff;border-radius:10px;padding:6px 8px;overflow:hidden;"
+                f"box-shadow:0 4px 10px -4px rgba(0,0,0,.3)'>"
+                f"<div style='font:600 11px Inter;line-height:1.15'>{glyph} {it['title']}</div>"
+                f"<div style='font:500 9px Inter;opacity:.9'>{time_lbl}</div>{detail}</div>"
+            )
+        cols_html += (
+            f"<div style='flex:1;min-width:150px;border-left:1px solid {PALETTE['line']}'>"
+            f"{head}"
+            f"<div style='position:relative;height:{grid_h}px;background:"
+            f"repeating-linear-gradient(to bottom,transparent,transparent {row_h - 1}px,{PALETTE['line']} {row_h}px)'>"
+            f"{blocks}</div></div>"
+        )
+
+    return f"""
+    <div style="font-family:Inter,sans-serif;background:{PALETTE['surface']};
+         border:1px solid {PALETTE['line']};border-radius:16px;overflow:hidden;
+         box-shadow:0 10px 30px -12px rgba(42,38,34,.18)">
+      <div style="display:flex">
+        <div style="width:58px;flex:none;padding-top:{44}px">{gutter}</div>
+        <div style="display:flex;flex:1;overflow-x:auto">{cols_html}</div>
+      </div>
+    </div>"""
 
 
 def placeholder_tile_html(label: str, kind: str = "hotel", sub: str = "") -> str:

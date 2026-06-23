@@ -31,6 +31,12 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+# Quiet dotenv's per-line parse warnings — the .env holds long JWT/comment lines
+# it can't fully parse but the real KEY=VALUE pairs load fine; the noise just
+# clutters the Streamlit/console output.
+import logging as _logging
+
+_logging.getLogger("dotenv.main").setLevel(_logging.ERROR)
 load_dotenv()  # pull VAPI_* + LLM + booking creds from the planner .env
 
 from agent import (

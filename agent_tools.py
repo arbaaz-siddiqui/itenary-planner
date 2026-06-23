@@ -353,6 +353,75 @@ def display_options_tool(kind: str) -> dict[str, Any]:
     return {"display": True, "kind": k}
 
 
+_SCHEDULE_KINDS = {"flight", "hotel", "tour", "transfer", "restaurant", "activity", "free"}
+
+
+@tool
+def build_trip_schedule_tool(days: list[dict[str, Any]]) -> dict[str, Any]:
+    """Lay the agreed plan out as a day-by-day, time-slotted SCHEDULE that the web
+    app renders as a calendar (time rows × day columns).
+
+    CALL THIS when the customer wants to SEE their plan on a timeline/calendar —
+    "show me the schedule", "what's the day-by-day plan", "lay it out by time",
+    or after you've assembled an itinerary they like. Use ONLY real items you've
+    actually discussed/searched (hotels, tours, transfers, flights, meals) — never
+    invent activities or times. It's fine to give sensible times for things like
+    "morning at the souk"; just don't invent the activity itself.
+
+    Args:
+        days: one entry per day, each:
+            {
+              "date": "2026-08-03",            # ISO date (or "Day 1" if unknown)
+              "label": "Arrival & Downtown",   # short day theme (optional)
+              "items": [
+                {
+                  "start": "10:00",            # 24h HH:MM
+                  "end": "11:00",              # optional
+                  "title": "Arrive at DXB",
+                  "kind": "transfer",          # flight|hotel|tour|transfer|restaurant|activity|free
+                  "detail": "Private cab to hotel"   # optional, short
+                }, ...
+              ]
+            }
+
+    Returns a `{schedule: True, days: [...]}` signal the web app reads to draw the
+    calendar. Still write a short text reply; don't paste the whole grid as text.
+    """
+    if not isinstance(days, list) or not days:
+        return {"error": True, "message": "days must be a non-empty list of day plans"}
+    clean_days: list[dict[str, Any]] = []
+    for d in days:
+        if not isinstance(d, dict):
+            continue
+        items_in = d.get("items") or []
+        items: list[dict[str, Any]] = []
+        for it in items_in:
+            if not isinstance(it, dict) or not str(it.get("title", "")).strip():
+                continue
+            kind = str(it.get("kind", "activity")).strip().lower().rstrip("s")
+            if kind not in _SCHEDULE_KINDS:
+                kind = "activity"
+            items.append(
+                {
+                    "start": str(it.get("start", "")).strip(),
+                    "end": str(it.get("end", "")).strip(),
+                    "title": str(it.get("title", "")).strip(),
+                    "kind": kind,
+                    "detail": str(it.get("detail", "")).strip(),
+                }
+            )
+        # keep items in time order when a start time is given
+        items.sort(key=lambda x: x["start"] or "99:99")
+        clean_days.append(
+            {
+                "date": str(d.get("date", "")).strip() or f"Day {len(clean_days) + 1}",
+                "label": str(d.get("label", "")).strip(),
+                "items": items,
+            }
+        )
+    return {"schedule": True, "days": clean_days, "total_days": len(clean_days)}
+
+
 @tool
 def compose_customer_payment_summary_tool(
     total_inr_inclusive: float,
@@ -565,6 +634,7 @@ def _build_all_tools() -> list[BaseTool]:
         compose_customer_payment_summary_tool,
         generate_itinerary_pdf_tool,
         display_options_tool,
+        build_trip_schedule_tool,
     ]
 
 
