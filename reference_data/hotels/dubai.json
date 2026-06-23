@@ -1,11 +1,15 @@
 {
-  "_README": "Curated hotel list is intentionally EMPTY. We now rely entirely on the live supplier API: GetStaticDataByCity discovers all ~4168 Dubai hotels, GetHotelStaticDataOptimize gives real names, and GetPropertyDescriptions gives real amenities. No hardcoded/reference hotel data — everything is live so prices, names, and amenities are never stale or guessed.",
+  "_README": "Fallback Dubai hotel IDs. PRIMARY source is live discovery (GetStaticDataByCity returns ~4168 hotels). But that endpoint is occasionally empty/down — when it is, search_hotels uses these confirmed-real IDs so the customer NEVER sees zero hotels. Real names/stars/amenities are still fetched live per id. These are IDs, not fabricated data.",
   "_meta": {
     "city": "Dubai",
     "country_id": 213,
     "city_id": 244520,
     "placeholder_data": false,
-    "confirmed_real_ids": []
+    "confirmed_real_ids": [398, 444, 693, 212, 229, 206, 509, 215, 1002, 1337, 418, 192, 381, 1094, 4374]
   },
-  "hotels": []
+  "hotels": [
+    { "id": 398 }, { "id": 444 }, { "id": 693 }, { "id": 212 }, { "id": 229 },
+    { "id": 206 }, { "id": 509 }, { "id": 215 }, { "id": 1002 }, { "id": 1337 },
+    { "id": 418 }, { "id": 192 }, { "id": 381 }, { "id": 1094 }, { "id": 4374 }
+  ]
 }
