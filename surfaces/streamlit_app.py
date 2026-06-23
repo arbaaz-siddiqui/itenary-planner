@@ -711,6 +711,97 @@ def _render_voice_tab() -> None:
 
 
 # =============================================================================
+# Leads tab — upload social-comment JSON, AI-classify into hot/warm/cold leads
+# =============================================================================
+_TAG_STYLE = {
+    "hot": ("🔥", "#ff4b4b"),
+    "warm": ("🟠", "#ff9d00"),
+    "cold": ("🧊", "#3b82f6"),
+}
+
+
+def _render_leads_tab() -> None:
+    st.subheader("🎯 Lead Inspector")
+    st.caption(
+        "Upload a JSON of social-media comments (from a post). The AI reads each "
+        "comment and flags the commenter as a hot / warm / cold travel lead with a "
+        "score and reason. (Later this connects live to the Meta Graph API.)"
+    )
+
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        _root = str(_Path(__file__).resolve().parent.parent)
+        if _root not in _sys.path:
+            _sys.path.insert(0, _root)
+        from lead_scoring import classify_leads, normalize_comments
+    except Exception as e:  # noqa: BLE001
+        st.error(f"lead_scoring unavailable: {e}")
+        return
+
+    uploaded = st.file_uploader(
+        "Upload comments JSON", type=["json"], key="leads_upload",
+        help="Array of comments with username, name, comment (extra fields are kept).",
+    )
+    use_llm = st.checkbox("Classify with AI (Claude)", value=True, key="leads_use_llm")
+
+    if uploaded is not None and st.button("🔎 Analyze leads", type="primary"):
+        try:
+            raw = json.load(uploaded)
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Couldn't read JSON: {e}")
+            return
+        comments = normalize_comments(raw)
+        if not comments:
+            st.warning("No comments found in that file. Expected a list of {username, name, comment}.")
+            return
+        with st.spinner(f"Analyzing {len(comments)} comments…"):
+            st.session_state.lead_rows = classify_leads(comments, use_llm=use_llm)
+
+    rows = st.session_state.get("lead_rows")
+    if not rows:
+        st.info("Upload a comments JSON and click **Analyze leads** to see the lead table.")
+        return
+
+    # Summary counts by tag.
+    counts = {t: sum(1 for r in rows if r["tag"] == t) for t in ("hot", "warm", "cold")}
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total leads", len(rows))
+    c2.metric("🔥 Hot", counts["hot"])
+    c3.metric("🟠 Warm", counts["warm"])
+    c4.metric("🧊 Cold", counts["cold"])
+
+    # Filter + table.
+    tag_filter = st.multiselect(
+        "Filter by tag", ["hot", "warm", "cold"], default=["hot", "warm", "cold"], key="leads_filter"
+    )
+    shown = [r for r in rows if r["tag"] in tag_filter]
+    table = [
+        {
+            "Lead": f"{_TAG_STYLE.get(r['tag'], ('', ''))[0]} {r['tag'].upper()}",
+            "Score": r["score"],
+            "Name": r.get("name", ""),
+            "Username": r.get("username", ""),
+            "Comment": r.get("comment", ""),
+            "Why": r.get("reason", ""),
+        }
+        for r in shown
+    ]
+    st.dataframe(
+        table,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Score": st.column_config.ProgressColumn(
+                "Score", min_value=0, max_value=100, format="%d"
+            ),
+            "Comment": st.column_config.TextColumn("Comment", width="large"),
+        },
+    )
+
+
+# =============================================================================
 # Chat
 # =============================================================================
 def _coerce_output(output: Any) -> Any:
@@ -872,7 +963,7 @@ _render_sidebar()
 st.title("🏖️ Dubai Trip Planner")
 st.caption(f"Powered by {describe_current_provider()} · streaming on")
 
-chat_tab, voice_tab = st.tabs(["💬 Chat", "📞 Voice"])
+chat_tab, voice_tab, leads_tab = st.tabs(["💬 Chat", "📞 Voice", "🎯 Leads"])
 
 with chat_tab:
     # Empty-state hint so the chat doesn't look broken before the first message.
@@ -909,6 +1000,9 @@ with chat_tab:
 
 with voice_tab:
     _render_voice_tab()
+
+with leads_tab:
+    _render_leads_tab()
 
 # Chat input — must be at top level (Streamlit requires st.chat_input outside
 # tabs/columns). It drives the Chat tab.
