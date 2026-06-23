@@ -893,10 +893,24 @@ def _process_message(user_message: str) -> None:
     result = StreamResult()
 
     with st.chat_message("assistant"):
-        # st.write_stream consumes the token generator and live-renders the
-        # assistant text as it arrives; it returns the full concatenated string.
-        assistant_text = st.write_stream(
-            stream_and_log(
+        # Show a live "thinking / searching" status during the silent gap while
+        # the agent reasons + calls booking APIs (before any text streams). As
+        # tools fire, reflect which one in the status so the wait feels alive.
+        status = st.status("✨ Planning your trip…", expanded=False)
+
+        def _streamed():
+            seen_tools: set[str] = set()
+            _labels = {
+                "search_flights": "✈️ Searching flights…",
+                "search_hotels": "🏨 Finding hotels…",
+                "search_tours": "🎟️ Looking up tours & activities…",
+                "search_airport_transfer_dubai": "🚐 Checking transfers…",
+                "get_hotel_description": "🏊 Checking hotel amenities…",
+                "get_visa_info": "📄 Checking visa details…",
+                "search_restaurants": "🍽️ Finding restaurants…",
+                "build_trip_schedule_tool": "🗓️ Laying out your schedule…",
+            }
+            gen = stream_and_log(
                 st.session_state.agent,
                 surface="streamlit",
                 thread_id=st.session_state.thread_id,
@@ -904,7 +918,17 @@ def _process_message(user_message: str) -> None:
                 turn_number=turn,
                 result=result,
             )
-        )
+            for token in gen:
+                # update status from tools observed so far this turn
+                for ev in result.tool_event_log:
+                    name = ev.get("tool_name", "")
+                    if ev.get("event") == "call" and name and name not in seen_tools:
+                        seen_tools.add(name)
+                        status.update(label=_labels.get(name, f"🔧 {name}…"))
+                yield token
+
+        assistant_text = st.write_stream(_streamed)
+        status.update(label="Done", state="complete")
         if not isinstance(assistant_text, str):
             assistant_text = result.text or ""
 

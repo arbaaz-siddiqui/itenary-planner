@@ -13,8 +13,8 @@ from __future__ import annotations
 import streamlit as st
 
 PALETTE = {
-    "ground": "#F6F3EE",
-    "surface": "#FBF9F5",
+    "ground": "#FAF8F4",
+    "surface": "#FFFFFF",
     "text": "#2A2622",
     "muted": "#7A726A",
     "accent": "#E07A3F",
@@ -27,8 +27,8 @@ _CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
-  --ground:  #F6F3EE;
-  --surface: #FBF9F5;
+  --ground:  #FAF8F4;
+  --surface: #FFFFFF;
   --text:    #2A2622;
   --muted:   #7A726A;
   --accent:  #E07A3F;
