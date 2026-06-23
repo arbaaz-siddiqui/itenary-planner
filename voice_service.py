@@ -193,15 +193,17 @@ def run_planner_turn(transcript: str, session_id: str) -> str:
         reply = format_for_voice(extract_assistant_text(response)) or (
             "Let me have a team member follow up with the exact details."
         )
-        # Tool calls the agent made (name + input + output summary)
+        # Tool calls the agent made — FULL input + FULL output (no truncation),
+        # so the debug UI shows exactly what the agent sent and got back.
         for tc in extract_tool_calls(response):
             out = tc.get("output")
-            summary = out
             if isinstance(out, (dict, list)):
-                summary = json.dumps(out, default=str)[:600]
-            elif isinstance(out, str):
-                summary = out[:600]
-            tools.append({"tool": tc.get("tool_name"), "input": tc.get("input"), "output": summary})
+                out_full = json.dumps(out, default=str, indent=2)
+            else:
+                out_full = str(out)
+            tools.append(
+                {"tool": tc.get("tool_name"), "input": tc.get("input"), "output": out_full}
+            )
     except Exception as e:  # noqa: BLE001
         etype = type(e).__name__
         log.error("voice_agent_failed", error=str(e), error_type=etype)

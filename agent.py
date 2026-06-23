@@ -404,11 +404,11 @@ def invoke_and_log(
     # turn can't spiral into a dozen LLM round-trips. ~8 graph steps ≈ 3-4 tool
     # calls, which keeps a turn under ~15s.
     if surface == "voice":
-        # ~12 graph steps ≈ 5-6 tool calls: enough to complete ONE real booking
-        # search (resolve party + search + maybe enrich) without spiralling into
-        # the 16-step loops that blew the call's latency budget. Too low (e.g. 8)
-        # cuts the search off before it can hit the booking API at all.
-        config["recursion_limit"] = 12
+        # Each tool round = a separate ~5-7s Claude round-trip, so chaining 3
+        # tools in one turn (search -> description -> info) blows ~25s and the
+        # call drops. ~8 graph steps ≈ ~3 tool calls: enough for ONE search plus
+        # one enrichment + answer, while still blocking the runaway 16-step loops.
+        config["recursion_limit"] = 8
     start = time.perf_counter()
     response = agent.invoke({"messages": [{"role": "user", "content": user_message}]}, config)
     latency = time.perf_counter() - start

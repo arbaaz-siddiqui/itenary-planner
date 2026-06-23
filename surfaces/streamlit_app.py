@@ -673,19 +673,37 @@ def _render_voice_tab() -> None:
                 st.markdown(f"🤖 **Agent:** {turn.get('agent', '')}")
                 tools = turn.get("tools") or []
                 if tools:
+                    st.markdown("🛠️ **Tools the agent called:**")
                     for t in tools:
-                        st.caption(f"🛠️ tool: `{t.get('tool')}`  input: `{t.get('input')}`")
-                        with st.popover("output"):
-                            st.code(str(t.get("output", ""))[:1500])
+                        with st.expander(f"`{t.get('tool')}`", expanded=False):
+                            st.markdown("**Input:**")
+                            st.code(json.dumps(t.get("input", {}), indent=2, default=str), language="json")
+                            st.markdown("**Output (full):**")
+                            st.code(str(t.get("output", "")), language="json")
                 calls = turn.get("api_calls") or []
                 if calls:
-                    st.caption("🌐 booking APIs called this turn:")
+                    st.markdown("🌐 **Booking APIs hit this turn (full request + response):**")
                     for c in calls:
                         ep = c.get("url", "").split("gujjutours.com")[-1] or c.get("url", "")
-                        st.caption(
-                            f"   {c.get('method')} {ep} → "
-                            f"{c.get('status_code')} ({c.get('duration_ms')} ms)"
+                        hdr = (
+                            f"{c.get('method')} {ep} → {c.get('status_code')} "
+                            f"({c.get('duration_ms')} ms)"
                         )
+                        with st.expander(hdr, expanded=False):
+                            st.markdown("**Request body (sent):**")
+                            st.code(
+                                json.dumps(c.get("request_body"), indent=2, default=str)
+                                if c.get("request_body") is not None
+                                else "(none)",
+                                language="json",
+                            )
+                            st.markdown("**Response body (received, full):**")
+                            st.code(
+                                json.dumps(c.get("response_body"), indent=2, default=str)
+                                if c.get("response_body") is not None
+                                else "(none)",
+                                language="json",
+                            )
                 else:
                     st.caption("🌐 no booking API calls this turn (conversational only)")
                 st.divider()
