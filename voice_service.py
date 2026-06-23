@@ -145,9 +145,15 @@ def get_voice_agent() -> object:
     return build_react_agent(surface="voice", checkpoint_store=build_sqlite_checkpoint())
 
 
+# If a thread gets corrupted (interrupted tool call), we bump this salt so the
+# caller gets a clean thread on retry instead of being stuck failing forever.
+_SESSION_SALT: dict[str, int] = {}
+
+
 def thread_id_for_session(session_id: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_-]", "_", (session_id or "").replace("+", "")) or "anon"
-    return f"voice_{cleaned}"
+    salt = _SESSION_SALT.get(session_id, 0)
+    return f"voice_{cleaned}" + (f"_{salt}" if salt else "")
 
 
 # Strip markup/URLs so nothing un-speakable reaches TTS.
@@ -186,33 +192,41 @@ def run_planner_turn(transcript: str, session_id: str) -> str:
     reply = ""
     api_calls: list[dict[str, Any]] = []
     tools: list[dict[str, Any]] = []
-    try:
-        response = invoke_and_log(
-            get_voice_agent(), surface="voice", thread_id=thread_id, user_message=transcript
+
+    def _invoke(tid: str):
+        resp = invoke_and_log(
+            get_voice_agent(), surface="voice", thread_id=tid, user_message=transcript
         )
-        reply = format_for_voice(extract_assistant_text(response)) or (
+        text = format_for_voice(extract_assistant_text(resp)) or (
             "Let me have a team member follow up with the exact details."
         )
-        # Tool calls the agent made — FULL input + FULL output (no truncation),
-        # so the debug UI shows exactly what the agent sent and got back.
-        for tc in extract_tool_calls(response):
+        tcs = []
+        for tc in extract_tool_calls(resp):
             out = tc.get("output")
-            if isinstance(out, (dict, list)):
-                out_full = json.dumps(out, default=str, indent=2)
-            else:
-                out_full = str(out)
-            tools.append(
-                {"tool": tc.get("tool_name"), "input": tc.get("input"), "output": out_full}
-            )
+            out_full = json.dumps(out, default=str, indent=2) if isinstance(out, (dict, list)) else str(out)
+            tcs.append({"tool": tc.get("tool_name"), "input": tc.get("input"), "output": out_full})
+        return text, tcs
+
+    try:
+        reply, tools = _invoke(thread_id)
     except Exception as e:  # noqa: BLE001
         etype = type(e).__name__
-        log.error("voice_agent_failed", error=str(e), error_type=etype)
-        reply = (
-            "That's taking a little longer to pull together. Let me send the full options "
-            "to your WhatsApp right after this call."
-            if "Recursion" in etype
-            else "Sorry, I hit a snag on my side. Please try again in a moment."
-        )
+        emsg = str(e)
+        log.error("voice_agent_failed", error=emsg, error_type=etype)
+        # A corrupted thread (tool_calls with no ToolMessage — e.g. an earlier
+        # turn was interrupted) poisons EVERY later turn. Recover by starting a
+        # fresh thread for this caller and retrying once, so the call continues.
+        if "INVALID_CHAT_HISTORY" in emsg or "tool_calls" in emsg or "ToolMessage" in emsg:
+            try:
+                _SESSION_SALT[session_id] = _SESSION_SALT.get(session_id, 0) + 1
+                fresh_tid = thread_id_for_session(session_id)
+                log.info("voice_thread_reset", session_id=session_id, new_thread=fresh_tid)
+                reply, tools = _invoke(fresh_tid)
+            except Exception as e2:  # noqa: BLE001
+                log.error("voice_agent_retry_failed", error=str(e2))
+                reply = "Sorry, let me start that again — could you tell me where you'd like to travel?"
+        else:
+            reply = "Sorry, I hit a snag on my side. Please try again in a moment."
 
     api_calls = http_requests_since(cursor)  # exact booking-API calls this turn
     _record_turn(

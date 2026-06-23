@@ -399,16 +399,14 @@ def invoke_and_log(
     turn_number: int = 0,
 ) -> dict[str, Any]:
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
-    # On a live phone call, latency is the enemy: a long ReAct loop (many
-    # tool calls) means dead air and the call drops. Cap the loop so a voice
-    # turn can't spiral into a dozen LLM round-trips. ~8 graph steps ≈ 3-4 tool
-    # calls, which keeps a turn under ~15s.
+    # NOTE: we deliberately do NOT set a tight recursion_limit for voice. A low
+    # limit cuts the agent off MID-tool-call (AIMessage with tool_calls but no
+    # ToolMessage), which corrupts the checkpointed thread and makes EVERY later
+    # turn fail with INVALID_CHAT_HISTORY ("I hit a snag"). Latency on voice is
+    # instead controlled by the prompt (one search per turn) + the SSE filler
+    # line. Keep a generous cap only as a runaway backstop.
     if surface == "voice":
-        # Each tool round = a separate ~5-7s Claude round-trip, so chaining 3
-        # tools in one turn (search -> description -> info) blows ~25s and the
-        # call drops. ~8 graph steps ≈ ~3 tool calls: enough for ONE search plus
-        # one enrichment + answer, while still blocking the runaway 16-step loops.
-        config["recursion_limit"] = 8
+        config["recursion_limit"] = 25
     start = time.perf_counter()
     response = agent.invoke({"messages": [{"role": "user", "content": user_message}]}, config)
     latency = time.perf_counter() - start

@@ -667,7 +667,8 @@ def _render_voice_tab() -> None:
     # Most-recent session first.
     for session_id, turns in reversed(list(traces.items())):
         with st.expander(f"Call `{session_id}` — {len(turns)} turns", expanded=True):
-            for i, turn in enumerate(turns, 1):
+            # Newest turn on TOP (reverse), with its real turn number preserved.
+            for i, turn in reversed(list(enumerate(turns, 1))):
                 st.markdown(f"**Turn {i}**  ·  _{turn.get('latency_s')}s_")
                 st.markdown(f"🧑 **Caller:** {turn.get('user', '')}")
                 st.markdown(f"🤖 **Agent:** {turn.get('agent', '')}")
