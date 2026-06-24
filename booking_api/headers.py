@@ -57,6 +57,10 @@ def flight_search_headers() -> dict[str, str]:
         "X-Time-Zone": "Arabian Standard Time",
         "X-Accept-Language": "ar",
         "X-Tenant-Id": s.flight_search_tenant_id,
+        # The N8N-Technoheven V1 collection sends X-API-Key alongside the Bearer
+        # token on flight search. The collection's value is the Postman {{token}}
+        # variable (the same agent token), so mirror that.
+        "X-API-Key": s.token,
     }
 
 

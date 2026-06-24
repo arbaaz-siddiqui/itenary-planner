@@ -6,8 +6,11 @@ to typed exceptions so callers can branch without parsing strings.
 
 from __future__ import annotations
 
+import itertools
 import logging
+import threading
 import time
+from collections import deque
 from functools import lru_cache
 from typing import Any
 
@@ -24,6 +27,78 @@ from core import (
 from settings import get_booking_api_settings, get_http_settings
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Live HTTP request recorder
+# =============================================================================
+# Every outbound supplier request is recorded here (method + FULL url + status +
+# duration). The debug UI reads this so you can see the *actual* endpoint that
+# was hit for a given tool call — e.g. the literal
+# `GET https://stagingapi.gujjutours.com//api/Currency/ROE/INR` — not just the
+# tool name. This is the ground truth for "which API was called", which is the
+# surest way to catch a hallucinated number (no request = invented).
+_RECORDER_LOCK = threading.Lock()
+_REQUEST_LOG: deque[dict[str, Any]] = deque(maxlen=200)
+_REQUEST_SEQ = itertools.count(1)
+
+
+def record_http_request(
+    *,
+    method: str,
+    url: str,
+    status_code: int | None,
+    duration_ms: float,
+    error: str | None = None,
+    request_body: Any = None,
+    response_body: Any = None,
+) -> None:
+    """Append one HTTP request record to the in-memory log (thread-safe).
+
+    `request_body` / `response_body` carry the FULL payloads (no truncation) so
+    the debug UI can show exactly what was sent and received for each booking-API
+    call. They are stored as-is (dict/list/str) for the caller to render.
+    """
+    with _RECORDER_LOCK:
+        _REQUEST_LOG.append(
+            {
+                "seq": next(_REQUEST_SEQ),
+                "method": method,
+                "url": url,
+                "status_code": status_code,
+                "duration_ms": round(duration_ms, 1),
+                "error": error,
+                "request_body": request_body,
+                "response_body": response_body,
+            }
+        )
+
+
+def get_http_request_log() -> list[dict[str, Any]]:
+    """Snapshot of recorded requests, oldest first."""
+    with _RECORDER_LOCK:
+        return list(_REQUEST_LOG)
+
+
+def http_requests_since(seq: int) -> list[dict[str, Any]]:
+    """All recorded requests with seq strictly greater than `seq`.
+
+    Lets a caller mark a cursor before invoking the agent, then collect exactly
+    the requests that fired during that turn.
+    """
+    with _RECORDER_LOCK:
+        return [r for r in _REQUEST_LOG if r["seq"] > seq]
+
+
+def latest_http_seq() -> int:
+    """Highest seq recorded so far (0 if none) — use as a cursor."""
+    with _RECORDER_LOCK:
+        return _REQUEST_LOG[-1]["seq"] if _REQUEST_LOG else 0
+
+
+def clear_http_request_log() -> None:
+    with _RECORDER_LOCK:
+        _REQUEST_LOG.clear()
 
 
 class BookingApiClient:
@@ -60,11 +135,11 @@ class BookingApiClient:
 
         while attempt <= self.max_retries:
             attempt += 1
+            req_start = time.perf_counter()
             try:
-                logger.info(
-                    "booking_api request",
-                    extra={"method": method, "path": path, "attempt": attempt},
-                )
+                # Plainly visible in the terminal so you can TRACE exactly which
+                # booking API the agent hit on each turn (no assumptions).
+                logger.info("[BOOKING-API] --> %s %s (attempt %d)", method, path, attempt)
                 response = self.session.request(
                     method=method,
                     url=url,
@@ -75,6 +150,13 @@ class BookingApiClient:
                 )
             except Timeout as e:
                 last_exc = e
+                record_http_request(
+                    method=method,
+                    url=url,
+                    status_code=None,
+                    duration_ms=(time.perf_counter() - req_start) * 1000,
+                    error="timeout",
+                )
                 if attempt > self.max_retries:
                     raise BookingApiTimeout(
                         f"Timeout for {path} after {self.max_retries + 1} attempts",
@@ -84,6 +166,13 @@ class BookingApiClient:
                 continue
             except RequestException as e:
                 last_exc = e
+                record_http_request(
+                    method=method,
+                    url=url,
+                    status_code=None,
+                    duration_ms=(time.perf_counter() - req_start) * 1000,
+                    error=type(e).__name__,
+                )
                 if attempt > self.max_retries:
                     raise BookingApiError(
                         f"Network error calling {path}: {e}", endpoint=path
@@ -92,6 +181,22 @@ class BookingApiClient:
                 continue
 
             sc = response.status_code
+            elapsed_ms = (time.perf_counter() - req_start) * 1000
+            # Capture the FULL request + response bodies for the debug trace.
+            try:
+                _resp_body = response.json()
+            except Exception:  # noqa: BLE001
+                _resp_body = response.text[:20000]
+            record_http_request(
+                method=method,
+                url=url,
+                status_code=sc,
+                duration_ms=elapsed_ms,
+                request_body=json,
+                response_body=_resp_body,
+            )
+            # Trace the result so you can confirm the call really happened + succeeded.
+            logger.info("[BOOKING-API] <-- %s %s [%d ms]", sc, path, int(elapsed_ms))
             if sc == 401:
                 raise BookingApiUnauthorized(
                     f"401 Unauthorized for {path}",
@@ -194,6 +299,22 @@ def get_client() -> BookingApiClient:
     http = get_http_settings()
     return BookingApiClient(
         base_url=booking.base_url,
+        token=booking.token,
+        tenant_id=booking.tenant_id,
+        timeout_secs=http.timeout_secs,
+        max_retries=http.max_retries,
+    )
+
+
+@lru_cache(maxsize=1)
+def get_b2c_client() -> BookingApiClient:
+    """Client for the B2C host (stagingb2c.gujjutours.com). Same token + retry
+    behaviour as the main client, different base URL. Used by the B2C tour
+    endpoints (options, price-check calendar, option details)."""
+    booking = get_booking_api_settings()
+    http = get_http_settings()
+    return BookingApiClient(
+        base_url=booking.b2c_base_url,
         token=booking.token,
         tenant_id=booking.tenant_id,
         timeout_secs=http.timeout_secs,

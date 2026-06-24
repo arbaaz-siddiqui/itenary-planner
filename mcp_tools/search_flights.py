@@ -79,26 +79,33 @@ def _impl(
             max_results=max_results,
         )
 
-        # The flight API returns prices for the FULL party as searched
-        # (Quantity=2 → returned price covers 2 adults). Indian travel agents
-        # quote per-person, so we surface both the per-adult and total.
-        pax_count = max(1, adults + children)  # avoid div-by-zero
+        # The flight API returns the FULL-party total AND a per-passenger
+        # breakdown. Indian travel agents quote per-person, so we surface both.
+        # Prefer the supplier's REAL per-adult fare (from the breakdown); only
+        # fall back to total ÷ pax when the breakdown is absent. This keeps the
+        # per-person number tool-sourced, never guessed.
+        searched_pax = max(1, adults + children)
+
+        def _per_adult(o: Any) -> float:
+            if o.price_per_adult_inr is not None and o.price_per_adult_inr > 0:
+                return round(o.price_per_adult_inr, 2)
+            pax = o.pax_count or searched_pax
+            return round(o.price_inr / pax, 2) if pax else o.price_inr
+
         opts_out = []
         for o in options:
             d = o.model_dump()
-            per_adult = round(o.price_inr / pax_count, 2) if pax_count else o.price_inr
             d["price_total_inr"] = o.price_inr
-            d["price_per_adult_inr"] = per_adult
-            d["pax_count"] = pax_count
+            d["price_per_adult_inr"] = _per_adult(o)
+            d["pax_count"] = o.pax_count or searched_pax
             opts_out.append(d)
 
         return {
             "options": opts_out,
             "cheapest_price_inr": options[0].price_inr if options else None,
-            "cheapest_price_per_adult_inr": (
-                round(options[0].price_inr / pax_count, 2) if options and pax_count else None
-            ),
+            "cheapest_price_per_adult_inr": _per_adult(options[0]) if options else None,
             "total_results": len(options),
+            "pricing_note": "price_total_inr is for the whole party; price_per_adult_inr is per adult.",
             "search_params": {
                 "origin": origin_city,
                 "destination": destination_city,
@@ -106,7 +113,7 @@ def _impl(
                 "return_date": return_date,
                 "adults": adults,
                 "children": children,
-                "pax_count": pax_count,
+                "pax_count": searched_pax,
             },
         }
     except TripPlannerError as e:

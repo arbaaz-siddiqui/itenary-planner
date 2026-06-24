@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 
 from fastapi import FastAPI, Form, Response
+from fastapi.responses import FileResponse
 from twilio.rest import Client
 
 from agent import (
@@ -22,12 +23,37 @@ from agent import (
     build_sqlite_checkpoint,
     configure_logging,
     extract_assistant_text,
+    extract_tool_calls,
     get_logger,
     invoke_and_log,
 )
+from itinerary_store import get_itinerary_path, public_url_for
 from settings import get_twilio_settings
 
 log = get_logger("whatsapp")
+
+
+def _coerce_output(output: object) -> object:
+    """Tool outputs arrive as dicts or JSON strings; normalize to a dict."""
+    if isinstance(output, dict):
+        return output
+    if isinstance(output, str):
+        import json
+
+        try:
+            return json.loads(output)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def _itinerary_id_from(response: dict) -> str | None:
+    """Find an itinerary_id produced by generate_itinerary_pdf this turn."""
+    for tc in extract_tool_calls(response):
+        out = _coerce_output(tc.get("output"))
+        if isinstance(out, dict) and out.get("itinerary_id"):
+            return str(out["itinerary_id"])
+    return None
 
 
 # =============================================================================
@@ -82,14 +108,18 @@ def _twilio_client() -> Client:
     return Client(s.account_sid, s.auth_token)
 
 
-def send_whatsapp(to_phone: str, body: str) -> None:
+def send_whatsapp(to_phone: str, body: str, media_url: str | None = None) -> None:
     s = get_twilio_settings()
     if not s.account_sid or not s.auth_token:
         log.warning("twilio_not_configured", to=to_phone, body_len=len(body))
         return
+    kwargs: dict[str, object] = {"from_": s.whatsapp_from, "to": to_phone, "body": body}
+    if media_url:
+        # Twilio attaches the PDF to the WhatsApp message from a public URL.
+        kwargs["media_url"] = [media_url]
     try:
-        _twilio_client().messages.create(from_=s.whatsapp_from, to=to_phone, body=body)
-        log.info("whatsapp_sent", to=to_phone, body_len=len(body))
+        _twilio_client().messages.create(**kwargs)
+        log.info("whatsapp_sent", to=to_phone, body_len=len(body), has_media=bool(media_url))
     except Exception as e:
         log.error("whatsapp_send_failed", to=to_phone, error=str(e))
         raise
@@ -119,6 +149,19 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/itinerary/{itinerary_id}.pdf")
+async def serve_itinerary(itinerary_id: str) -> Response:
+    """Public PDF download — also the URL Twilio fetches to attach the PDF."""
+    path = get_itinerary_path(itinerary_id)
+    if path is None:
+        return Response(content="Not found", status_code=404)
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename="Dubai-itinerary.pdf",
+    )
+
+
 @app.post("/whatsapp")
 async def receive(
     From: str = Form(...),  # noqa: N803 -- Twilio's exact field name
@@ -137,7 +180,18 @@ async def receive(
             user_message=Body,
         )
         formatted = format_for_whatsapp(extract_assistant_text(response))
-        send_whatsapp(From, formatted)
+
+        # If the agent generated an itinerary PDF this turn, attach it as media.
+        media_url = None
+        itinerary_id = _itinerary_id_from(response)
+        if itinerary_id:
+            media_url = public_url_for(itinerary_id)
+            if media_url:
+                bound.info("itinerary_pdf_attached", itinerary_id=itinerary_id)
+            else:
+                bound.warning("itinerary_pdf_no_public_url", itinerary_id=itinerary_id)
+
+        send_whatsapp(From, formatted, media_url=media_url)
     except Exception as e:
         bound.error("agent_invoke_failed", error=str(e), error_type=type(e).__name__)
         send_whatsapp(

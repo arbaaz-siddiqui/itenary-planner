@@ -42,7 +42,7 @@ from core import (
     VisaOption,
     to_inr,
 )
-from settings import get_currency_settings
+from fx import live_rate_map
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
@@ -88,6 +88,30 @@ def _safe_to_inr(amount: Any, currency: str, rates: dict[str, float]) -> float |
 # bogus pricing without filtering legitimate budget domestic fares.
 FLIGHT_PRICE_INR_FLOOR: int = 8000
 
+# Bogus supplier fares are almost always INR-LABELED and implausibly low — e.g. a
+# DEL↔DXB round-trip for 2 adults coming back as ₹9,206 (₹4,603/adult) or even
+# ₹2,801. A real India↔Gulf round-trip is ~₹18,000+/adult even in low season, so
+# any INR-labeled fare under this PER-ADULT floor is a mislabeled/test fare and is
+# dropped. USD/AED fares (converted via live FX) are trusted and skip this check —
+# the mislabeling only happens on the INR-tagged ones.
+FLIGHT_INR_LABELED_PER_ADULT_FLOOR: int = 12000
+
+
+def _is_bogus_flight(opt: FlightOption) -> bool:
+    """True if the fare looks like supplier test/mislabeled data, not a real fare."""
+    # Whole-party floor (any currency) — catches absurdly low totals.
+    if opt.price_inr < FLIGHT_PRICE_INR_FLOOR:
+        return True
+    # INR-labeled fares are the ones the supplier mislabels; hold them to a
+    # realistic per-adult floor. Converted USD/AED fares are trusted.
+    if opt.currency_original.upper() == "INR":
+        per_adult = opt.price_per_adult_inr
+        if per_adult is None and opt.pax_count > 0:
+            per_adult = opt.price_inr / opt.pax_count
+        if per_adult is not None and per_adult < FLIGHT_INR_LABELED_PER_ADULT_FLOOR:
+            return True
+    return False
+
 
 def parse_flight_response(
     raw: dict[str, Any],
@@ -116,13 +140,13 @@ def parse_flight_response(
     expected_dest_upper = expected_destination.upper() if expected_destination else None
     expected_origin_upper = expected_origin.upper() if expected_origin else None
 
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     options: list[FlightOption] = []
     for item in itineraries:
         opt = _parse_flight_itinerary(item, rates)
         if opt is None:
             continue
-        if opt.price_inr < FLIGHT_PRICE_INR_FLOOR:
+        if _is_bogus_flight(opt):
             continue
         # Drop itineraries to/from the wrong airport
         if expected_dest_upper and opt.segments_outbound:
@@ -157,6 +181,21 @@ def _parse_flight_itinerary(item: dict[str, Any], rates: dict[str, float]) -> Fl
     base_fare_inr = _safe_to_inr(itin.get("baseFare", {}).get("amount"), currency, rates)
     total_tax_inr = _safe_to_inr(itin.get("totalTax", {}).get("amount"), currency, rates)
 
+    # Per-adult fare + total pax come straight from the supplier's per-passenger
+    # breakdown — so we quote a REAL per-person number, never total ÷ pax guessed
+    # by the agent. ptC_FareBreakdowns has one entry per passenger type (ADT/CHD/INF).
+    price_per_adult_inr: float | None = None
+    pax_count = 0
+    for b in pricing.get("ptC_FareBreakdowns") or []:
+        if not isinstance(b, dict):
+            continue
+        ptq = b.get("passengerTypeQuantity") or {}
+        qty = _safe_int(ptq.get("quantity")) or 0
+        pax_count += qty
+        if str(ptq.get("code") or "").upper() == "ADT":
+            adt_fare = (b.get("passengerFare") or {}).get("totalFare") or {}
+            price_per_adult_inr = _safe_to_inr(adt_fare.get("amount"), currency, rates)
+
     od_options = item.get("originDestinationOptions") or []
     segs_out = _parse_segments(od_options[0]) if len(od_options) > 0 else []
     segs_ret = _parse_segments(od_options[1]) if len(od_options) > 1 else []
@@ -188,6 +227,8 @@ def _parse_flight_itinerary(item: dict[str, Any], rates: dict[str, float]) -> Fl
         fare_source_code=str(pricing.get("fareSourceCode") or ""),
         itinerary_source_code=str(item.get("itinerarySourceCode") or ""),
         price_inr=price_inr,
+        price_per_adult_inr=price_per_adult_inr,
+        pax_count=pax_count,
         price_original=float(amount),
         currency_original=str(currency),
         base_fare_inr=base_fare_inr,
@@ -303,6 +344,7 @@ def parse_hotel_response(
     nights: int,
     hotel_names: dict[str, str] | None = None,
     hotel_areas: dict[str, str] | None = None,
+    hotel_stars: dict[str, float] | None = None,
     max_results: int | None = None,
 ) -> list[HotelOption]:
     if not isinstance(raw, dict):
@@ -314,13 +356,14 @@ def parse_hotel_response(
         return []
 
     response_currency = rs.get("Currency") or "USD"
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     names = hotel_names or {}
     areas = hotel_areas or {}
+    star_map = hotel_stars or {}
 
     options: list[HotelOption] = []
     for h in hotel_results:
-        opt = _parse_hotel(h, nights, response_currency, rates, names, areas)
+        opt = _parse_hotel(h, nights, response_currency, rates, names, areas, star_map)
         if opt is not None:
             options.append(opt)
     options.sort(key=lambda o: o.price_inr)
@@ -334,6 +377,7 @@ def _parse_hotel(
     rates: dict[str, float],
     names: dict[str, str],
     areas: dict[str, str],
+    star_map: dict[str, float] | None = None,
 ) -> HotelOption | None:
     if not isinstance(h, dict):
         return None
@@ -345,7 +389,11 @@ def _parse_hotel(
     area = areas.get(hotel_id_str, "")
 
     start_price = float(h.get("StartPrice") or 0)
+    # The availability API does NOT return star ratings (sends 0). Fall back to
+    # the reference-data stars so the star filter actually works.
     stars = float(h.get("StarRating") or 0)
+    if stars <= 0 and star_map:
+        stars = float(star_map.get(hotel_id_str, 0) or 0)
 
     rooms: list[HotelRoom] = []
     for opt in h.get("HotelOption") or []:
@@ -449,7 +497,7 @@ def parse_tour_response(
                 if tid is not None:
                     rate_map[tid] = r
 
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     options: list[TourOption] = []
     for t in tour_list:
         opt = _parse_tour(t, rate_map, rates, image_base_url)
@@ -535,7 +583,7 @@ def parse_transfer_response(
     result = raw.get("result")
     if not isinstance(result, list):
         return []
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     options: list[TransferOption] = []
     for t in result:
         opt = _parse_transfer(t, rates, image_base_url)
@@ -555,15 +603,29 @@ def _parse_transfer(t: Any, rates: dict[str, float], image_base_url: str) -> Tra
     price_inr = _safe_to_inr(price, currency, rates)
     if price_inr is None:
         return None
-    transfer_type = str(t.get("transferType") or "Private Transfer")
+    transfer_type = str(t.get("transferType") or "")
     vehicle_type = str(t.get("vehicleType") or "")
+    vehicle_name = str(t.get("vehicleName") or "")
+    # Shared vs Private: the supplier signals "Shared" in transferType, but PRIVATE
+    # is only spelled out in the vehicle NAME ("... Private Van/Bus"). Detect both
+    # so the agent can offer the traveller a shared OR private option.
+    name_lc = vehicle_name.lower()
+    is_shared = "shared" in transfer_type.lower() or "sharing" in transfer_type.lower() or "shared" in name_lc
+    is_private = "private" in name_lc or "private" in transfer_type.lower()
     badges: list[str] = []
-    if "Private" in transfer_type:
+    if is_shared:
+        badges.append("Shared")
+    if is_private:
         badges.append("Private")
-    if "Sharing" in transfer_type:
-        badges.append("Sharing")
     if vehicle_type:
         badges.append(vehicle_type)
+    # Normalize transfer_type so downstream/agent sees a clear shared|private label.
+    if is_shared:
+        transfer_type = "Shared"
+    elif is_private:
+        transfer_type = "Private"
+    elif not transfer_type:
+        transfer_type = "Private"  # supplier default when unmarked
     return TransferOption(
         transfer_id=str(t.get("transferID") or t.get("uniqueKey") or t.get("vehicleId") or ""),
         unique_key=str(t.get("uniqueKey") or ""),
@@ -600,7 +662,7 @@ def parse_restaurant_response(
     items = result.get("list") if isinstance(result, dict) else None
     if not isinstance(items, list):
         return []
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     options: list[RestaurantOption] = []
     for r in items:
         opt = _parse_restaurant(r, rates, image_base_url)
@@ -673,7 +735,7 @@ def parse_visa_response(raw: dict[str, Any], *, max_results: int | None = None) 
     else:
         visas_list = []
 
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     options: list[VisaOption] = []
     for v in visas_list:
         if not isinstance(v, dict):
@@ -862,7 +924,7 @@ def parse_package_response(
     if not isinstance(list_items, list):
         return []
 
-    rates = get_currency_settings().as_rate_map()
+    rates = live_rate_map()
     out: list[dict[str, Any]] = []
     for p in list_items:
         if not isinstance(p, dict):
@@ -971,11 +1033,15 @@ def _unwrap_result(raw: Any) -> Any:
     """Peel the common response envelope to the meaningful payload.
 
     Hotel-static endpoints variously nest the body under Result/result/Data/
-    Response. Returns the innermost recognized payload, else the input.
+    Response, or under `raw` (our http_client wraps a top-level JSON LIST as
+    {"raw": [...]}, which is exactly how GetCitiesWithHotel / GetStaticDataByCity
+    return their arrays). Returns the innermost recognized payload, else input.
     """
     if not isinstance(raw, dict):
         return raw
-    payload = _first_present(raw, "Result", "result", "Data", "data", "Response", "response")
+    payload = _first_present(
+        raw, "Result", "result", "Data", "data", "Response", "response", "raw"
+    )
     return payload if payload is not None else raw
 
 
@@ -995,13 +1061,25 @@ def parse_hotel_cities_response(
     for c in cities:
         if not isinstance(c, dict):
             continue
-        city_id = _safe_int(_first_present(c, "CityID", "CityId", "cityId", "cityid"))
+        # Real GetCitiesWithHotel item shape (June 2026):
+        #   {Id: 244520, LocationId: "6053839", FullName: "...", Type: "city",
+        #    Name: "Dubai", Rank: 5}
+        # The numeric `Id` IS the CityID used by HotelSearch; `LocationId` +
+        # `Type` feed GetStaticDataByCity. Accept the legacy CityID keys too.
+        city_id = _safe_int(_first_present(c, "CityID", "CityId", "cityId", "cityid", "Id", "id"))
         if city_id is None:
             continue
         out.append(
             {
                 "city_id": city_id,
-                "city_name": str(_first_present(c, "CityName", "cityName", "name") or "").strip(),
+                "location_id": str(
+                    _first_present(c, "LocationId", "locationId", "LocationID") or ""
+                ).strip(),
+                "type": str(_first_present(c, "Type", "type") or "").strip(),
+                "city_name": str(
+                    _first_present(c, "CityName", "cityName", "Name", "name") or ""
+                ).strip(),
+                "full_name": str(_first_present(c, "FullName", "fullName") or "").strip(),
                 "country_name": str(
                     _first_present(c, "CountryName", "countryName", "country") or ""
                 ).strip(),
@@ -1025,8 +1103,17 @@ def parse_hotel_static_data_response(
     if not isinstance(raw, dict):
         raise HotelStaticNormalizationError("Expected dict response", missing_field="root")
     payload = _unwrap_result(raw)
+    # Real shapes: GetHotelStaticDataOptimize -> {"PropertyInfo": [...]},
+    # gethotelstaticdatalistsuboptimize_v1_Address -> {"PropertyAddressInfo": [...]}.
     hotels = _first_present(
-        payload, "Hotels", "HotelList", "HotelStaticData", "hotels", "list"
+        payload,
+        "Hotels",
+        "HotelList",
+        "HotelStaticData",
+        "PropertyInfo",
+        "PropertyAddressInfo",
+        "hotels",
+        "list",
     )
     if hotels is None and isinstance(payload, list):
         hotels = payload
@@ -1061,6 +1148,13 @@ def _parse_hotel_static_record(h: Any) -> dict[str, Any] | None:
         country = str(_first_present(h, "Country", "country") or "")
         latitude = _first_present(h, "Latitude", "latitude")
         longitude = _first_present(h, "Longitude", "longitude")
+    # Flat shape (HotelPropertyInfo / PropertyAddressInfo): hotel_address + lat/long
+    if not full_address:
+        full_address = _strip_html(_first_present(h, "hotel_address", "HotelAddress"))
+    if latitude is None:
+        latitude = _first_present(h, "lat", "Lat")
+    if longitude is None:
+        longitude = _first_present(h, "long", "Long", "lng")
 
     facilities = _first_present(h, "Facilities", "Amenities", "facilities", "amenities") or []
     if isinstance(facilities, str):

@@ -73,6 +73,23 @@ def get_hotel_areas(city_key: str = "dubai") -> dict[str, str]:
     return {}
 
 
+def get_hotel_stars(city_key: str = "dubai") -> dict[str, float]:
+    """Map hotel id -> star rating from reference data.
+
+    The availability API does NOT return star ratings (it sends 0), so the
+    star filter must fall back to these known ratings — otherwise any
+    min_stars>=1 filter drops every hotel.
+    """
+    if city_key.lower() == "dubai":
+        hotels = _load_dubai_hotels().get("hotels") or []
+        return {
+            str(h["id"]): float(h.get("stars") or 0)
+            for h in hotels
+            if isinstance(h, dict) and "id" in h
+        }
+    return {}
+
+
 def list_indian_origins() -> list[str]:
     cities = _load_cities().get("cities") or {}
     return [

@@ -43,6 +43,39 @@ class TestTokenWiring:
         s = self._settings(token="MAIN", hotel_static_token="")
         assert s.hotel_static_bearer() == "MAIN"
 
+    @staticmethod
+    def _jwt(services: list[str]) -> str:
+        """Build an unsigned JWT with a given serviceType claim (for scope check)."""
+        import base64
+        import json
+
+        hdr = base64.urlsafe_b64encode(b'{"alg":"HS256"}').decode().rstrip("=")
+        pl = base64.urlsafe_b64encode(json.dumps({"serviceType": services}).encode())
+        return f"{hdr}.{pl.decode().rstrip('=')}.sig"
+
+    def test_all_services_token_has_no_missing(self) -> None:
+        from settings import BookingApiSettings
+
+        tok = self._jwt(["Hotels", "Flight", "Packages", "Restaurant", "Transfer", "Visa"])
+        s = BookingApiSettings(_env_file=None, BOOKING_TOKEN=tok)
+        assert s.main_token_missing_services() == []
+
+    def test_activities_only_token_flags_missing(self) -> None:
+        """An Activities-only token (the GT-018 mis-config) must be flagged —
+        it silently returns null for hotels otherwise."""
+        from settings import BookingApiSettings
+
+        s = BookingApiSettings(_env_file=None, BOOKING_TOKEN=self._jwt(["Activities"]))
+        missing = s.main_token_missing_services()
+        assert "Hotels" in missing
+        assert "Flight" in missing
+
+    def test_undecodable_token_does_not_false_alarm(self) -> None:
+        from settings import BookingApiSettings
+
+        assert BookingApiSettings(_env_file=None, BOOKING_TOKEN="not.a.jwt").main_token_missing_services() == []
+        assert BookingApiSettings(_env_file=None, BOOKING_TOKEN="").main_token_missing_services() == []
+
     def test_hotel_static_headers_use_hotel_token(self, monkeypatch: Any) -> None:
         import booking_api.headers as headers
 
@@ -143,15 +176,33 @@ class TestHotelStaticParsers:
         out = parse_hotel_cities_response(
             {"Result": {"Cities": [{"CityID": 244520, "CityName": "Dubai"}]}}
         )
-        assert out == [
-            {
-                "city_id": 244520,
-                "city_name": "Dubai",
-                "country_name": "",
-                "country_id": None,
-                "state_name": "",
-            }
-        ]
+        assert len(out) == 1
+        assert out[0]["city_id"] == 244520
+        assert out[0]["city_name"] == "Dubai"
+
+    def test_cities_real_raw_shape_with_location_id(self) -> None:
+        """REGRESSION: live GetCitiesWithHotel returns a `raw`-wrapped list with
+        Id / LocationId / Type / Name (NOT a Cities/CityID envelope). The parser
+        must extract these or the discovery flow silently returns 0 cities."""
+        raw = {
+            "raw": [
+                {
+                    "Id": 244520,
+                    "LocationId": "6053839",
+                    "FullName": "Dubai, Dubai, United Arab Emirates",
+                    "Type": "city",
+                    "Name": "Dubai",
+                    "Rank": 5,
+                }
+            ]
+        }
+        out = parse_hotel_cities_response(raw)
+        assert len(out) == 1
+        c = out[0]
+        assert c["city_id"] == 244520
+        assert c["location_id"] == "6053839"  # feeds GetStaticDataByCity
+        assert c["type"] == "city"
+        assert c["city_name"] == "Dubai"
 
     def test_cities_lowercase_keys(self) -> None:
         out = parse_hotel_cities_response(
@@ -159,6 +210,20 @@ class TestHotelStaticParsers:
         )
         assert out[0]["city_id"] == 1
         assert out[0]["city_name"] == "X"
+
+    def test_static_data_real_raw_shape(self) -> None:
+        """REGRESSION: live GetStaticDataByCity returns a `raw`-wrapped list of
+        {HotelId, StarRating, Category}. Must parse (was returning 0 hotels)."""
+        raw = {
+            "raw": [
+                {"HotelId": 306, "IsRecommand": False, "Category": "Hotel", "StarRating": 5.0},
+                {"HotelId": 451, "Category": "Hotel", "StarRating": 4.0},
+            ]
+        }
+        out = parse_hotel_static_data_response(raw)
+        assert len(out) == 2
+        assert out[0]["hotel_id"] == 306
+        assert out[0]["stars"] == 5.0
 
     def test_static_data_strips_html_and_parses_coords(self) -> None:
         out = parse_hotel_static_data_response(
