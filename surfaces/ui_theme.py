@@ -13,13 +13,13 @@ from __future__ import annotations
 import streamlit as st
 
 PALETTE = {
-    "ground": "#FAF8F4",
-    "surface": "#FFFFFF",
+    "ground": "#E8DFD0",
+    "surface": "#F0E8DA",
     "text": "#2A2622",
     "muted": "#7A726A",
     "accent": "#E07A3F",
     "accent2": "#1F6F6B",
-    "line": "#E7E0D6",
+    "line": "#D4C9B5",
 }
 
 _CSS = """
@@ -27,15 +27,15 @@ _CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
-  --ground:  #FAF8F4;
-  --surface: #FFFFFF;
+  --ground:  #E8DFD0;
+  --surface: #F0E8DA;
   --text:    #2A2622;
   --muted:   #7A726A;
   --accent:  #E07A3F;
   --accent2: #1F6F6B;
-  --line:    #E7E0D6;
+  --line:    #D4C9B5;
   --radius:  18px;
-  --shadow:  0 10px 30px -12px rgba(42,38,34,.18);
+  --shadow:  0 10px 30px -12px rgba(42,38,34,.22);
 }
 
 /* ---- base ---- */
@@ -47,9 +47,9 @@ html, body, [class*="css"], .stApp {
 .stApp {
   /* soft desert-to-oasis wash so the off-white isn't flat */
   background:
-    radial-gradient(1200px 480px at 88% -8%, rgba(224,122,63,.08), transparent 60%),
-    radial-gradient(900px 420px at 0% 8%, rgba(31,111,107,.06), transparent 55%),
-    var(--ground);
+    radial-gradient(1200px 480px at 88% -8%, rgba(224,122,63,.12), transparent 60%),
+    radial-gradient(900px 420px at 0% 8%, rgba(31,111,107,.08), transparent 55%),
+    #E8DFD0;
 }
 
 /* headings in the display serif */
@@ -79,7 +79,7 @@ div[data-baseweb="tab-list"] {
   z-index: 999999;
   gap: 6px;
   padding: 7px;
-  background: rgba(251,249,245,.65);
+  background: rgba(232,223,208,.75);
   backdrop-filter: blur(16px) saturate(150%);
   -webkit-backdrop-filter: blur(16px) saturate(150%);
   border: 1px solid rgba(255,255,255,.55);
@@ -113,7 +113,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
   background: var(--surface);
   border: 1px solid var(--line) !important;
   border-radius: var(--radius) !important;
-  box-shadow: var(--shadow);
+  box-shadow: 0 12px 32px -14px rgba(42,38,34,.22);
   overflow: hidden;
 }
 
@@ -135,7 +135,7 @@ div[data-testid="stChatMessage"] { background: transparent; }
 
 /* sidebar */
 section[data-testid="stSidebar"] {
-  background: var(--surface);
+  background: #DDD3C0;
   border-right: 1px solid var(--line);
 }
 
@@ -185,7 +185,7 @@ def render_calendar_html(days: list[dict], *, start_hour: int = 8, end_hour: int
     start/end time. Returns a self-contained HTML string for components.html."""
     if not days:
         return "<p>No schedule yet.</p>"
-    row_h = 56  # px per hour
+    row_h = 64  # px per hour
     grid_h = (end_hour - start_hour) * row_h
     ncols = len(days)
 
@@ -199,11 +199,17 @@ def render_calendar_html(days: list[dict], *, start_hour: int = 8, end_hour: int
 
     cols_html = ""
     for d in days:
-        # header
+        # header — pick a tint from the first item's kind for the day column
         date = d.get("date", "")
         label = d.get("label", "")
+        first_kind = (d.get("items") or [{}])[0].get("kind", "other")
+        col_tint, _ = _CATEGORY_TINT.get(first_kind, _CATEGORY_TINT["other"])
+        # convert hex to rgb for gradient
+        _hex = col_tint.lstrip("#")
+        _r, _g, _b = int(_hex[0:2], 16), int(_hex[2:4], 16), int(_hex[4:6], 16)
         head = (
-            f"<div style='text-align:center;padding:10px 6px;border-bottom:1px solid {PALETTE['line']}'>"
+            f"<div style='text-align:center;padding:10px 6px;border-bottom:1px solid {PALETTE['line']};"
+            f"background:linear-gradient(180deg,rgba({_r},{_g},{_b},0.12) 0%,transparent 100%)'>"
             f"<div style='font:600 13px Inter,sans-serif;color:{PALETTE['text']}'>{date}</div>"
             f"<div style='font:500 11px Inter,sans-serif;color:{PALETTE['muted']}'>{label}</div></div>"
         )
@@ -223,10 +229,13 @@ def render_calendar_html(days: list[dict], *, start_hour: int = 8, end_hour: int
             )
             blocks += (
                 f"<div style='position:absolute;top:{top}px;left:4px;right:4px;height:{height}px;"
-                f"background:{tint};color:#fff;border-radius:10px;padding:6px 8px;overflow:hidden;"
+                f"background:linear-gradient(135deg,{tint} 0%,rgba(0,0,0,0.3) 100%);"
+                f"color:#fff;border-radius:10px;padding:6px 8px;overflow:hidden;"
                 f"box-shadow:0 4px 10px -4px rgba(0,0,0,.3)'>"
-                f"<div style='font:600 11px Inter;line-height:1.15'>{glyph} {it['title']}</div>"
-                f"<div style='font:500 9px Inter;opacity:.9'>{time_lbl}</div>{detail}</div>"
+                f"<div style='font:600 11px Inter;line-height:1.15;"
+                f"text-shadow:0 1px 3px rgba(0,0,0,0.4)'>{glyph} {it['title']}</div>"
+                f"<div style='font:500 9px Inter;opacity:.9;"
+                f"text-shadow:0 1px 3px rgba(0,0,0,0.4)'>{time_lbl}</div>{detail}</div>"
             )
         cols_html += (
             f"<div style='flex:1;min-width:150px;border-left:1px solid {PALETTE['line']}'>"
@@ -240,9 +249,9 @@ def render_calendar_html(days: list[dict], *, start_hour: int = 8, end_hour: int
     <div style="font-family:Inter,sans-serif;background:{PALETTE['surface']};
          border:1px solid {PALETTE['line']};border-radius:16px;overflow:hidden;
          box-shadow:0 10px 30px -12px rgba(42,38,34,.18)">
-      <div style="display:flex">
+      <div style="display:flex;overflow:hidden">
         <div style="width:58px;flex:none;padding-top:{44}px">{gutter}</div>
-        <div style="display:flex;flex:1;overflow-x:auto">{cols_html}</div>
+        <div style="display:flex;flex:1;overflow-x:auto;overflow-y:hidden">{cols_html}</div>
       </div>
     </div>"""
 
