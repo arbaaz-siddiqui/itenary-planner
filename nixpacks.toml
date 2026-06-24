@@ -20,5 +20,7 @@ cmds = [
 [phases.build]
 cmds = []
 
-[start]
-cmd = "uvicorn surfaces.whatsapp_app:app --host 0.0.0.0 --port $PORT"
+# No [start] here — each branch's railway.toml defines the start command.
+# whatsapp/development → uvicorn surfaces.whatsapp_app:app
+# chat/development     → streamlit run surfaces/streamlit_app.py
+# voice/development    → uvicorn voice_service:app
