@@ -2,7 +2,7 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "streamlit run surfaces/streamlit_app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true --server.enableCORS=false --server.enableXsrfProtection=false"
+startCommand = "PYTHONPATH=/app streamlit run surfaces/streamlit_app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true --server.enableCORS=false --server.enableXsrfProtection=false"
 healthcheckPath = "/_stcore/health"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
