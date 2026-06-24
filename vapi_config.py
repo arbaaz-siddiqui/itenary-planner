@@ -204,13 +204,16 @@ def build_assistant_config() -> dict:
         # Caller can interrupt the agent mid-sentence — natural conversation.
         "interruptionsEnabled": True,
 
+        # Allow interrupting even the first message (no forced intro monologue).
+        "firstMessageInterruptionsEnabled": True,
+
         # Background noise removal (call centre / road noise).
         "backgroundDenoisingEnabled": True,
 
         # ── Call lifecycle ──────────────────────────────────────────────────
         "firstMessage": (
-            "Hi! I'm your Dubai trip planner. "
-            "Where are you flying from, and when are you looking to travel?"
+            "Hey, thanks for calling! I'm your Dubai trip planner. "
+            "Quick question — where are you flying in from, and when are you thinking of going?"
         ),
         "firstMessageMode": "assistant-speaks-first",
 
