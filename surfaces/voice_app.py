@@ -74,23 +74,43 @@ URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 MD_HEADING_RE = re.compile(r"^#{1,6}\s+", re.MULTILINE)
 MD_EMPHASIS_RE = re.compile(r"[*_`#~]+")
 MD_BULLET_RE = re.compile(r"^\s*[-*•]\s+", re.MULTILINE)
+_RUPEE_RE = re.compile(r"₹\s*([\d,]+)")
+
+
+def _humanise_numbers(text: str) -> str:
+    """Convert ₹1,24,500 → 'one lakh twenty four thousand rupees' style.
+    TTS reads raw ₹ figures awkwardly; spoken amounts sound natural."""
+    def _replace(m: re.Match) -> str:
+        raw = m.group(1).replace(",", "")
+        try:
+            n = int(raw)
+        except ValueError:
+            return m.group(0)
+        if n >= 10_00_000:
+            return f"{n / 10_00_000:g} crore rupees"
+        if n >= 1_00_000:
+            return f"{n / 1_00_000:g} lakh rupees"
+        if n >= 1_000:
+            return f"{n:,} rupees"
+        return f"{n} rupees"
+    return _RUPEE_RE.sub(_replace, text)
 
 
 def format_for_voice(text: str) -> str:
     """Make agent text safe and natural for text-to-speech.
 
     Removes markdown tables, headings, emphasis characters, bullets and URLs,
-    and collapses whitespace into spoken-friendly sentences.
+    humanises currency figures, and collapses whitespace into spoken sentences.
     """
     if not text:
         return ""
-    text = TABLE_LINE_RE.sub("", text)  # drop table rows entirely
-    text = URL_RE.sub("", text)  # never read a URL aloud
-    text = MD_HEADING_RE.sub("", text)  # "## Hotels" -> "Hotels"
-    text = MD_BULLET_RE.sub("", text)  # "- item" -> "item"
-    text = MD_EMPHASIS_RE.sub("", text)  # strip * _ ` # ~
+    text = TABLE_LINE_RE.sub("", text)
+    text = URL_RE.sub("", text)
+    text = MD_HEADING_RE.sub("", text)
+    text = MD_BULLET_RE.sub("", text)
+    text = MD_EMPHASIS_RE.sub("", text)
     text = text.replace("&", " and ")
-    # Collapse blank lines/extra spaces; periods make TTS pause naturally.
+    text = _humanise_numbers(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{2,}", ". ", text)
     text = re.sub(r"\n", " ", text)

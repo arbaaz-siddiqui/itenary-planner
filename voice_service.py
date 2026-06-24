@@ -168,9 +168,38 @@ _URL = re.compile(r"https?://\S+", re.IGNORECASE)
 _HEAD = re.compile(r"^#{1,6}\s+", re.MULTILINE)
 _EMPH = re.compile(r"[*_`#~]+")
 _BULLET = re.compile(r"^\s*[-*•]\s+", re.MULTILINE)
+_RUPEE = re.compile(r"₹\s*([\d,]+)")          # ₹1,00,000 → "1 lakh rupees" etc.
+
+
+def _humanise_numbers(text: str) -> str:
+    """Convert ₹1,24,500 → 'one lakh twenty four thousand five hundred rupees'.
+    Keeps the conversation natural — TTS reads raw numbers awkwardly."""
+    def _replace(m: re.Match) -> str:
+        raw = m.group(1).replace(",", "")
+        try:
+            n = int(raw)
+        except ValueError:
+            return m.group(0)
+        if n >= 10_00_000:
+            cr = n / 10_00_000
+            return f"{cr:g} crore rupees"
+        if n >= 1_00_000:
+            lk = n / 1_00_000
+            return f"{lk:g} lakh rupees"
+        if n >= 1_000:
+            return f"{n:,} rupees"
+        return f"{n} rupees"
+    return _RUPEE.sub(_replace, text)
 
 
 def format_for_voice(text: str) -> str:
+    """Make agent text safe and natural for text-to-speech.
+
+    Pipeline:
+    1. Strip all markdown (tables, headings, bullets, emphasis, URLs)
+    2. Humanise currency figures (₹ → spoken rupees)
+    3. Collapse whitespace into spoken-friendly sentences
+    """
     if not text:
         return ""
     text = _TABLE.sub("", text)
@@ -179,11 +208,43 @@ def format_for_voice(text: str) -> str:
     text = _BULLET.sub("", text)
     text = _EMPH.sub("", text)
     text = text.replace("&", " and ")
+    text = _humanise_numbers(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{2,}", ". ", text)
     text = re.sub(r"\n", " ", text)
     text = re.sub(r"\s+([.,!?])", r"\1", text)
     return re.sub(r"\.{2,}", ".", text).strip()
+
+
+# Filler phrases spoken IMMEDIATELY while the agent thinks — kills dead air.
+_FILLERS: dict[str, str] = {
+    "flight":   "Sure, let me check those flights...",
+    "fly":      "Sure, let me check those flights...",
+    "hotel":    "Looking up hotels for you...",
+    "stay":     "Looking up hotels for you...",
+    "room":     "Looking up hotels for you...",
+    "tour":     "Checking tour options...",
+    "safari":   "Checking tour options...",
+    "burj":     "Checking tour options...",
+    "transfer": "Looking up transfers...",
+    "taxi":     "Looking up transfers...",
+    "visa":     "Pulling visa info...",
+    "budget":   "Let me run those numbers...",
+    "cost":     "Let me run those numbers...",
+    "price":    "Let me run those numbers...",
+    "plan":     "On it, give me just a moment...",
+    "trip":     "On it, give me just a moment...",
+    "itinerary":"On it, give me just a moment...",
+}
+_DEFAULT_FILLER = "Got it, one moment..."
+
+
+def _filler_for(transcript: str) -> str:
+    t = transcript.lower()
+    for keyword, filler in _FILLERS.items():
+        if keyword in t:
+            return filler
+    return _DEFAULT_FILLER
 
 
 def run_planner_turn(transcript: str, session_id: str) -> str:
@@ -303,9 +364,13 @@ async def vapi_chat_completions(request: Request) -> Any:
 
     def gen():
         yield _sse_chunk(cid, model, {"role": "assistant"}, None)
-        reply = run_planner_turn(transcript, session_id) if transcript.strip() else (
-            "Hello! How can I help you plan your trip today?"
-        )
+        if not transcript.strip():
+            reply = "Hello! I'm your Dubai trip planner. Where are you flying from?"
+        else:
+            # Stream a filler immediately — Vapi speaks this while agent searches.
+            # Keeps the call alive; no dead air while booking APIs respond.
+            yield _sse_chunk(cid, model, {"content": _filler_for(transcript)}, None)
+            reply = run_planner_turn(transcript, session_id)
         yield _sse_chunk(cid, model, {"content": reply}, None)
         yield _sse_chunk(cid, model, {}, "stop")
         yield "data: [DONE]\n\n"
