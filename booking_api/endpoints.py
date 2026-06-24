@@ -35,6 +35,7 @@ Each function:
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
 from booking_api.headers import (
@@ -44,7 +45,7 @@ from booking_api.headers import (
     flight_search_headers,
     hotel_static_headers,
 )
-from booking_api.http_client import get_client
+from booking_api.http_client import get_b2c_client, get_client
 from core import (
     BookingApiError,
     CurrencyRoeFailed,
@@ -72,6 +73,11 @@ HOTEL_AVAILABILITY_PATH = "/api/xconnect/Availabilitywithcancellation"
 TOUR_LIST_PATH = "/api/v1/tourservices/TourSearch/toursearchlist"
 TOUR_RATE_PATH = "/api/v1/tourservices/TourSearch/toursearchlistrate"
 TOUR_DETAILS_PATH = "/api/v1/tourservices/TourSearch/Tourdetails"
+TOUR_TIMESLOT_PATH = "/api/v1/tourservices/TourSearch/Timeslot"
+# B2C host (stagingb2c) — see get_b2c_client().
+TOUR_OPTIONS_PATH = "/api/tours/options"
+TOUR_PRICE_CALENDAR_PATH = "/api/tours/tour-price-check-calender"  # supplier's spelling
+TOUR_OPTION_DETAILS_PATH = "/api/tours/option-details"
 TRANSFER_LIST_PATH = "/api/transferservices/TransferList"
 TRANSFER_DETAILS_PATH = "/api/transferservices/TransferDetail"
 RESTAURANT_LIST_PATH = "/api/restaurant/v1/restaurants"
@@ -392,6 +398,114 @@ def call_tour_details(*, tour_id: int) -> dict[str, Any]:
 
 
 # =============================================================================
+# Tour booking-flow endpoints (time slots, options, price calendar, option detail)
+# =============================================================================
+# These drill into a chosen tour: TourList/Rate gives tourId + supplierId, then
+# options -> time slots / price calendar / option details. Three of them live on
+# the B2C host (get_b2c_client); TourTimeSlot is on the main B2B host.
+
+
+def call_tour_options(*, tour_id: int, travel_date: str, lang: str = "en") -> dict[str, Any]:
+    """Available options/variants for a tour (B2C). Returns tourOptionId/ratePlanId."""
+    payload: dict[str, Any] = {"tourID": tour_id, "travelDate": travel_date, "lang": lang}
+    try:
+        return get_b2c_client().post(TOUR_OPTIONS_PATH, json=payload, headers=base_headers())
+    except Exception as e:
+        if isinstance(e, BookingApiError):
+            raise
+        raise TourDetailsFailed(f"Tour options call failed: {e}", endpoint=TOUR_OPTIONS_PATH) from e
+
+
+def call_tour_timeslots(
+    *,
+    tour_id: int,
+    tour_option_id: str,
+    travel_date: str,
+    supplier_id: int,
+    transfer_id: int = 0,
+    adults: int = 1,
+    adult_age: int = 30,
+    lang: str = "en",
+) -> dict[str, Any]:
+    """Available time slots for a tour option on a date. Returns timeslotId(s)."""
+    payload: dict[str, Any] = {
+        "tourId": tour_id,
+        "transferId": transfer_id,
+        "tourOptionId": str(tour_option_id),
+        "travelDate": travel_date,
+        "supplierId": supplier_id,
+        "paxDetails": [{"Label": "Adult", "Value": str(adults), "Age": str(adult_age)}],
+        "lang": lang,
+    }
+    try:
+        return get_client().post(TOUR_TIMESLOT_PATH, json=payload, headers=base_headers())
+    except Exception as e:
+        if isinstance(e, BookingApiError):
+            raise
+        raise TourDetailsFailed(
+            f"Tour timeslot call failed: {e}", endpoint=TOUR_TIMESLOT_PATH
+        ) from e
+
+
+def call_tour_price_calendar(
+    *,
+    tour_id: int,
+    tour_option_id: int,
+    start_month: int,
+    end_month: int,
+    rate_plan_id: int = 0,
+    timeslot_id: int = 0,
+    lang: str = "en",
+) -> dict[str, Any]:
+    """Price-availability calendar for a tour option across a month range (B2C)."""
+    payload: dict[str, Any] = {
+        "tourId": tour_id,
+        "tourOptionId": tour_option_id,
+        "ratePlanId": rate_plan_id,
+        "timeslotId": timeslot_id,
+        "startMonth": start_month,
+        "endMonth": end_month,
+        "lang": lang,
+    }
+    try:
+        return get_b2c_client().post(
+            TOUR_PRICE_CALENDAR_PATH, json=payload, headers=base_headers()
+        )
+    except Exception as e:
+        if isinstance(e, BookingApiError):
+            raise
+        raise TourDetailsFailed(
+            f"Tour price-calendar call failed: {e}", endpoint=TOUR_PRICE_CALENDAR_PATH
+        ) from e
+
+
+def call_tour_option_details(
+    *, tour_id: int, tour_option_id: str, supplier_id: int, lang: str = "en"
+) -> dict[str, Any]:
+    """Full detail for a tour option: pricing, inclusions, cancellation (B2C).
+
+    The collection sends NO auth header for this endpoint, but passing the Bearer
+    token (as get_b2c_client does) is harmless and consistent.
+    """
+    payload: dict[str, Any] = {
+        "tourId": tour_id,
+        "tourOptionId": str(tour_option_id),
+        "supplierId": supplier_id,
+        "lang": lang,
+    }
+    try:
+        return get_b2c_client().post(
+            TOUR_OPTION_DETAILS_PATH, json=payload, headers=base_headers()
+        )
+    except Exception as e:
+        if isinstance(e, BookingApiError):
+            raise
+        raise TourDetailsFailed(
+            f"Tour option-details call failed: {e}", endpoint=TOUR_OPTION_DETAILS_PATH
+        ) from e
+
+
+# =============================================================================
 # Transfers (list + details)
 # =============================================================================
 # fromType / toType single-letter codes per client's Postman:
@@ -415,24 +529,32 @@ def _transfer_payload(
     is_round_trip: bool = False,
     from_type: str = TRANSFER_TYPE_AIRPORT,
     to_type: str = TRANSFER_TYPE_OTHER,
+    from_location_name: str = "",
+    to_location_name: str = "",
     adults: int = 1,
     unique_key: str | None = None,
 ) -> dict[str, Any]:
-    # The transfer API rejects an empty returnDate with HTTP 400
-    # ("Search data cannot be null"), even for one-way searches. When no
-    # return date is supplied, fall back to the departure date — isRoundTrip=0
-    # still tells the supplier this is one-way, so the return value is ignored.
+    # Payload mirrors the N8N-Technoheven V1 collection's TransferList/Detail
+    # bodies EXACTLY: the supplier expects CAPITALIZED DepartureDate/ReturnDate/
+    # IsRoundTrip and the from/to location-name fields. The earlier lowercase
+    # keys (departureDate/returnDate) + agtMkp/agtMkpType were why transfer
+    # search failed; the new collection dropped agtMkp* and capitalized the dates.
+    #
+    # The API still rejects an empty ReturnDate even for one-way searches, so
+    # fall back to the departure date; IsRoundTrip=0 keeps it one-way.
     effective_return_date = return_date or departure_date
     payload: dict[str, Any] = {
         "fromLongitude": from_lng,
         "fromLatitude": from_lat,
         "toLongitude": to_lng,
         "toLatitude": to_lat,
-        "departureDate": departure_date,
+        "DepartureDate": departure_date,
         "departureTime": departure_time,
-        "returnDate": effective_return_date,
+        "ReturnDate": effective_return_date,
         "returnTime": return_time,
         "isRoundTrip": 1 if is_round_trip else 0,
+        "fromLocationName": from_location_name,
+        "toLocationName": to_location_name,
         "fromType": from_type,
         "toType": to_type,
         "fromPlaceId": from_place_id,
@@ -444,8 +566,6 @@ def _transfer_payload(
                 "transferRateTypeName": "Adult",
             }
         ],
-        "agtMkp": 0,
-        "agtMkpType": 0,
     }
     if unique_key is not None:
         payload["uniqueKey"] = unique_key
@@ -467,6 +587,8 @@ def call_transfer_search(
     is_round_trip: bool = False,
     from_type: str = TRANSFER_TYPE_AIRPORT,
     to_type: str = TRANSFER_TYPE_OTHER,
+    from_location_name: str = "",
+    to_location_name: str = "",
     adults: int = 1,
 ) -> dict[str, Any]:
     """List available transfers between two points."""
@@ -487,6 +609,8 @@ def call_transfer_search(
                 is_round_trip=is_round_trip,
                 from_type=from_type,
                 to_type=to_type,
+                from_location_name=from_location_name,
+                to_location_name=to_location_name,
                 adults=adults,
             ),
             headers=base_headers(),
@@ -515,6 +639,8 @@ def call_transfer_details(
     is_round_trip: bool = False,
     from_type: str = TRANSFER_TYPE_AIRPORT,
     to_type: str = TRANSFER_TYPE_OTHER,
+    from_location_name: str = "",
+    to_location_name: str = "",
     adults: int = 1,
 ) -> dict[str, Any]:
     """Get details for a specific transfer. uniqueKey comes from TransferList result."""
@@ -535,6 +661,8 @@ def call_transfer_details(
                 is_round_trip=is_round_trip,
                 from_type=from_type,
                 to_type=to_type,
+                from_location_name=from_location_name,
+                to_location_name=to_location_name,
                 adults=adults,
                 unique_key=unique_key,
             ),
@@ -854,6 +982,43 @@ def call_hotel_static_by_city(
         raise HotelStaticDataFailed(
             f"GetStaticDataByCity call failed: {e}", endpoint=HOTEL_STATIC_BY_CITY_PATH
         ) from e
+
+
+@lru_cache(maxsize=8)
+def discover_city_hotel_ids(city_id: int) -> tuple[tuple[int, float], ...]:
+    """Live (hotel_id, star_rating) list for a city, from GetStaticDataByCity.
+
+    The supplier exposes the full inventory here (thousands of hotels with star
+    ratings); search_hotels uses this to look beyond the small curated set.
+    Cached for the process lifetime — the list is large and effectively static
+    per city. Returns () on failure so the caller can fall back gracefully.
+    Sorted star-desc so a star-filtered batch favours rated properties.
+    """
+    try:
+        raw = call_hotel_static_by_city(city_id=city_id, lookup_type="city")
+    except Exception:
+        return ()
+    # GetStaticDataByCity returns {"CountryId": ..., "Hotels": [{HotelId, StarRating,
+    # Category, ...}, ...]} — thousands of hotels. Older code looked for "raw"/
+    # a top-level list and silently got nothing (→ only the 2 curated hotels showed).
+    items = None
+    if isinstance(raw, dict):
+        items = raw.get("Hotels") or raw.get("raw") or raw.get("result")
+    if not isinstance(items, list):
+        items = raw if isinstance(raw, list) else []
+    out: list[tuple[int, float]] = []
+    for h in items:
+        if not isinstance(h, dict):
+            continue
+        hid = h.get("HotelId") or h.get("hotelId")
+        if hid is None:
+            continue
+        try:
+            out.append((int(hid), float(h.get("StarRating") or 0)))
+        except (ValueError, TypeError):
+            continue
+    out.sort(key=lambda t: t[1], reverse=True)
+    return tuple(out)
 
 
 def call_hotel_static_data(

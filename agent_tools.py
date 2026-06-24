@@ -325,6 +325,103 @@ def get_destination_tips_tool(destination: str = "Dubai") -> dict[str, Any]:
     return {"destination": destination, **tips}
 
 
+_DISPLAYABLE_KINDS = {"flight", "hotel", "tour", "transfer", "restaurant", "visa", "package"}
+
+
+@tool
+def display_options_tool(kind: str) -> dict[str, Any]:
+    """Render the most recent search results for `kind` as visual cards (with
+    images where available) in the web UI.
+
+    Call this when the customer asks to SEE the options visually — "show me",
+    "render the images", "show with pictures", "let me see them", etc. It does
+    not fetch anything; it tells the web surface to display the cards from the
+    latest matching search. On WhatsApp (no UI) it is a harmless no-op.
+
+    Args:
+        kind: one of flight, hotel, tour, transfer, restaurant, visa, package.
+
+    Returns a `{display: True, kind}` signal the web app reads. You still write a
+    short text reply; do NOT paste raw image URLs — the cards show the images.
+    """
+    k = (kind or "").strip().lower().rstrip("s")  # tolerate "tours" -> "tour"
+    if k not in _DISPLAYABLE_KINDS:
+        return {
+            "error": True,
+            "message": f"Cannot display {kind!r}. Supported: {sorted(_DISPLAYABLE_KINDS)}",
+        }
+    return {"display": True, "kind": k}
+
+
+_SCHEDULE_KINDS = {"flight", "hotel", "tour", "transfer", "restaurant", "activity", "free"}
+
+
+@tool
+def build_trip_schedule_tool(days: list[dict[str, Any]]) -> dict[str, Any]:
+    """Lay the agreed plan out as a day-by-day, time-slotted SCHEDULE that the web
+    app renders as a calendar (time rows × day columns).
+
+    CALL THIS when the customer wants to SEE their plan on a timeline/calendar —
+    "show me the schedule", "what's the day-by-day plan", "lay it out by time",
+    or after you've assembled an itinerary they like. Use ONLY real items you've
+    actually discussed/searched (hotels, tours, transfers, flights, meals) — never
+    invent activities or times. It's fine to give sensible times for things like
+    "morning at the souk"; just don't invent the activity itself.
+
+    Args:
+        days: one entry per day, each:
+            {
+              "date": "2026-08-03",            # ISO date (or "Day 1" if unknown)
+              "label": "Arrival & Downtown",   # short day theme (optional)
+              "items": [
+                {
+                  "start": "10:00",            # 24h HH:MM
+                  "end": "11:00",              # optional
+                  "title": "Arrive at DXB",
+                  "kind": "transfer",          # flight|hotel|tour|transfer|restaurant|activity|free
+                  "detail": "Private cab to hotel"   # optional, short
+                }, ...
+              ]
+            }
+
+    Returns a `{schedule: True, days: [...]}` signal the web app reads to draw the
+    calendar. Still write a short text reply; don't paste the whole grid as text.
+    """
+    if not isinstance(days, list) or not days:
+        return {"error": True, "message": "days must be a non-empty list of day plans"}
+    clean_days: list[dict[str, Any]] = []
+    for d in days:
+        if not isinstance(d, dict):
+            continue
+        items_in = d.get("items") or []
+        items: list[dict[str, Any]] = []
+        for it in items_in:
+            if not isinstance(it, dict) or not str(it.get("title", "")).strip():
+                continue
+            kind = str(it.get("kind", "activity")).strip().lower().rstrip("s")
+            if kind not in _SCHEDULE_KINDS:
+                kind = "activity"
+            items.append(
+                {
+                    "start": str(it.get("start", "")).strip(),
+                    "end": str(it.get("end", "")).strip(),
+                    "title": str(it.get("title", "")).strip(),
+                    "kind": kind,
+                    "detail": str(it.get("detail", "")).strip(),
+                }
+            )
+        # keep items in time order when a start time is given
+        items.sort(key=lambda x: x["start"] or "99:99")
+        clean_days.append(
+            {
+                "date": str(d.get("date", "")).strip() or f"Day {len(clean_days) + 1}",
+                "label": str(d.get("label", "")).strip(),
+                "items": items,
+            }
+        )
+    return {"schedule": True, "days": clean_days, "total_days": len(clean_days)}
+
+
 @tool
 def compose_customer_payment_summary_tool(
     total_inr_inclusive: float,
@@ -389,6 +486,91 @@ def compose_customer_payment_summary_tool(
     }
 
 
+@tool
+def generate_itinerary_pdf_tool(
+    destination: str = "Dubai",
+    origin_city: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    nights: int | None = None,
+    party_summary: str = "",
+    customer_name: str = "",
+    reference: str = "",
+    overview: str = "",
+    day_plans: list[dict[str, Any]] | None = None,
+    components: list[dict[str, Any]] | None = None,
+    inclusions: list[str] | None = None,
+    exclusions: list[str] | None = None,
+    total_inr: float | None = None,
+    payment_schedule: list[dict[str, Any]] | None = None,
+    notes: list[str] | None = None,
+) -> dict[str, Any]:
+    """Generate the branded, downloadable itinerary PDF once the customer is happy.
+
+    CALL THIS when the customer confirms they like the plan ("looks good",
+    "send it", "can I get this in writing", "share the itinerary"). It renders
+    the Gujju Tours letterhead (header + footer on every page) with the trip
+    laid out clearly, saves it, and returns a download link.
+
+    Use ONLY real numbers you already obtained from search/pricing tools — never
+    invent figures here. Money fields are INR. Pass `amount_inr: null` for any
+    service that is On Request.
+
+    Args:
+        destination/origin_city/start_date/end_date/nights/party_summary: trip facts.
+        customer_name, reference: optional personalization (quote/booking ref).
+        overview: 1-2 sentence intro to the trip.
+        day_plans: [{"title": "Day 1 - Arrival", "items": ["Pickup", "Check-in"]}].
+        components: priced services
+            [{"label": "Flights (Air India)", "detail": "BOM->DXB return, 2 adults",
+              "amount_inr": 217366}]. amount_inr null => "On Request".
+        inclusions/exclusions/notes: lists of plain strings.
+        total_inr: final all-inclusive total.
+        payment_schedule: [{"label": "Deposit", "amount_inr": 78598,
+                            "due_date_iso": "2026-06-10"}].
+
+    Returns:
+        {itinerary_id, download_url (or None), filename, summary} — share the
+        download link with the customer. On WhatsApp the service attaches the
+        PDF automatically when an itinerary_id is produced.
+    """
+    from itinerary_store import public_url_for, save_itinerary_pdf
+
+    data: dict[str, Any] = {
+        "destination": destination,
+        "origin_city": origin_city,
+        "start_date": start_date,
+        "end_date": end_date,
+        "nights": nights,
+        "party_summary": party_summary,
+        "customer_name": customer_name,
+        "reference": reference,
+        "overview": overview,
+        "day_plans": day_plans or [],
+        "components": components or [],
+        "inclusions": inclusions or [],
+        "exclusions": exclusions or [],
+        "total_inr": total_inr,
+        "payment_schedule": payment_schedule or [],
+        "notes": notes or [],
+    }
+    try:
+        itinerary_id, _path = save_itinerary_pdf(data)
+    except Exception as e:  # never crash the turn over a PDF
+        return {"error": True, "message": f"Could not generate the PDF: {e}"}
+
+    url = public_url_for(itinerary_id)
+    return {
+        "itinerary_id": itinerary_id,
+        "download_url": url,
+        "filename": f"{destination}-itinerary.pdf",
+        "summary": (
+            f"Itinerary PDF ready ({destination}, {party_summary or 'your party'})."
+            + (f" Download: {url}" if url else " Available to download in the app.")
+        ),
+    }
+
+
 # =============================================================================
 # Tool registry — ONE place, ALL tools
 # =============================================================================
@@ -402,6 +584,8 @@ def _build_all_tools() -> list[BaseTool]:
     from mcp_tools.get_package_details import get_package_details_tool
     from mcp_tools.get_restaurant_details import get_restaurant_details_tool
     from mcp_tools.get_tour_details import get_tour_details_tool
+    from mcp_tools.get_tour_option_details import get_tour_option_details_tool
+    from mcp_tools.get_tour_options import get_tour_options_tool
     from mcp_tools.get_transfer_details import get_transfer_details_tool
     from mcp_tools.get_visa_info import get_visa_info_tool
     from mcp_tools.list_city_hotels import list_city_hotels_tool
@@ -426,6 +610,8 @@ def _build_all_tools() -> list[BaseTool]:
         # Detail tools (MCP-exposed)
         get_flight_details_tool,
         get_tour_details_tool,
+        get_tour_options_tool,
+        get_tour_option_details_tool,
         get_transfer_details_tool,
         get_restaurant_details_tool,
         get_package_details_tool,
@@ -446,6 +632,9 @@ def _build_all_tools() -> list[BaseTool]:
         compute_remaining_budget_tool,
         get_destination_tips_tool,
         compose_customer_payment_summary_tool,
+        generate_itinerary_pdf_tool,
+        display_options_tool,
+        build_trip_schedule_tool,
     ]
 
 

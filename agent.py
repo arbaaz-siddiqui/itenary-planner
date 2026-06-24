@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import sys
 import time
@@ -102,6 +103,8 @@ def load_system_prompt(*, surface: str = "streamlit") -> str:
     ]
     if surface == "whatsapp":
         parts.extend(["", _load_prompt("whatsapp_addendum.md").rstrip()])
+    elif surface == "voice":
+        parts.extend(["", _load_prompt("voice_addendum.md").rstrip()])
     return "\n".join(parts)
 
 
@@ -117,6 +120,21 @@ def build_react_agent(
 ) -> Any:
     llm = build_llm(temperature=temperature, max_tokens=max_tokens)
     checkpointer = checkpoint_store or build_in_memory_checkpoint()
+
+    # Loud warning for the most common mis-config: a BOOKING_TOKEN that lacks the
+    # services the app needs (e.g. an Activities-only token silently returns null
+    # for hotel availability). Doesn't block startup — just surfaces it.
+    from settings import get_booking_api_settings
+
+    missing = get_booking_api_settings().main_token_missing_services()
+    if missing:
+        get_logger().warning(
+            "booking_token_scope_warning",
+            missing_services=missing,
+            hint="BOOKING_TOKEN is missing serviceTypes; hotel/flight/etc. calls "
+            "may return empty. Use the all-services agent token (e.g. GT-021).",
+        )
+
     return create_react_agent(
         model=llm,
         tools=ALL_TOOLS,
@@ -380,7 +398,15 @@ def invoke_and_log(
     user_message: str,
     turn_number: int = 0,
 ) -> dict[str, Any]:
-    config = {"configurable": {"thread_id": thread_id}}
+    config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+    # NOTE: we deliberately do NOT set a tight recursion_limit for voice. A low
+    # limit cuts the agent off MID-tool-call (AIMessage with tool_calls but no
+    # ToolMessage), which corrupts the checkpointed thread and makes EVERY later
+    # turn fail with INVALID_CHAT_HISTORY ("I hit a snag"). Latency on voice is
+    # instead controlled by the prompt (one search per turn) + the SSE filler
+    # line. Keep a generous cap only as a runaway backstop.
+    if surface == "voice":
+        config["recursion_limit"] = 25
     start = time.perf_counter()
     response = agent.invoke({"messages": [{"role": "user", "content": user_message}]}, config)
     latency = time.perf_counter() - start
@@ -394,3 +420,149 @@ def invoke_and_log(
         turn_number=turn_number,
     )
     return response
+
+
+# =============================================================================
+# Streaming
+# =============================================================================
+class StreamResult:
+    """Mutable holder populated as a turn streams.
+
+    `stream_and_log` yields assistant-text tokens (for `st.write_stream`) while
+    filling this in. After the stream is exhausted, `.response` is shaped like
+    `invoke()`'s output (a `{"messages": [...]}` dict) so the existing
+    extractors (`extract_tool_calls`, `extract_search_options`, …) work
+    unchanged, and `.tool_event_log` carries a live trace of which tools fired
+    and in what order — surfaced in the debug UI.
+    """
+
+    def __init__(self) -> None:
+        self.text: str = ""
+        self.messages: list[Any] = []
+        self.tool_event_log: list[dict[str, Any]] = []
+        self.latency_seconds: float = 0.0
+
+    @property
+    def response(self) -> dict[str, Any]:
+        return {"messages": self.messages}
+
+
+def stream_and_log(
+    agent: Any,
+    *,
+    surface: str,
+    thread_id: str,
+    user_message: str,
+    turn_number: int = 0,
+    result: StreamResult | None = None,
+):
+    """Stream a turn token-by-token, yielding assistant text as it is produced.
+
+    Uses LangGraph's `messages` + `updates` stream modes:
+      - `messages` → (token_chunk, metadata) for live assistant text. We only
+        forward tokens from the agent's final answer node, never tool-internal
+        LLM chatter.
+      - `updates`  → per-node state deltas; we harvest the full AI/Tool messages
+        from these so the final `result.response` matches `invoke()` output and
+        tool calls/options can be extracted exactly as before.
+
+    Yields:
+        str tokens — feed straight into `st.write_stream`.
+
+    Side effects:
+        Populates `result` (a StreamResult) and logs the turn on completion.
+    """
+    holder = result if result is not None else StreamResult()
+    config = {"configurable": {"thread_id": thread_id}}
+    start = time.perf_counter()
+
+    for mode, chunk in agent.stream(
+        {"messages": [{"role": "user", "content": user_message}]},
+        config,
+        stream_mode=["messages", "updates"],
+    ):
+        if mode == "messages":
+            msg_chunk, metadata = chunk
+            # Only stream tokens from the agent node's text output — skip tool
+            # results and any non-text content blocks.
+            node = (metadata or {}).get("langgraph_node")
+            if node and node != "agent":
+                continue
+            # Skip text that rides along with a tool-call chunk. Some models
+            # (e.g. Mistral) emit tool-invocation scaffolding as plain text —
+            # "search_hotels{...} // Retry with broader search",
+            # "enumerate_package_details{}" — which must NOT leak into the
+            # customer-facing reply. The real answer streams in the FINAL agent
+            # message, which has no tool_calls.
+            if _safe_attr(msg_chunk, "tool_calls") or _safe_attr(msg_chunk, "tool_call_chunks"):
+                continue
+            token = _token_text(msg_chunk)
+            if token and not _looks_like_tool_scaffolding(token):
+                holder.text += token
+                yield token
+        elif mode == "updates":
+            for node_name, state in (chunk or {}).items():
+                msgs = (state or {}).get("messages") if isinstance(state, dict) else None
+                for m in msgs or []:
+                    holder.messages.append(m)
+                    _record_tool_events(m, node_name, holder)
+
+    holder.latency_seconds = time.perf_counter() - start
+    log_turn(
+        model=get_active_model_id(),
+        surface=surface,
+        thread_id=thread_id,
+        user_message=user_message,
+        agent_response=holder.response,
+        latency_seconds=holder.latency_seconds,
+        turn_number=turn_number,
+    )
+
+
+# Tool-call scaffolding some models leak as plain text, e.g.
+# `search_hotels{"destination_city": ...}`, `// Retry with broader search`,
+# `enumerate_package_details{}`. A token matching this is internal, not a reply.
+_TOOL_NAMES_RE = re.compile(
+    r"\b(search_flights|search_hotels|search_tours|search_restaurants|get_visa_info|"
+    r"list_packages|get_exchange_rate|resolve_party_tool|check_floor_tool|"
+    r"search_airport_transfer_dubai|enumerate_package_details|generate_itinerary_pdf"
+    r"|[a-z_]+_tool)\s*\{",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_tool_scaffolding(token: str) -> bool:
+    """True if a streamed token is leaked tool-call syntax, not a real reply."""
+    t = token.strip()
+    if not t:
+        return False
+    return bool(_TOOL_NAMES_RE.search(t)) or t.startswith("//")
+
+
+def _token_text(msg_chunk: Any) -> str:
+    """Extract printable text from a streamed message chunk (str or block list)."""
+    content = _message_content(msg_chunk)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for c in content:
+            if isinstance(c, dict) and c.get("type") == "text":
+                parts.append(str(c.get("text") or ""))
+            elif isinstance(c, str):
+                parts.append(c)
+        return "".join(parts)
+    return ""
+
+
+def _record_tool_events(msg: Any, node_name: str, holder: StreamResult) -> None:
+    """Note tool-call requests and tool results as they stream in, in order."""
+    for tc in _safe_attr(msg, "tool_calls") or []:
+        if isinstance(tc, dict):
+            holder.tool_event_log.append(
+                {"event": "call", "tool_name": tc.get("name") or "", "node": node_name}
+            )
+    if _message_role(msg) == "tool":
+        holder.tool_event_log.append(
+            {"event": "result", "tool_name": _safe_attr(msg, "name") or "", "node": node_name}
+        )

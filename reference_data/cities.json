@@ -9,10 +9,10 @@
     "Malaysia": 130
   },
   "default_dubai_airport": {
-    "lat": 25.2532,
-    "lng": 55.3657,
-    "place_id": "DXB",
-    "name": "Dubai International Airport (DXB)"
+    "lat": 25.2515401,
+    "lng": 55.3683066,
+    "place_id": "ChIJaQ4mkwZdXz4R6e5IegDUleY",
+    "name": "Dubai International Airport(dxb)"
   },
   "cities": {
     "dubai": {

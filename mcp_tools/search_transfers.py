@@ -46,13 +46,15 @@ def _impl(
             to_lng=hotel_lng,
             from_place_id=str(airport.get("place_id", "DXB")),
             to_place_id="HOTEL",
+            from_location_name=str(airport.get("name", "Dubai International Airport(dxb)")),
+            to_location_name="Hotel",
             departure_date=arrival_date,
             departure_time=arrival_time,
             return_date=return_date,
             return_time=return_time,
             is_round_trip=return_date is not None,
             from_type="A",
-            to_type="O",
+            to_type="H",
             adults=adults,
         )
         options = parse_transfer_response(raw, max_results=max_results)

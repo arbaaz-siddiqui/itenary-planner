@@ -415,7 +415,9 @@ class FlightOption(BaseModel):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
     fare_source_code: str
     itinerary_source_code: str = ""
-    price_inr: float
+    price_inr: float  # whole-party total (all passengers)
+    price_per_adult_inr: float | None = None  # per-adult, from the supplier breakdown
+    pax_count: int = 0  # total passengers this fare covers (ADT+CHD+INF)
     price_original: float
     currency_original: str = "INR"
     base_fare_inr: float | None = None

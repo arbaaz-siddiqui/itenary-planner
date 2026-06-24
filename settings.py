@@ -47,6 +47,11 @@ class BookingApiSettings(BaseSettings):
     base_url: str = Field(
         default="https://stagingapi.gujjutours.com", validation_alias="BOOKING_BASE_URL"
     )
+    # Some tour endpoints (options, price calendar, option details) live on the
+    # B2C host, not the main B2B api host. Separate base URL, same Bearer token.
+    b2c_base_url: str = Field(
+        default="https://stagingb2c.gujjutours.com", validation_alias="BOOKING_B2C_BASE_URL"
+    )
     token: str = Field(default="", validation_alias="BOOKING_TOKEN")
     # Hotel static-content endpoints use a separate Hotels-only account token.
     # Falls back to the main token when unset so a single-token setup still works.
@@ -55,6 +60,38 @@ class BookingApiSettings(BaseSettings):
     def hotel_static_bearer(self) -> str:
         """Token for hotel static-content endpoints (falls back to main token)."""
         return self.hotel_static_token or self.token
+
+    @staticmethod
+    def _token_service_types(token: str) -> list[str]:
+        """Decode a JWT's `serviceType` claim WITHOUT verifying the signature.
+
+        Used only for a config sanity check (which services the token grants),
+        never for trust decisions. Returns [] if the token can't be decoded.
+        """
+        import base64
+        import json
+
+        try:
+            payload = token.split(".")[1]
+            payload += "=" * (-len(payload) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload))
+            services = claims.get("serviceType") or []
+            return [str(s) for s in services] if isinstance(services, list) else []
+        except Exception:
+            return []
+
+    def main_token_missing_services(self) -> list[str]:
+        """Services the configured BOOKING_TOKEN is MISSING vs. what the app needs.
+
+        The main token must grant Hotels/Flight/etc. An Activities-only token
+        silently returns null for hotels — this lets startup warn loudly instead.
+        Empty list = all good (or token unset/undecodable, which we don't warn on).
+        """
+        granted = set(self._token_service_types(self.token))
+        if not granted:
+            return []  # unset or undecodable — separate concern, don't false-alarm
+        required = {"Hotels", "Flight", "Packages", "Restaurant", "Transfer", "Visa"}
+        return sorted(required - granted)
     tenant_id: str = Field(
         default="A29CD3EE-D050-A34A-3A53-3A20E4FAF5F3",
         validation_alias="BOOKING_TENANT_ID",
@@ -140,6 +177,14 @@ def get_twilio_settings() -> TwilioSettings:
 class StateSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     whatsapp_db_path: str = Field(default="whatsapp_state.db", validation_alias="WHATSAPP_DB_PATH")
+    # Where generated itinerary PDFs are written. On a mounted volume in prod,
+    # point this at the volume (e.g. /var/data/itineraries) so they survive
+    # restarts and the WhatsApp service can serve them back by id.
+    itinerary_dir: str = Field(default="itineraries", validation_alias="ITINERARY_DIR")
+    # Public base URL of the WhatsApp/FastAPI service (no trailing slash), used
+    # to build the Twilio media URL for PDF delivery. e.g.
+    # https://itinerary-planner-production.up.railway.app
+    public_base_url: str = Field(default="", validation_alias="PUBLIC_BASE_URL")
 
 
 @lru_cache(maxsize=1)

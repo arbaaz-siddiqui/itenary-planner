@@ -339,7 +339,12 @@ def test_transfer_search_uses_a_o_codes() -> None:
     assert sent["TransferRateTypes"] == [
         {"TransferRateTypeId": 1, "Count": 1, "transferRateTypeName": "Adult"}
     ]
-    assert sent["agtMkpType"] == 0
+    # New collection (June 2026): CAPITALIZED date keys, no agtMkp/agtMkpType.
+    # This is what fixed transfer search (live-verified). Pin it as a regression.
+    assert sent["DepartureDate"] == "2026-06-25"
+    assert "departureDate" not in sent  # old lowercase key must be gone
+    assert "agtMkp" not in sent
+    assert "agtMkpType" not in sent
 
 
 @responses.activate
@@ -364,7 +369,7 @@ def test_transfer_search_oneway_falls_back_to_departure_date() -> None:
         adults=1,
     )
     sent = json.loads(responses.calls[0].request.body)
-    assert sent["returnDate"] == "2026-06-25"  # NOT empty
+    assert sent["ReturnDate"] == "2026-06-25"  # NOT empty; capitalized per new collection
     assert sent["isRoundTrip"] == 0  # still one-way
 
 
