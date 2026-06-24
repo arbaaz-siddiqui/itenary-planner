@@ -56,33 +56,11 @@ def _stt_config() -> dict:
     if STT_PROVIDER == "deepgram":
         return {
             "provider": "deepgram",
-            "model": "nova-2-general",     # nova-2 has better en-IN than nova-3 currently
-            "language": "en-IN",           # Indian English — handles accent well
-            "smartFormat": True,           # formats numbers, currencies, dates naturally
+            "model": "nova-3",
+            "language": "en",
+            "smartFormat": True,
             "punctuate": True,
-            "utteranceEndMs": "1200",      # wait 1.2s of silence before end-of-turn
-                                           # longer than default (800ms) — Indian speech
-                                           # has natural mid-sentence pauses
-            "endpointing": 300,            # ms of silence to detect end of utterance
-            "keywords": [                  # boost recognition of domain vocabulary
-                "Dubai:2",
-                "Mumbai:2",
-                "Delhi:2",
-                "Bangalore:2",
-                "AED:2",
-                "INR:2",
-                "Burj Khalifa:3",
-                "Atlantis:2",
-                "Palm Jumeirah:2",
-                "Desert Safari:2",
-                "Technoheaven:1",
-                "itinerary:2",
-                "Emirates:2",
-                "IndiGo:2",
-                "Air India:2",
-                "lakh:2",
-                "crore:2",
-            ],
+            "endpointing": 300,
         }
     if STT_PROVIDER == "gladia":
         return {
@@ -228,39 +206,6 @@ def build_assistant_config() -> dict:
 
         # Background noise removal (call centre / road noise).
         "backgroundDenoisingEnabled": True,
-
-        # Backchannels: Vapi inserts "mm-hmm", "I see", "got it" while
-        # the agent is processing — makes silence feel alive.
-        "backchannel": {
-            "enabled": True,
-            "plan": {
-                "messages": [
-                    {"type": "custom", "message": "Mm-hmm..."},
-                    {"type": "custom", "message": "Got it..."},
-                    {"type": "custom", "message": "Sure..."},
-                    {"type": "custom", "message": "Right..."},
-                    {"type": "custom", "message": "Okay..."},
-                    {"type": "custom", "message": "I see..."},
-                ],
-                "randomized": True,
-            },
-        },
-
-        # Filler injection: spoken IMMEDIATELY when Vapi detects the caller
-        # has finished speaking, before the LLM even responds.
-        # This is the #1 fix for "dead air" latency perception.
-        "fillerInjection": {
-            "enabled": True,
-            "plan": {
-                "messages": [
-                    {"type": "custom", "message": "Let me check that for you..."},
-                    {"type": "custom", "message": "One moment..."},
-                    {"type": "custom", "message": "Sure, looking that up..."},
-                    {"type": "custom", "message": "Give me just a second..."},
-                ],
-                "randomized": True,
-            },
-        },
 
         # ── Call lifecycle ──────────────────────────────────────────────────
         "firstMessage": (
