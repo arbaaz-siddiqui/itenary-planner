@@ -165,15 +165,21 @@ def _render_flight(o: dict[str, Any]) -> None:
 
 
 def _render_calendar(days: list[dict[str, Any]]) -> None:
-    """Render the day-by-day schedule as a calendar time-grid (inspiration look)."""
+    """Render the day-by-day schedule as a calendar time-grid via a popover."""
     import streamlit.components.v1 as components
 
     try:
         from surfaces.ui_theme import render_calendar_html
     except ImportError:
         from ui_theme import render_calendar_html
-    # height: header (~50) + 15 hours * 56 + padding
-    components.html(render_calendar_html(days), height=940, scrolling=True)
+
+    start_hour = 8
+    end_hour = 23
+    # height: header (~50) + hours * 64 + padding
+    cal_height = (end_hour - start_hour) * 64 + 100
+
+    with st.popover("📅 View trip schedule →", use_container_width=True):
+        components.html(render_calendar_html(days), height=cal_height, scrolling=False)
 
 
 def _render_hotel(o: dict[str, Any]) -> None:
@@ -623,10 +629,6 @@ def _render_sidebar() -> None:
     with st.sidebar:
         st.header("🌴 Trip Planner")
         _render_itinerary_section()
-        st.divider()
-        st.subheader("🔧 Debug")
-        st.caption(describe_current_provider())
-        _render_debug_inspector()
 
 
 # =============================================================================
@@ -1037,7 +1039,7 @@ _render_sidebar()
 st.title("🏖️ Dubai Trip Planner")
 st.caption(f"Powered by {describe_current_provider()} · streaming on")
 
-chat_tab, voice_tab, leads_tab = st.tabs(["💬 Chat", "📞 Voice", "🎯 Leads"])
+chat_tab, voice_tab, leads_tab, debug_tab = st.tabs(["💬 Chat", "📞 Voice", "🎯 Leads", "🔧 Debug"])
 
 with chat_tab:
     # Empty-state hint so the chat doesn't look broken before the first message.
@@ -1045,7 +1047,7 @@ with chat_tab:
         st.info(
             "👋 Tell me about your Dubai trip — origin city, dates/nights, who's "
             "travelling, and your budget. Every API and tool call shows live in the "
-            "**🔧 Debug** sidebar so you can see exactly what data each answer is built on.",
+            "**🔧 Debug** tab so you can see exactly what data each answer is built on.",
             icon="🧭",
         )
 
@@ -1079,6 +1081,10 @@ with voice_tab:
 
 with leads_tab:
     _render_leads_tab()
+
+with debug_tab:
+    st.caption(describe_current_provider())
+    _render_debug_inspector()
 
 # Chat input — must be at top level (Streamlit requires st.chat_input outside
 # tabs/columns). It drives the Chat tab.
