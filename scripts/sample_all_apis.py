@@ -142,7 +142,7 @@ def make_endpoints() -> list[dict[str, Any]]:
                 "nationalityId": 213,
                 "citizenId": 213,
                 "visaTypeId": 1,
-                "checkInDate": "10-10-2026",
+                "checkInDate": "12-10-2026",
                 "guestInfo": {"adults": 1, "children": 1},
                 "agentMarkupType": 0,
                 "agentMarkup": 0,
@@ -160,7 +160,7 @@ def make_endpoints() -> list[dict[str, Any]]:
             "body": {
                 "cityid": 244520,
                 "GuestInfo": {"Adults": 1, "Children": 0},
-                "SearchDate": "06-06-2026",
+                "SearchDate": "12-06-2026",
             },
         },
         # ------------------------------------------------------------------
@@ -174,7 +174,7 @@ def make_endpoints() -> list[dict[str, Any]]:
             "body": {
                 "cityid": 244520,
                 "GuestInfo": {"Adults": 1, "Children": 0},
-                "SearchDate": "06-06-2026",
+                "SearchDate": "12-06-2026",
             },
         },
         # ------------------------------------------------------------------
@@ -189,8 +189,8 @@ def make_endpoints() -> list[dict[str, Any]]:
                 "cityID": 0,
                 "nationality": "India",
                 "residency": "India",
-                "checkInDate": "2026-06-19",
-                "checkOutDate": "2026-06-23",
+                "checkInDate": "2026-12-19",
+                "checkOutDate": "2026-12-23",
                 "noofNights": 4,
                 "rooms": [
                     {
@@ -222,8 +222,8 @@ def make_endpoints() -> list[dict[str, Any]]:
                 "cityID": 0,
                 "nationality": "India",
                 "residency": "India",
-                "checkInDate": "2026-06-19",
-                "checkOutDate": "2026-06-23",
+                "checkInDate": "2026-12-19",
+                "checkOutDate": "2026-12-23",
                 "noofNights": 4,
                 "rooms": [
                     {
@@ -291,7 +291,7 @@ def make_endpoints() -> list[dict[str, Any]]:
                 "tourCategoryId": 1,
                 "transferTypeID": 0,
                 "tourIDs": "",
-                "travelDate": "2026-05-20",
+                "travelDate": "2026-12-20",
             },
         },
         # ------------------------------------------------------------------
@@ -308,7 +308,7 @@ def make_endpoints() -> list[dict[str, Any]]:
                 "tourCategoryId": 1,
                 "transferTypeID": 0,
                 "tourIDs": "",
-                "travelDate": "2026-05-20",
+                "travelDate": "2026-12-20",
             },
         },
         # ------------------------------------------------------------------
@@ -334,9 +334,9 @@ def make_endpoints() -> list[dict[str, Any]]:
                 "fromLatitude": 25.2515401,
                 "toLongitude": 55.3032906,
                 "toLatitude": 25.2145565,
-                "departureDate": "2026-06-25",
+                "departureDate": "2026-12-25",
                 "departureTime": "07:00:00",
-                "returnDate": "2026-06-27",
+                "returnDate": "2026-12-27",
                 "returnTime": "07:00:00",
                 "isRoundTrip": 0,
                 "fromType": "A",
@@ -369,9 +369,9 @@ def make_endpoints() -> list[dict[str, Any]]:
                 "fromLatitude": 25.2515401,
                 "toLongitude": 55.3032906,
                 "toLatitude": 25.2145565,
-                "departureDate": "2026-06-25",
+                "departureDate": "2026-12-25",
                 "departureTime": "07:00:00",
-                "returnDate": "2026-06-27",
+                "returnDate": "2026-12-27",
                 "returnTime": "07:00:00",
                 "isRoundTrip": 0,
                 "fromType": "A",
@@ -404,7 +404,7 @@ def make_endpoints() -> list[dict[str, Any]]:
             "body": {
                 "OriginDestinationInformations": [
                     {
-                        "DepartureDateTime": "11-07-2026",
+                        "DepartureDateTime": "11-12-2026",
                         "OriginLocationCode": "DEL",
                         "DestinationLocationCode": "BOM",
                     }
@@ -448,8 +448,8 @@ def make_endpoints() -> list[dict[str, Any]]:
                         }
                     ],
                     "CityID": "244520",
-                    "CheckInDate": "11-20-2026",
-                    "CheckOutDate": "11-22-2026",
+                    "CheckInDate": "12-20-2026",
+                    "CheckOutDate": "12-22-2026",
                     "NoofNights": "2",
                     "Nationality": "India",
                     "Filters": {

@@ -30,6 +30,9 @@ data/samples/
 *.db
 *.db-journal
 whatsapp_state*
+itineraries/
+*_node_modules/
+node_modules/
 benchmark_results.xlsx
 benchmark_results.xlsx.lock
 .streamlit/

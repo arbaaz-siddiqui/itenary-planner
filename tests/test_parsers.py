@@ -110,6 +110,57 @@ class TestFlightParser:
         with pytest.raises(FlightNormalizationError):
             parse_flight_response("not a dict")  # type: ignore[arg-type]
 
+    @staticmethod
+    def _itin(total: float, currency: str, per_adult: float, pax: int = 2) -> dict:
+        """Minimal priced itinerary with a per-passenger breakdown."""
+        return {
+            "itinerarySourceCode": "x",
+            "directionInd": "return",
+            "airItineraryPricingInfo": {
+                "fareSourceCode": "fsc",
+                "itinTotalFare": {"totalFare": {"amount": total, "currencyCode": currency}},
+                "ptC_FareBreakdowns": [
+                    {
+                        "passengerTypeQuantity": {"code": "ADT", "quantity": pax},
+                        "passengerFare": {"totalFare": {"amount": per_adult, "currencyCode": currency}},
+                    }
+                ],
+            },
+            "originDestinationOptions": [
+                {"originDestinationOption": [{"flightSegment": {
+                    "departureAirportLocationCode": "DEL", "arrivalAirportLocationCode": "DXB",
+                    "marketingAirlineName": "Test Air", "flightNumber": "1"}}]},
+            ],
+        }
+
+    def test_drops_bogus_inr_labeled_intl_fare(self) -> None:
+        """REGRESSION: a DEL->DXB round-trip for 2 adults that comes back as
+        ₹9,206 total (₹4,603/adult), INR-labeled, is a mislabeled/test fare and
+        MUST be dropped — it must never reach the customer as a real option."""
+        raw = {"data": {"pricedItineraries": [self._itin(9206.0, "INR", 4603.0, pax=2)]}}
+        opts = parse_flight_response(raw, expected_origin="DEL", expected_destination="DXB")
+        assert opts == []  # bogus fare filtered out
+
+    def test_keeps_realistic_usd_fare_and_extracts_per_adult(self) -> None:
+        """A USD-priced fare is trusted (converted via FX) and its per-adult
+        comes from the supplier breakdown, NOT division by the agent."""
+        raw = {"data": {"pricedItineraries": [self._itin(2553.65, "USD", 1276.82, pax=2)]}}
+        opts = parse_flight_response(raw, expected_origin="DEL", expected_destination="DXB")
+        assert len(opts) == 1
+        o = opts[0]
+        assert o.pax_count == 2
+        assert o.price_per_adult_inr is not None
+        # per-adult ≈ half the total (both from the breakdown, FX-converted)
+        assert o.price_per_adult_inr == pytest.approx(o.price_inr / 2, rel=0.01)
+        assert o.currency_original == "USD"
+
+    def test_realistic_inr_fare_survives(self) -> None:
+        """A genuine INR fare above the per-adult floor is kept."""
+        raw = {"data": {"pricedItineraries": [self._itin(40000.0, "INR", 20000.0, pax=2)]}}
+        opts = parse_flight_response(raw, expected_origin="DEL", expected_destination="DXB")
+        assert len(opts) == 1
+        assert opts[0].price_per_adult_inr == pytest.approx(20000.0)
+
 
 # =============================================================================
 # Hotel
@@ -160,6 +211,67 @@ class TestHotelParser:
 
     def test_empty(self) -> None:
         assert parse_hotel_response({"AvailabilityRS": {"HotelResult": []}}, nights=2) == []
+
+    def test_uses_response_currency_not_room_supplier_currency(self) -> None:
+        """REGRESSION (real staging data, Nov-2026 Availabilitywithcancellation):
+
+        The response-level Currency is "AED" but each room's SupplierCurrency is
+        mislabeled "INR" with an AED-magnitude Price (643.15). Converting with
+        the room's "INR" label would skip the FX step and quote ~Rs 643 for a
+        Dubai night — a ~23x under-price. The parser MUST convert using the
+        response-level "AED": 643.15 * 23 = Rs 14,792. This locks that in.
+        """
+        raw = {
+            "AvailabilityRS": {
+                "Currency": "AED",
+                "Count": 1,
+                "HotelResult": [
+                    {
+                        "StartPrice": 643.15,
+                        "HotelId": 509,
+                        "HotelOption": [
+                            {
+                                "SupplierName": "ean_b2b",
+                                "MinPrice": 643.15,
+                                "HotelRooms": [
+                                    [
+                                        {
+                                            "RoomNo": "1",
+                                            "RoomTypeName": "Standard Double Room",
+                                            "MealName": "Free WiFi",
+                                            "Price": 643.15,
+                                            "SupplierCurrency": "INR",  # mislabeled!
+                                            "BookingStatus": "Available",
+                                            "MappedMealName": "Room Only",
+                                            "CancellationPolicy": [
+                                                {
+                                                    "FromDate": "06-10-2026",
+                                                    "ToDate": "11-20-2026",
+                                                    "CancellationPrice": 643.15,
+                                                    "isNRF": False,
+                                                }
+                                            ],
+                                        }
+                                    ]
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+        # Uses the configured AED->INR rate (default 23.0). Assert via the ratio
+        # so the test is robust to the exact configured rate.
+        opts = parse_hotel_response(raw, nights=2)
+        assert len(opts) == 1
+        o = opts[0]
+        assert o.currency_original == "AED"
+        # The misleading room-level label is preserved but NOT used for FX.
+        assert o.rooms[0].supplier_currency == "INR"
+        # Converted via AED, not trusted as INR: ratio must be ~20-26x, never ~1x.
+        ratio = o.price_inr / 643.15
+        assert 20 <= ratio <= 26, f"expected AED->INR conversion (~23x), got {ratio:.2f}x"
+        assert o.per_night_inr == pytest.approx(o.price_inr / 2, abs=1.0)
 
 
 # =============================================================================

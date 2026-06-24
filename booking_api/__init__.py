@@ -17,11 +17,16 @@ from booking_api.endpoints import (
     call_restaurant_details,
     call_restaurant_search,
     call_tour_details,
+    call_tour_option_details,
+    call_tour_options,
+    call_tour_price_calendar,
     call_tour_rates,
     call_tour_search,
+    call_tour_timeslots,
     call_transfer_details,
     call_transfer_search,
     call_visa_info,
+    discover_city_hotel_ids,
 )
 from booking_api.http_client import BookingApiClient, get_client
 
@@ -43,10 +48,15 @@ __all__ = [
     "call_restaurant_details",
     "call_restaurant_search",
     "call_tour_details",
+    "call_tour_option_details",
+    "call_tour_options",
+    "call_tour_price_calendar",
     "call_tour_rates",
     "call_tour_search",
+    "call_tour_timeslots",
     "call_transfer_details",
     "call_transfer_search",
     "call_visa_info",
+    "discover_city_hotel_ids",
     "get_client",
 ]

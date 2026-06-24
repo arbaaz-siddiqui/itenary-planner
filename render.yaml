@@ -16,6 +16,10 @@ services:
         value: "3.12"
       - key: WHATSAPP_DB_PATH
         value: /var/data/whatsapp_state.db
+      - key: ITINERARY_DIR
+        value: /var/data/itineraries
+      - key: PUBLIC_BASE_URL
+        sync: false
       - key: LLM_PROVIDER
         sync: false
       - key: ANTHROPIC_API_KEY
