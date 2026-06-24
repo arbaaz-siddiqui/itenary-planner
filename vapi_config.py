@@ -59,7 +59,6 @@ def _stt_config() -> dict:
             "model": "nova-3",
             "language": "en",
             "smartFormat": True,
-            "punctuate": True,
             "endpointing": 300,
         }
     if STT_PROVIDER == "gladia":
@@ -204,13 +203,15 @@ def build_assistant_config() -> dict:
         # Caller can interrupt the agent mid-sentence — natural conversation.
         "interruptionsEnabled": True,
 
+        # Allow interrupting even the first message (no forced intro monologue).
+        "firstMessageInterruptionsEnabled": True,
+
         # Background noise removal (call centre / road noise).
         "backgroundDenoisingEnabled": True,
 
         # ── Call lifecycle ──────────────────────────────────────────────────
         "firstMessage": (
-            "Hi! I'm your Dubai trip planner. "
-            "Where are you flying from, and when are you looking to travel?"
+            "Hey, I am Nikki ! how may I help you today? "
         ),
         "firstMessageMode": "assistant-speaks-first",
 
@@ -267,8 +268,14 @@ def _vapi_request(method: str, path: str, body: dict | None = None) -> dict:
         },
         method=method,
     )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"HTTP {e.code} {e.reason}")
+        print(body)
+        raise
 
 
 def create_assistant() -> dict:

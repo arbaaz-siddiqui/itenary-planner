@@ -26,3 +26,19 @@ cd C:\Users\MohdArbaazSiddiqui\Downloads\AI_itinerary_planner\voice_agent\voice-
 
 
  If you restart ngrok, its URL changes → tell me the new one (or update Vapi's assistant model.url to https://NEW-URL/api/webhook).
+
+
+
+ 1. Voice service (the brain + Vapi webhook, port 8100):
+
+
+cd C:\Users\MohdArbaazSiddiqui\Downloads\AI_itinerary_planner
+uvicorn voice_service:app --host 127.0.0.1 --port 8100
+2. ngrok → 8100 (so Vapi can reach it):
+
+
+ngrok http 8100
+3. Streamlit UI:
+
+
+streamlit run surfaces/streamlit_app.py
