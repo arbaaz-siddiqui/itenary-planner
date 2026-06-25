@@ -691,28 +691,30 @@ def _render_voice_tab() -> None:
     st.divider()
     st.markdown("##### 🔎 Call trace (live)")
     st.caption(f"Reading trace from the voice service at {svc_url}")
+
+    if "voice_traces" not in st.session_state:
+        st.session_state.voice_traces = {}
+
     if st.button("🔄 Refresh trace"):
-        st.rerun()
+        try:
+            import urllib.request as _u
+            with _u.urlopen(f"{svc_url}/trace", timeout=4) as r:
+                st.session_state.voice_traces = json.loads(r.read().decode())
+        except Exception as e:  # noqa: BLE001
+            st.warning(
+                f"Couldn't reach the voice service /trace at {svc_url} ({e}). "
+                "Is it running?"
+            )
 
-    traces: dict[str, Any] = {}
-    try:
-        import urllib.request as _u
-
-        with _u.urlopen(f"{svc_url}/trace", timeout=4) as r:
-            traces = json.loads(r.read().decode())
-    except Exception as e:  # noqa: BLE001
-        st.warning(
-            f"Couldn't reach the voice service /trace at {svc_url} ({e}). "
-            "Is it running? (uvicorn voice_service:app --port 8100)"
-        )
-        return
+    traces: dict[str, Any] = st.session_state.voice_traces
     if not traces:
-        st.info("No calls yet. Place a call above, talk to the agent, then refresh.")
+        st.info("No calls yet. Place a call above, talk to the agent, then click Refresh.")
         return
 
-    # Most-recent session first.
-    for session_id, turns in reversed(list(traces.items())):
-        with st.expander(f"Call `{session_id}` — {len(turns)} turns", expanded=True):
+    # Most-recent session first. Only auto-expand the latest one.
+    sessions = list(reversed(list(traces.items())))
+    for idx, (session_id, turns) in enumerate(sessions):
+        with st.expander(f"Call `{session_id}` — {len(turns)} turns", expanded=(idx == 0)):
             # Newest turn on TOP (reverse), with its real turn number preserved.
             for i, turn in reversed(list(enumerate(turns, 1))):
                 st.markdown(f"**Turn {i}**  ·  _{turn.get('latency_s')}s_")
