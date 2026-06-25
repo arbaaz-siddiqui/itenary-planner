@@ -1051,10 +1051,16 @@ with chat_tab:
             icon="🧭",
         )
 
-    # Replay chat history
-    for entry in st.session_state.chat_history:
+    # Replay chat history — only render rich cards for the last 6 messages to
+    # avoid rerendering all hotel/flight cards on every interaction (causes freeze).
+    history = st.session_state.chat_history
+    RICH_WINDOW = 6
+    rich_start = max(0, len(history) - RICH_WINDOW)
+    for i, entry in enumerate(history):
         with st.chat_message(entry.get("role", "assistant")):
             st.markdown(entry.get("content", ""))
+            if i < rich_start:
+                continue  # skip heavy card rendering for old messages
             cards = entry.get("cards") or {}
             kind = cards.get("kind")
             options = cards.get("options") or []
