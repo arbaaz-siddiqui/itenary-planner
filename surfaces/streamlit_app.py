@@ -691,68 +691,58 @@ def _render_voice_tab() -> None:
     st.divider()
     st.markdown("##### 🔎 Call trace (live)")
     st.caption(f"Reading trace from the voice service at {svc_url}")
+
+    if "voice_traces" not in st.session_state:
+        st.session_state.voice_traces = {}
+
     if st.button("🔄 Refresh trace"):
-        st.rerun()
+        try:
+            import urllib.request as _u
+            with _u.urlopen(f"{svc_url}/trace", timeout=4) as r:
+                st.session_state.voice_traces = json.loads(r.read().decode())
+        except Exception as e:  # noqa: BLE001
+            st.warning(
+                f"Couldn't reach the voice service /trace at {svc_url} ({e}). "
+                "Is it running?"
+            )
 
-    traces: dict[str, Any] = {}
-    try:
-        import urllib.request as _u
-
-        with _u.urlopen(f"{svc_url}/trace", timeout=4) as r:
-            traces = json.loads(r.read().decode())
-    except Exception as e:  # noqa: BLE001
-        st.warning(
-            f"Couldn't reach the voice service /trace at {svc_url} ({e}). "
-            "Is it running? (uvicorn voice_service:app --port 8100)"
-        )
-        return
+    traces: dict[str, Any] = st.session_state.voice_traces
     if not traces:
-        st.info("No calls yet. Place a call above, talk to the agent, then refresh.")
+        st.info("No calls yet. Place a call above, talk to the agent, then click Refresh.")
         return
 
-    # Most-recent session first.
-    for session_id, turns in reversed(list(traces.items())):
-        with st.expander(f"Call `{session_id}` — {len(turns)} turns", expanded=True):
-            # Newest turn on TOP (reverse), with its real turn number preserved.
-            for i, turn in reversed(list(enumerate(turns, 1))):
+    def _truncate(obj, max_chars: int = 500) -> str:
+        s = json.dumps(obj, indent=2, default=str) if not isinstance(obj, str) else obj
+        return s if len(s) <= max_chars else s[:max_chars] + f"\n... [{len(s)-max_chars} chars truncated]"
+
+    # Most-recent session first. Only auto-expand the latest one.
+    sessions = list(reversed(list(traces.items())))
+    for idx, (session_id, turns) in enumerate(sessions):
+        with st.expander(f"Call `{session_id}` — {len(turns)} turns", expanded=(idx == 0)):
+            # Show only last 5 turns to avoid freezing on long calls
+            visible_turns = list(enumerate(turns, 1))[-5:]
+            if len(turns) > 5:
+                st.caption(f"Showing last 5 of {len(turns)} turns.")
+            for i, turn in reversed(visible_turns):
                 st.markdown(f"**Turn {i}**  ·  _{turn.get('latency_s')}s_")
                 st.markdown(f"🧑 **Caller:** {turn.get('user', '')}")
                 st.markdown(f"🤖 **Agent:** {turn.get('agent', '')}")
                 tools = turn.get("tools") or []
                 if tools:
-                    st.markdown("🛠️ **Tools the agent called:**")
                     for t in tools:
-                        with st.expander(f"`{t.get('tool')}`", expanded=False):
-                            st.markdown("**Input:**")
-                            st.code(json.dumps(t.get("input", {}), indent=2, default=str), language="json")
-                            st.markdown("**Output (full):**")
-                            st.code(str(t.get("output", "")), language="json")
+                        with st.expander(f"🛠️ `{t.get('tool')}`", expanded=False):
+                            st.code(_truncate(t.get("input", {})), language="json")
+                            st.caption("Output:")
+                            st.code(_truncate(t.get("output", "")), language="json")
                 calls = turn.get("api_calls") or []
                 if calls:
-                    st.markdown("🌐 **Booking APIs hit this turn (full request + response):**")
                     for c in calls:
                         ep = c.get("url", "").split("gujjutours.com")[-1] or c.get("url", "")
-                        hdr = (
-                            f"{c.get('method')} {ep} → {c.get('status_code')} "
-                            f"({c.get('duration_ms')} ms)"
-                        )
-                        with st.expander(hdr, expanded=False):
-                            st.markdown("**Request body (sent):**")
-                            st.code(
-                                json.dumps(c.get("request_body"), indent=2, default=str)
-                                if c.get("request_body") is not None
-                                else "(none)",
-                                language="json",
-                            )
-                            st.markdown("**Response body (received, full):**")
-                            st.code(
-                                json.dumps(c.get("response_body"), indent=2, default=str)
-                                if c.get("response_body") is not None
-                                else "(none)",
-                                language="json",
-                            )
-                else:
-                    st.caption("🌐 no booking API calls this turn (conversational only)")
+                        hdr = f"{c.get('method')} {ep} → {c.get('status_code')} ({c.get('duration_ms')} ms)"
+                        with st.expander(f"🌐 {hdr}", expanded=False):
+                            st.code(_truncate(c.get("request_body")), language="json")
+                            st.caption("Response:")
+                            st.code(_truncate(c.get("response_body")), language="json")
                 st.divider()
 
 
@@ -1051,10 +1041,16 @@ with chat_tab:
             icon="🧭",
         )
 
-    # Replay chat history
-    for entry in st.session_state.chat_history:
+    # Replay chat history — only render rich cards for the last 6 messages to
+    # avoid rerendering all hotel/flight cards on every interaction (causes freeze).
+    history = st.session_state.chat_history
+    RICH_WINDOW = 6
+    rich_start = max(0, len(history) - RICH_WINDOW)
+    for i, entry in enumerate(history):
         with st.chat_message(entry.get("role", "assistant")):
             st.markdown(entry.get("content", ""))
+            if i < rich_start:
+                continue  # skip heavy card rendering for old messages
             cards = entry.get("cards") or {}
             kind = cards.get("kind")
             options = cards.get("options") or []

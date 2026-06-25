@@ -123,19 +123,30 @@ def place_call(number: str, *, schedule_unix: int | None = None) -> dict[str, An
 #   {"user": str, "agent": str, "latency_s": float, "api_calls": [...], "tools": [...]}
 _TRACE_LOCK = threading.Lock()
 _TRACES: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=50))
+_KNOWN_SESSIONS: set[str] = set()
 
 
 def _record_turn(session_id: str, turn: dict[str, Any]) -> None:
     with _TRACE_LOCK:
+        # New call detected — wipe all previous sessions so only current call is visible
+        if session_id not in _KNOWN_SESSIONS:
+            _TRACES.clear()
+            _KNOWN_SESSIONS.clear()
+            _KNOWN_SESSIONS.add(session_id)
         _TRACES[session_id].append(turn)
 
 
 def get_trace(session_id: str | None = None) -> dict[str, list[dict[str, Any]]]:
-    """All recorded voice turns. Without session_id, returns every session."""
     with _TRACE_LOCK:
         if session_id:
             return {session_id: list(_TRACES.get(session_id, []))}
         return {sid: list(turns) for sid, turns in _TRACES.items()}
+
+
+def clear_trace() -> None:
+    with _TRACE_LOCK:
+        _TRACES.clear()
+        _KNOWN_SESSIONS.clear()
 
 
 def clear_trace() -> None:
@@ -192,6 +203,57 @@ def _humanise_numbers(text: str) -> str:
     return _RUPEE.sub(_replace, text)
 
 
+# Masculine → feminine Hindi verb form replacements.
+# Applied after LLM output so gender is correct regardless of what the model says.
+_GENDER_FIXES: list[tuple[str, str]] = [
+    # first person singular
+    (r"\bkarunga\b",       "karungi"),
+    (r"\bsakta hoon\b",    "sakti hoon"),
+    (r"\bbata sakta\b",    "bata sakti"),
+    (r"\bcheck kar sakta\b","check kar sakti"),
+    (r"\bde sakta\b",      "de sakti"),
+    (r"\bnikal sakta\b",   "nikal sakti"),
+    (r"\bkar sakta\b",     "kar sakti"),
+    (r"\bsamajh gaya\b",   "samajh gayi"),
+    (r"\bsunata hoon\b",   "sunati hoon"),
+    (r"\bbatata hoon\b",   "batati hoon"),
+    (r"\bkarta hoon\b",    "karti hoon"),
+    (r"\bdekh raha hoon\b","dekh rahi hoon"),
+    (r"\bbol raha hoon\b", "bol rahi hoon"),
+    (r"\bcheck kar raha hoon\b","check kar rahi hoon"),
+    (r"\bsearch kar raha hoon\b","search kar rahi hoon"),
+    (r"\bjaanta hoon\b",   "jaanti hoon"),
+    (r"\bchahta hoon\b",   "chahti hoon"),
+    # third person / future
+    (r"\bkarega\b",        "karegi"),
+    (r"\bhoga\b",          "hogi"),
+    (r"\bpadega\b",        "padegi"),
+    (r"\bmilega\b",        "milegi"),
+    (r"\baayega\b",        "aayegi"),
+    (r"\bbatayega\b",      "batayegi"),
+    (r"\bbolega\b",        "bolegi"),
+    # Devanagari → Roman for common slips
+    ("बिल्कुल",            "Bilkul"),
+    ("हां",                "Haan"),
+    ("नहीं",               "Nahi"),
+    ("ठीक है",             "Theek hai"),
+    ("अच्छा",              "Acha"),
+    ("शानदार",             "shandar"),
+    ("बेहतरीन",            "behtareen"),
+    ("चाहिए",              "chahiye"),
+    ("करूंगा",             "karungi"),
+    ("करूंगी",             "karungi"),
+    ("निकाल सकता",         "nikal sakti"),
+]
+
+
+def _fix_gender(text: str) -> str:
+    """Post-process LLM output to enforce feminine verb forms and Roman script."""
+    for pattern, replacement in _GENDER_FIXES:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
 def format_for_voice(text: str) -> str:
     """Make agent text safe and natural for text-to-speech.
 
@@ -209,6 +271,7 @@ def format_for_voice(text: str) -> str:
     text = _EMPH.sub("", text)
     text = text.replace("&", " and ")
     text = _humanise_numbers(text)
+    text = _fix_gender(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{2,}", ". ", text)
     text = re.sub(r"\n", " ", text)
@@ -218,25 +281,25 @@ def format_for_voice(text: str) -> str:
 
 # Filler phrases spoken IMMEDIATELY while the agent thinks — kills dead air.
 _FILLERS: dict[str, str] = {
-    "flight":   "Sure, let me check those flights...",
-    "fly":      "Sure, let me check those flights...",
-    "hotel":    "Looking up hotels for you...",
-    "stay":     "Looking up hotels for you...",
-    "room":     "Looking up hotels for you...",
-    "tour":     "Checking tour options...",
-    "safari":   "Checking tour options...",
-    "burj":     "Checking tour options...",
-    "transfer": "Looking up transfers...",
-    "taxi":     "Looking up transfers...",
-    "visa":     "Pulling visa info...",
-    "budget":   "Let me run those numbers...",
-    "cost":     "Let me run those numbers...",
-    "price":    "Let me run those numbers...",
-    "plan":     "On it, give me just a moment...",
-    "trip":     "On it, give me just a moment...",
-    "itinerary":"On it, give me just a moment...",
+    "flight":    "Ek moment, flights dekh rahi hoon...",
+    "fly":       "Ek moment, flights dekh rahi hoon...",
+    "hotel":     "Please wait, hotels check kar rahi hoon...",
+    "stay":      "Please wait, hotels check kar rahi hoon...",
+    "room":      "Please wait, hotels check kar rahi hoon...",
+    "tour":      "Thodi si wait karein, tours dekh rahi hoon...",
+    "safari":    "Thodi si wait karein, safari options check kar rahi hoon...",
+    "burj":      "Thodi si wait karein, tours dekh rahi hoon...",
+    "transfer":  "Haan sir, transfers check kar rahi hoon...",
+    "taxi":      "Haan sir, transfers check kar rahi hoon...",
+    "visa":      "Just a moment, visa details dekh rahi hoon...",
+    "budget":    "Ek second, numbers calculate kar rahi hoon...",
+    "cost":      "Ek second, pricing check kar rahi hoon...",
+    "price":     "Ek second, pricing check kar rahi hoon...",
+    "plan":      "Haan bilkul, abhi dekhti hoon...",
+    "trip":      "Haan bilkul, abhi dekhti hoon...",
+    "itinerary": "Haan bilkul, abhi dekhti hoon...",
 }
-_DEFAULT_FILLER = "Got it, one moment..."
+_DEFAULT_FILLER = "Ek moment sir, dekh rahi hoon..."
 
 
 def _filler_for(transcript: str) -> str:
@@ -413,3 +476,9 @@ async def call_endpoint(request: Request) -> JSONResponse:
 @app.get("/trace")
 async def trace_endpoint(session_id: str | None = None) -> JSONResponse:
     return JSONResponse(get_trace(session_id))
+
+
+@app.delete("/trace")
+async def clear_trace_endpoint() -> JSONResponse:
+    clear_trace()
+    return JSONResponse({"status": "cleared"})
