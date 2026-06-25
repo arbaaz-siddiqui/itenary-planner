@@ -203,6 +203,57 @@ def _humanise_numbers(text: str) -> str:
     return _RUPEE.sub(_replace, text)
 
 
+# Masculine → feminine Hindi verb form replacements.
+# Applied after LLM output so gender is correct regardless of what the model says.
+_GENDER_FIXES: list[tuple[str, str]] = [
+    # first person singular
+    (r"\bkarunga\b",       "karungi"),
+    (r"\bsakta hoon\b",    "sakti hoon"),
+    (r"\bbata sakta\b",    "bata sakti"),
+    (r"\bcheck kar sakta\b","check kar sakti"),
+    (r"\bde sakta\b",      "de sakti"),
+    (r"\bnikal sakta\b",   "nikal sakti"),
+    (r"\bkar sakta\b",     "kar sakti"),
+    (r"\bsamajh gaya\b",   "samajh gayi"),
+    (r"\bsunata hoon\b",   "sunati hoon"),
+    (r"\bbatata hoon\b",   "batati hoon"),
+    (r"\bkarta hoon\b",    "karti hoon"),
+    (r"\bdekh raha hoon\b","dekh rahi hoon"),
+    (r"\bbol raha hoon\b", "bol rahi hoon"),
+    (r"\bcheck kar raha hoon\b","check kar rahi hoon"),
+    (r"\bsearch kar raha hoon\b","search kar rahi hoon"),
+    (r"\bjaanta hoon\b",   "jaanti hoon"),
+    (r"\bchahta hoon\b",   "chahti hoon"),
+    # third person / future
+    (r"\bkarega\b",        "karegi"),
+    (r"\bhoga\b",          "hogi"),
+    (r"\bpadega\b",        "padegi"),
+    (r"\bmilega\b",        "milegi"),
+    (r"\baayega\b",        "aayegi"),
+    (r"\bbatayega\b",      "batayegi"),
+    (r"\bbolega\b",        "bolegi"),
+    # Devanagari → Roman for common slips
+    ("बिल्कुल",            "Bilkul"),
+    ("हां",                "Haan"),
+    ("नहीं",               "Nahi"),
+    ("ठीक है",             "Theek hai"),
+    ("अच्छा",              "Acha"),
+    ("शानदार",             "shandar"),
+    ("बेहतरीन",            "behtareen"),
+    ("चाहिए",              "chahiye"),
+    ("करूंगा",             "karungi"),
+    ("करूंगी",             "karungi"),
+    ("निकाल सकता",         "nikal sakti"),
+]
+
+
+def _fix_gender(text: str) -> str:
+    """Post-process LLM output to enforce feminine verb forms and Roman script."""
+    for pattern, replacement in _GENDER_FIXES:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
 def format_for_voice(text: str) -> str:
     """Make agent text safe and natural for text-to-speech.
 
@@ -220,6 +271,7 @@ def format_for_voice(text: str) -> str:
     text = _EMPH.sub("", text)
     text = text.replace("&", " and ")
     text = _humanise_numbers(text)
+    text = _fix_gender(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{2,}", ". ", text)
     text = re.sub(r"\n", " ", text)
@@ -229,25 +281,25 @@ def format_for_voice(text: str) -> str:
 
 # Filler phrases spoken IMMEDIATELY while the agent thinks — kills dead air.
 _FILLERS: dict[str, str] = {
-    "flight":   "Sure, let me check those flights...",
-    "fly":      "Sure, let me check those flights...",
-    "hotel":    "Looking up hotels for you...",
-    "stay":     "Looking up hotels for you...",
-    "room":     "Looking up hotels for you...",
-    "tour":     "Checking tour options...",
-    "safari":   "Checking tour options...",
-    "burj":     "Checking tour options...",
-    "transfer": "Looking up transfers...",
-    "taxi":     "Looking up transfers...",
-    "visa":     "Pulling visa info...",
-    "budget":   "Let me run those numbers...",
-    "cost":     "Let me run those numbers...",
-    "price":    "Let me run those numbers...",
-    "plan":     "On it, give me just a moment...",
-    "trip":     "On it, give me just a moment...",
-    "itinerary":"On it, give me just a moment...",
+    "flight":    "Ek moment, flights dekh rahi hoon...",
+    "fly":       "Ek moment, flights dekh rahi hoon...",
+    "hotel":     "Please wait, hotels check kar rahi hoon...",
+    "stay":      "Please wait, hotels check kar rahi hoon...",
+    "room":      "Please wait, hotels check kar rahi hoon...",
+    "tour":      "Thodi si wait karein, tours dekh rahi hoon...",
+    "safari":    "Thodi si wait karein, safari options check kar rahi hoon...",
+    "burj":      "Thodi si wait karein, tours dekh rahi hoon...",
+    "transfer":  "Haan sir, transfers check kar rahi hoon...",
+    "taxi":      "Haan sir, transfers check kar rahi hoon...",
+    "visa":      "Just a moment, visa details dekh rahi hoon...",
+    "budget":    "Ek second, numbers calculate kar rahi hoon...",
+    "cost":      "Ek second, pricing check kar rahi hoon...",
+    "price":     "Ek second, pricing check kar rahi hoon...",
+    "plan":      "Haan bilkul, abhi dekhti hoon...",
+    "trip":      "Haan bilkul, abhi dekhti hoon...",
+    "itinerary": "Haan bilkul, abhi dekhti hoon...",
 }
-_DEFAULT_FILLER = "Got it, one moment..."
+_DEFAULT_FILLER = "Ek moment sir, dekh rahi hoon..."
 
 
 def _filler_for(transcript: str) -> str:
