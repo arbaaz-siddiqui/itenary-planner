@@ -123,19 +123,30 @@ def place_call(number: str, *, schedule_unix: int | None = None) -> dict[str, An
 #   {"user": str, "agent": str, "latency_s": float, "api_calls": [...], "tools": [...]}
 _TRACE_LOCK = threading.Lock()
 _TRACES: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=50))
+_KNOWN_SESSIONS: set[str] = set()
 
 
 def _record_turn(session_id: str, turn: dict[str, Any]) -> None:
     with _TRACE_LOCK:
+        # New call detected — wipe all previous sessions so only current call is visible
+        if session_id not in _KNOWN_SESSIONS:
+            _TRACES.clear()
+            _KNOWN_SESSIONS.clear()
+            _KNOWN_SESSIONS.add(session_id)
         _TRACES[session_id].append(turn)
 
 
 def get_trace(session_id: str | None = None) -> dict[str, list[dict[str, Any]]]:
-    """All recorded voice turns. Without session_id, returns every session."""
     with _TRACE_LOCK:
         if session_id:
             return {session_id: list(_TRACES.get(session_id, []))}
         return {sid: list(turns) for sid, turns in _TRACES.items()}
+
+
+def clear_trace() -> None:
+    with _TRACE_LOCK:
+        _TRACES.clear()
+        _KNOWN_SESSIONS.clear()
 
 
 def clear_trace() -> None:
@@ -413,3 +424,9 @@ async def call_endpoint(request: Request) -> JSONResponse:
 @app.get("/trace")
 async def trace_endpoint(session_id: str | None = None) -> JSONResponse:
     return JSONResponse(get_trace(session_id))
+
+
+@app.delete("/trace")
+async def clear_trace_endpoint() -> JSONResponse:
+    clear_trace()
+    return JSONResponse({"status": "cleared"})

@@ -711,50 +711,38 @@ def _render_voice_tab() -> None:
         st.info("No calls yet. Place a call above, talk to the agent, then click Refresh.")
         return
 
+    def _truncate(obj, max_chars: int = 500) -> str:
+        s = json.dumps(obj, indent=2, default=str) if not isinstance(obj, str) else obj
+        return s if len(s) <= max_chars else s[:max_chars] + f"\n... [{len(s)-max_chars} chars truncated]"
+
     # Most-recent session first. Only auto-expand the latest one.
     sessions = list(reversed(list(traces.items())))
     for idx, (session_id, turns) in enumerate(sessions):
         with st.expander(f"Call `{session_id}` — {len(turns)} turns", expanded=(idx == 0)):
-            # Newest turn on TOP (reverse), with its real turn number preserved.
-            for i, turn in reversed(list(enumerate(turns, 1))):
+            # Show only last 5 turns to avoid freezing on long calls
+            visible_turns = list(enumerate(turns, 1))[-5:]
+            if len(turns) > 5:
+                st.caption(f"Showing last 5 of {len(turns)} turns.")
+            for i, turn in reversed(visible_turns):
                 st.markdown(f"**Turn {i}**  ·  _{turn.get('latency_s')}s_")
                 st.markdown(f"🧑 **Caller:** {turn.get('user', '')}")
                 st.markdown(f"🤖 **Agent:** {turn.get('agent', '')}")
                 tools = turn.get("tools") or []
                 if tools:
-                    st.markdown("🛠️ **Tools the agent called:**")
                     for t in tools:
-                        with st.expander(f"`{t.get('tool')}`", expanded=False):
-                            st.markdown("**Input:**")
-                            st.code(json.dumps(t.get("input", {}), indent=2, default=str), language="json")
-                            st.markdown("**Output (full):**")
-                            st.code(str(t.get("output", "")), language="json")
+                        with st.expander(f"🛠️ `{t.get('tool')}`", expanded=False):
+                            st.code(_truncate(t.get("input", {})), language="json")
+                            st.caption("Output:")
+                            st.code(_truncate(t.get("output", "")), language="json")
                 calls = turn.get("api_calls") or []
                 if calls:
-                    st.markdown("🌐 **Booking APIs hit this turn (full request + response):**")
                     for c in calls:
                         ep = c.get("url", "").split("gujjutours.com")[-1] or c.get("url", "")
-                        hdr = (
-                            f"{c.get('method')} {ep} → {c.get('status_code')} "
-                            f"({c.get('duration_ms')} ms)"
-                        )
-                        with st.expander(hdr, expanded=False):
-                            st.markdown("**Request body (sent):**")
-                            st.code(
-                                json.dumps(c.get("request_body"), indent=2, default=str)
-                                if c.get("request_body") is not None
-                                else "(none)",
-                                language="json",
-                            )
-                            st.markdown("**Response body (received, full):**")
-                            st.code(
-                                json.dumps(c.get("response_body"), indent=2, default=str)
-                                if c.get("response_body") is not None
-                                else "(none)",
-                                language="json",
-                            )
-                else:
-                    st.caption("🌐 no booking API calls this turn (conversational only)")
+                        hdr = f"{c.get('method')} {ep} → {c.get('status_code')} ({c.get('duration_ms')} ms)"
+                        with st.expander(f"🌐 {hdr}", expanded=False):
+                            st.code(_truncate(c.get("request_body")), language="json")
+                            st.caption("Response:")
+                            st.code(_truncate(c.get("response_body")), language="json")
                 st.divider()
 
 
