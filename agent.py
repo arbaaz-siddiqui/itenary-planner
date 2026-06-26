@@ -108,7 +108,39 @@ def load_system_prompt(*, surface: str = "streamlit") -> str:
     if surface == "whatsapp":
         parts.extend(["", _load_prompt("whatsapp_addendum.md").rstrip()])
     elif surface == "voice":
-        parts.extend(["", _load_prompt("voice_addendum.md").rstrip()])
+        # Hard override block — placed LAST so it wins over every earlier rule.
+        # The base prompt (system_prompt_v1.md) asks for pax/rooms before searching;
+        # on voice that kills the call. These rules CANCEL those requirements.
+        parts.extend([
+            "",
+            "---",
+            "## !!!CRITICAL VOICE OVERRIDE — SUPERSEDES ALL RULES ABOVE!!!",
+            "",
+            "You are on a LIVE PHONE CALL. The following rules CANCEL any earlier",
+            "instruction that says to ask for party size, rooms, or budget before",
+            "searching. Ignore those instructions entirely on voice.",
+            "",
+            "RULE 1 — SEARCH IMMEDIATELY when you have origin + dates:",
+            "  - Use adults=1, rooms=[{adults:1}] as defaults.",
+            "  - Do NOT ask for pax, rooms, budget, child ages before the first search.",
+            "  - Search first. Ask ONE follow-up after results are shown.",
+            "",
+            "RULE 2 — ONE question per turn, maximum. Never two questions in one reply.",
+            "",
+            "RULE 3 — URGENT keyword = skip ALL questions, search immediately.",
+            "  The caller said 'urgent' or 'jaldi' → search right now, no questions.",
+            "",
+            "RULE 4 — 2 sentences maximum per reply. Hard limit. No lists.",
+            "",
+            "Examples:",
+            "  Caller: 'Delhi se Dubai, 13 July' → search flights NOW (adults=1).",
+            "  Caller: 'I want to go Dubai urgent' → ask only: 'Kahan se fly karenge?'",
+            "  Caller: 'Dubai, July 9, urgent' → search flights NOW.",
+            "  WRONG: 'Kitne log? Rooms? Budget? Child ages?' — NEVER do this.",
+            "---",
+            "",
+            _load_prompt("voice_addendum.md").rstrip(),
+        ])
     return "\n".join(parts)
 
 
