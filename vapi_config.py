@@ -59,7 +59,7 @@ def _stt_config() -> dict:
             "model": "nova-3",
             "language": "multi",  # multilingual — handles Hindi + English mixed (Hinglish)
             "smartFormat": True,
-            "endpointing": 300,
+            "endpointing": 150,  # ms before STT finalises — lower = faster response
         }
     if STT_PROVIDER == "gladia":
         return {
