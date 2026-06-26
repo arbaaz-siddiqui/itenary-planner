@@ -84,6 +84,33 @@ def _fetch_hotel_names(hotel_ids: list[int]) -> dict[str, str]:
     return names
 
 
+def _fetch_amenities_text(hotel_ids: list[int]) -> dict[str, str]:
+    """{hotel_id: combined description text} from GetPropertyDescriptions, so we
+    can check which requested amenities (pool/bar/spa) a hotel actually has.
+    Best-effort: returns {} on failure (the caller then can't confirm amenities,
+    which is correct — better than guessing)."""
+    if not hotel_ids:
+        return {}
+    from booking_api import call_hotel_descriptions
+    from parsers import parse_hotel_descriptions_response
+
+    out: dict[str, str] = {}
+    # GetPropertyDescriptions only returns data for ONE hotel id per call — a
+    # batched id list comes back empty. So fetch per hotel (cap to keep latency
+    # sane on the result set we actually show).
+    for hid in hotel_ids[:8]:
+        try:
+            raw = call_hotel_descriptions(hotel_ids=[hid])
+            sections = parse_hotel_descriptions_response(raw, max_results=50)
+        except Exception as e:
+            logger.warning("amenity enrichment failed for %s: %s", hid, e)
+            continue
+        text = " ".join(str(s.get("description", "")) for s in sections).strip()
+        if text:
+            out[str(hid)] = text
+    return out
+
+
 def _impl(
     destination_city: str,
     check_in: str,
@@ -96,8 +123,16 @@ def _impl(
     min_stars: float = 0,
     max_stars: float = 5,
     max_results: int = 5,
+    amenities: list[str] | None = None,
 ) -> dict[str, Any]:
     """Search hotels in the destination city. Returns options + per-night pricing.
+
+    `amenities`: optional list of must-have facility keywords the customer asked
+    for, e.g. ["pool", "bar", "spa", "gym"]. When given, each returned hotel is
+    enriched with `amenities_text` (the supplier's real description) and
+    `amenities_matched` (which of the requested amenities the description actually
+    mentions). This lets you confirm "has a pool/bar" from REAL data instead of
+    guessing — never claim an amenity that isn't in amenities_matched.
 
     Occupancy — two ways to specify:
     - For a single room, pass flat `adults` / `children` / `child_ages`.
@@ -193,8 +228,26 @@ def _impl(
         else:
             options = filtered
 
+        option_dicts = [o.model_dump() for o in options]
+
+        # Amenity enrichment: if the customer asked for specific facilities
+        # (pool/bar/spa/...), fetch the REAL supplier descriptions for these
+        # exact hotels and flag which requested amenities each one actually has.
+        # This is the source of truth — the agent must not guess amenities.
+        if amenities:
+            wanted = [a.strip().lower() for a in amenities if a and a.strip()]
+            ids = [int(o["hotel_id"]) for o in option_dicts if str(o.get("hotel_id", "")).isdigit()]
+            desc_by_id = _fetch_amenities_text(ids)
+            for o in option_dicts:
+                text = desc_by_id.get(str(o.get("hotel_id")), "")
+                o["amenities_text"] = text
+                low = text.lower()
+                o["amenities_matched"] = [w for w in wanted if w in low]
+            # Sort hotels that match ALL requested amenities to the top.
+            option_dicts.sort(key=lambda o: -len(o.get("amenities_matched", [])))
+
         return {
-            "options": [o.model_dump() for o in options],
+            "options": option_dicts,
             "cheapest_price_inr": options[0].price_inr if options else None,
             "nights": nights,
             "per_night_inr": options[0].per_night_inr if options else None,

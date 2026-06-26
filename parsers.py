@@ -603,15 +603,29 @@ def _parse_transfer(t: Any, rates: dict[str, float], image_base_url: str) -> Tra
     price_inr = _safe_to_inr(price, currency, rates)
     if price_inr is None:
         return None
-    transfer_type = str(t.get("transferType") or "Private Transfer")
+    transfer_type = str(t.get("transferType") or "")
     vehicle_type = str(t.get("vehicleType") or "")
+    vehicle_name = str(t.get("vehicleName") or "")
+    # Shared vs Private: the supplier signals "Shared" in transferType, but PRIVATE
+    # is only spelled out in the vehicle NAME ("... Private Van/Bus"). Detect both
+    # so the agent can offer the traveller a shared OR private option.
+    name_lc = vehicle_name.lower()
+    is_shared = "shared" in transfer_type.lower() or "sharing" in transfer_type.lower() or "shared" in name_lc
+    is_private = "private" in name_lc or "private" in transfer_type.lower()
     badges: list[str] = []
-    if "Private" in transfer_type:
+    if is_shared:
+        badges.append("Shared")
+    if is_private:
         badges.append("Private")
-    if "Sharing" in transfer_type:
-        badges.append("Sharing")
     if vehicle_type:
         badges.append(vehicle_type)
+    # Normalize transfer_type so downstream/agent sees a clear shared|private label.
+    if is_shared:
+        transfer_type = "Shared"
+    elif is_private:
+        transfer_type = "Private"
+    elif not transfer_type:
+        transfer_type = "Private"  # supplier default when unmarked
     return TransferOption(
         transfer_id=str(t.get("transferID") or t.get("uniqueKey") or t.get("vehicleId") or ""),
         unique_key=str(t.get("uniqueKey") or ""),

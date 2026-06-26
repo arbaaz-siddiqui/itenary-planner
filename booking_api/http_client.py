@@ -44,9 +44,21 @@ _REQUEST_SEQ = itertools.count(1)
 
 
 def record_http_request(
-    *, method: str, url: str, status_code: int | None, duration_ms: float, error: str | None = None
+    *,
+    method: str,
+    url: str,
+    status_code: int | None,
+    duration_ms: float,
+    error: str | None = None,
+    request_body: Any = None,
+    response_body: Any = None,
 ) -> None:
-    """Append one HTTP request record to the in-memory log (thread-safe)."""
+    """Append one HTTP request record to the in-memory log (thread-safe).
+
+    `request_body` / `response_body` carry the FULL payloads (no truncation) so
+    the debug UI can show exactly what was sent and received for each booking-API
+    call. They are stored as-is (dict/list/str) for the caller to render.
+    """
     with _RECORDER_LOCK:
         _REQUEST_LOG.append(
             {
@@ -56,6 +68,8 @@ def record_http_request(
                 "status_code": status_code,
                 "duration_ms": round(duration_ms, 1),
                 "error": error,
+                "request_body": request_body,
+                "response_body": response_body,
             }
         )
 
@@ -123,10 +137,9 @@ class BookingApiClient:
             attempt += 1
             req_start = time.perf_counter()
             try:
-                logger.info(
-                    "booking_api request",
-                    extra={"method": method, "path": path, "attempt": attempt},
-                )
+                # Plainly visible in the terminal so you can TRACE exactly which
+                # booking API the agent hit on each turn (no assumptions).
+                logger.info("[BOOKING-API] --> %s %s (attempt %d)", method, path, attempt)
                 response = self.session.request(
                     method=method,
                     url=url,
@@ -168,12 +181,22 @@ class BookingApiClient:
                 continue
 
             sc = response.status_code
+            elapsed_ms = (time.perf_counter() - req_start) * 1000
+            # Capture the FULL request + response bodies for the debug trace.
+            try:
+                _resp_body = response.json()
+            except Exception:  # noqa: BLE001
+                _resp_body = response.text[:20000]
             record_http_request(
                 method=method,
                 url=url,
                 status_code=sc,
-                duration_ms=(time.perf_counter() - req_start) * 1000,
+                duration_ms=elapsed_ms,
+                request_body=json,
+                response_body=_resp_body,
             )
+            # Trace the result so you can confirm the call really happened + succeeded.
+            logger.info("[BOOKING-API] <-- %s %s [%d ms]", sc, path, int(elapsed_ms))
             if sc == 401:
                 raise BookingApiUnauthorized(
                     f"401 Unauthorized for {path}",

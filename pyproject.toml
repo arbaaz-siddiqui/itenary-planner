@@ -47,7 +47,7 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["core", "settings", "parsers", "rules", "reference_data_loader", "llm", "agent", "agent_tools", "itinerary_pdf", "itinerary_store", "fx"]
+py-modules = ["core", "settings", "parsers", "rules", "reference_data_loader", "llm", "agent", "agent_tools", "itinerary_pdf", "itinerary_store", "fx", "voice_service", "lead_scoring"]
 packages = ["booking_api", "mcp_tools", "surfaces", "scripts", "assets"]
 
 [tool.setuptools.package-data]

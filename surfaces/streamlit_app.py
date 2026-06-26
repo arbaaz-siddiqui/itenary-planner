@@ -39,6 +39,14 @@ from llm import describe_current_provider
 configure_logging(prod=False)
 st.set_page_config(page_title="Dubai Trip Planner", page_icon="🏖️", layout="wide")
 
+# Visual identity: off-white "desert sand + oasis" theme, glass floating navbar,
+# Fraunces/Inter type, soft image-rich cards. (surfaces/ui_theme.py)
+try:
+    from surfaces.ui_theme import inject_theme, placeholder_tile_html
+except ImportError:  # when run as `streamlit run surfaces/streamlit_app.py`
+    from ui_theme import inject_theme, placeholder_tile_html
+inject_theme()
+
 
 def _init_session() -> None:
     if "agent" not in st.session_state:
@@ -109,6 +117,17 @@ def _display_signal(tool_calls: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _schedule_signal(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """If the agent called build_trip_schedule_tool this turn, return its days so
+    the chat can render the calendar grid."""
+    for tc in tool_calls:
+        if tc.get("tool_name") == "build_trip_schedule_tool":
+            out = _coerce_output(tc.get("output"))
+            if isinstance(out, dict) and out.get("schedule") and out.get("days"):
+                return out["days"]
+    return None
+
+
 # A rupee amount with at least 3 digits (e.g. ₹2,83,844 or ₹104934) — used to
 # detect when an answer quotes a concrete price so we can flag answers that
 # state prices without having called any pricing tool that turn.
@@ -145,24 +164,55 @@ def _render_flight(o: dict[str, Any]) -> None:
             st.caption("Total (all pax)")
 
 
+def _render_calendar(days: list[dict[str, Any]]) -> None:
+    """Render the day-by-day schedule as a calendar time-grid via a popover."""
+    import streamlit.components.v1 as components
+
+    try:
+        from surfaces.ui_theme import render_calendar_html
+    except ImportError:
+        from ui_theme import render_calendar_html
+
+    start_hour = 8
+    end_hour = 23
+    # height: header (~50) + hours * 64 + padding
+    cal_height = (end_hour - start_hour) * 64 + 100
+
+    with st.popover("📅 View trip schedule →", use_container_width=True):
+        components.html(render_calendar_html(days), height=cal_height, scrolling=False)
+
+
 def _render_hotel(o: dict[str, Any]) -> None:
     with st.container(border=True):
-        c1, c2 = st.columns([3, 1])
-        with c1:
-            star_str = "⭐" * int(o.get("stars", 0))
-            st.markdown(f"**🏨 {o.get('hotel_name') or 'Hotel'}** {star_str}")
-            if o.get("area"):
-                st.caption(f"📍 {o['area']}")
-            if o.get("cheapest_room_type"):
-                st.caption(f"Room: {o['cheapest_room_type']}")
-            if o.get("cheapest_board"):
-                st.caption(f"Board: {o['cheapest_board']}")
-            if o.get("has_free_cancellation"):
-                st.caption("✓ Free cancellation")
-        with c2:
-            st.markdown(f"### {format_inr(o.get('price_inr', 0))}")
-            nights = o.get("nights", 0)
-            st.caption(f"{nights} nights · {format_inr(o.get('per_night_inr', 0))}/night")
+        name = o.get("hotel_name") or "Hotel"
+        stars = int(o.get("stars", 0) or 0)
+        # Supplier API has no hotel photos — show an elegant gradient tile (never
+        # a fake photo), keeping the layout image-rich and consistent with tours.
+        img_col, body_col = st.columns([1, 2])
+        with img_col:
+            st.markdown(
+                placeholder_tile_html(name, kind="hotel", sub="⭐" * stars if stars else ""),
+                unsafe_allow_html=True,
+            )
+        with body_col:
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                star_str = "⭐" * stars
+                st.markdown(f"**🏨 {name}** {star_str}")
+                if o.get("amenities_matched"):
+                    st.caption("✓ " + " · ".join(o["amenities_matched"]))
+                if o.get("area"):
+                    st.caption(f"📍 {o['area']}")
+                if o.get("cheapest_room_type"):
+                    st.caption(f"Room: {o['cheapest_room_type']}")
+                if o.get("cheapest_board"):
+                    st.caption(f"Board: {o['cheapest_board']}")
+                if o.get("has_free_cancellation"):
+                    st.caption("✓ Free cancellation")
+            with c2:
+                st.markdown(f"### {format_inr(o.get('price_inr', 0))}")
+                nights = o.get("nights", 0)
+                st.caption(f"{nights} nights · {format_inr(o.get('per_night_inr', 0))}/night")
 
 
 def _render_tour(o: dict[str, Any]) -> None:
@@ -579,10 +629,212 @@ def _render_sidebar() -> None:
     with st.sidebar:
         st.header("🌴 Trip Planner")
         _render_itinerary_section()
-        st.divider()
-        st.subheader("🔧 Debug")
-        st.caption(describe_current_provider())
-        _render_debug_inspector()
+
+
+# =============================================================================
+# Voice tab — place a call + see the full per-call trace
+# =============================================================================
+def _render_voice_tab() -> None:
+    st.subheader("📞 Voice agent")
+    st.caption(
+        "Enter a phone number and place a call. The voice agent (Vapi + Indian "
+        "voice) talks to the caller using THIS planner as its brain. Below you can "
+        "see exactly what was said and which booking APIs were called."
+    )
+
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        _root = str(_Path(__file__).resolve().parent.parent)
+        if _root not in _sys.path:
+            _sys.path.insert(0, _root)
+        import voice_service
+    except Exception as e:  # noqa: BLE001
+        st.error(f"voice_service unavailable: {e}")
+        return
+
+    if not voice_service.VAPI_API_KEY:
+        st.warning(
+            "VAPI not configured. Set VAPI_API_KEY / VAPI_ASSISTANT_ID / "
+            "VAPI_PHONE_NUMBER_ID in .env. The voice service must also be running "
+            "and reachable by Vapi via ngrok."
+        )
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        number = st.text_input(
+            "Phone number", value="+91", key="voice_number",
+            help="E.g. +918881310786 or a bare 10-digit Indian number.",
+        )
+    with col2:
+        st.write("")
+        st.write("")
+        get_call = st.button("📞 Get a call", type="primary", use_container_width=True)
+
+    # The voice SERVICE (uvicorn, the URL Vapi hits) runs as a separate process,
+    # so the live trace lives there. Fetch it over HTTP, not from our own import.
+    import os as _os
+
+    svc_url = _os.getenv("VOICE_SERVICE_URL", "http://127.0.0.1:8100")
+
+    if get_call:
+        res = voice_service.place_call(number)
+        if res.get("error"):
+            st.error(f"Call failed: {res['error']}")
+        else:
+            st.success(
+                f"Calling {res.get('number')} now (status: {res.get('status')}). "
+                "Pick up — your phone should ring within a few seconds."
+            )
+
+    st.divider()
+    st.markdown("##### 🔎 Call trace (live)")
+    st.caption(f"Reading trace from the voice service at {svc_url}")
+
+    if "voice_traces" not in st.session_state:
+        st.session_state.voice_traces = {}
+
+    if st.button("🔄 Refresh trace"):
+        try:
+            import urllib.request as _u
+            with _u.urlopen(f"{svc_url}/trace", timeout=4) as r:
+                st.session_state.voice_traces = json.loads(r.read().decode())
+        except Exception as e:  # noqa: BLE001
+            st.warning(
+                f"Couldn't reach the voice service /trace at {svc_url} ({e}). "
+                "Is it running?"
+            )
+
+    traces: dict[str, Any] = st.session_state.voice_traces
+    if not traces:
+        st.info("No calls yet. Place a call above, talk to the agent, then click Refresh.")
+        return
+
+    def _truncate(obj, max_chars: int = 50000) -> str:
+        s = json.dumps(obj, indent=2, default=str) if not isinstance(obj, str) else obj
+        return s if len(s) <= max_chars else s[:max_chars] + f"\n... [{len(s)-max_chars} chars truncated]"
+
+    # Most-recent session first. Only auto-expand the latest one.
+    sessions = list(reversed(list(traces.items())))
+    for idx, (session_id, turns) in enumerate(sessions):
+        with st.expander(f"Call `{session_id}` — {len(turns)} turns", expanded=(idx == 0)):
+            # Show only last 5 turns to avoid freezing on long calls
+            visible_turns = list(enumerate(turns, 1))[-5:]
+            if len(turns) > 5:
+                st.caption(f"Showing last 5 of {len(turns)} turns.")
+            for i, turn in reversed(visible_turns):
+                st.markdown(f"**Turn {i}**  ·  _{turn.get('latency_s')}s_")
+                st.markdown(f"🧑 **Caller:** {turn.get('user', '')}")
+                st.markdown(f"🤖 **Agent:** {turn.get('agent', '')}")
+                tools = turn.get("tools") or []
+                if tools:
+                    for t in tools:
+                        with st.expander(f"🛠️ `{t.get('tool')}`", expanded=False):
+                            st.code(_truncate(t.get("input", {})), language="json")
+                            st.caption("Output:")
+                            st.code(_truncate(t.get("output", "")), language="json")
+                calls = turn.get("api_calls") or []
+                if calls:
+                    for c in calls:
+                        ep = c.get("url", "").split("gujjutours.com")[-1] or c.get("url", "")
+                        hdr = f"{c.get('method')} {ep} → {c.get('status_code')} ({c.get('duration_ms')} ms)"
+                        with st.expander(f"🌐 {hdr}", expanded=False):
+                            st.code(_truncate(c.get("request_body")), language="json")
+                            st.caption("Response:")
+                            st.code(_truncate(c.get("response_body")), language="json")
+                st.divider()
+
+
+# =============================================================================
+# Leads tab — upload social-comment JSON, AI-classify into hot/warm/cold leads
+# =============================================================================
+_TAG_STYLE = {
+    "hot": ("🔥", "#ff4b4b"),
+    "warm": ("🟠", "#ff9d00"),
+    "cold": ("🧊", "#3b82f6"),
+}
+
+
+def _render_leads_tab() -> None:
+    st.subheader("🎯 Lead Inspector")
+    st.caption(
+        "Upload a JSON of social-media comments (from a post). The AI reads each "
+        "comment and flags the commenter as a hot / warm / cold travel lead with a "
+        "score and reason. (Later this connects live to the Meta Graph API.)"
+    )
+
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        _root = str(_Path(__file__).resolve().parent.parent)
+        if _root not in _sys.path:
+            _sys.path.insert(0, _root)
+        from lead_scoring import classify_leads, normalize_comments
+    except Exception as e:  # noqa: BLE001
+        st.error(f"lead_scoring unavailable: {e}")
+        return
+
+    uploaded = st.file_uploader(
+        "Upload comments JSON", type=["json"], key="leads_upload",
+        help="Array of comments with username, name, comment (extra fields are kept).",
+    )
+    use_llm = st.checkbox("Classify with AI (Claude)", value=True, key="leads_use_llm")
+
+    if uploaded is not None and st.button("🔎 Analyze leads", type="primary"):
+        try:
+            raw = json.load(uploaded)
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Couldn't read JSON: {e}")
+            return
+        comments = normalize_comments(raw)
+        if not comments:
+            st.warning("No comments found in that file. Expected a list of {username, name, comment}.")
+            return
+        with st.spinner(f"Analyzing {len(comments)} comments…"):
+            st.session_state.lead_rows = classify_leads(comments, use_llm=use_llm)
+
+    rows = st.session_state.get("lead_rows")
+    if not rows:
+        st.info("Upload a comments JSON and click **Analyze leads** to see the lead table.")
+        return
+
+    # Summary counts by tag.
+    counts = {t: sum(1 for r in rows if r["tag"] == t) for t in ("hot", "warm", "cold")}
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total leads", len(rows))
+    c2.metric("🔥 Hot", counts["hot"])
+    c3.metric("🟠 Warm", counts["warm"])
+    c4.metric("🧊 Cold", counts["cold"])
+
+    # Filter + table.
+    tag_filter = st.multiselect(
+        "Filter by tag", ["hot", "warm", "cold"], default=["hot", "warm", "cold"], key="leads_filter"
+    )
+    shown = [r for r in rows if r["tag"] in tag_filter]
+    table = [
+        {
+            "Lead": f"{_TAG_STYLE.get(r['tag'], ('', ''))[0]} {r['tag'].upper()}",
+            "Score": r["score"],
+            "Name": r.get("name", ""),
+            "Username": r.get("username", ""),
+            "Comment": r.get("comment", ""),
+            "Why": r.get("reason", ""),
+        }
+        for r in shown
+    ]
+    st.dataframe(
+        table,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Score": st.column_config.ProgressColumn(
+                "Score", min_value=0, max_value=100, format="%d"
+            ),
+            "Comment": st.column_config.TextColumn("Comment", width="large"),
+        },
+    )
 
 
 # =============================================================================
@@ -633,10 +885,24 @@ def _process_message(user_message: str) -> None:
     result = StreamResult()
 
     with st.chat_message("assistant"):
-        # st.write_stream consumes the token generator and live-renders the
-        # assistant text as it arrives; it returns the full concatenated string.
-        assistant_text = st.write_stream(
-            stream_and_log(
+        # Show a live "thinking / searching" status during the silent gap while
+        # the agent reasons + calls booking APIs (before any text streams). As
+        # tools fire, reflect which one in the status so the wait feels alive.
+        status = st.status("✨ Planning your trip…", expanded=False)
+
+        def _streamed():
+            seen_tools: set[str] = set()
+            _labels = {
+                "search_flights": "✈️ Searching flights…",
+                "search_hotels": "🏨 Finding hotels…",
+                "search_tours": "🎟️ Looking up tours & activities…",
+                "search_airport_transfer_dubai": "🚐 Checking transfers…",
+                "get_hotel_description": "🏊 Checking hotel amenities…",
+                "get_visa_info": "📄 Checking visa details…",
+                "search_restaurants": "🍽️ Finding restaurants…",
+                "build_trip_schedule_tool": "🗓️ Laying out your schedule…",
+            }
+            gen = stream_and_log(
                 st.session_state.agent,
                 surface="streamlit",
                 thread_id=st.session_state.thread_id,
@@ -644,7 +910,17 @@ def _process_message(user_message: str) -> None:
                 turn_number=turn,
                 result=result,
             )
-        )
+            for token in gen:
+                # update status from tools observed so far this turn
+                for ev in result.tool_event_log:
+                    name = ev.get("tool_name", "")
+                    if ev.get("event") == "call" and name and name not in seen_tools:
+                        seen_tools.add(name)
+                        status.update(label=_labels.get(name, f"🔧 {name}…"))
+                yield token
+
+        assistant_text = st.write_stream(_streamed)
+        status.update(label="Done", state="complete")
         if not isinstance(assistant_text, str):
             assistant_text = result.text or ""
 
@@ -704,11 +980,17 @@ def _process_message(user_message: str) -> None:
                 for opt in options:
                     _render_option(kind, opt)
 
+        # Calendar: if the agent built a schedule this turn, draw the time-grid.
+        schedule_days = _schedule_signal(tool_calls)
+        if schedule_days:
+            _render_calendar(schedule_days)
+
         st.session_state.chat_history.append(
             {
                 "role": "assistant",
                 "content": assistant_text,
                 "cards": cards_payload,
+                "schedule": schedule_days or None,
             }
         )
 
@@ -747,39 +1029,61 @@ _render_sidebar()
 st.title("🏖️ Dubai Trip Planner")
 st.caption(f"Powered by {describe_current_provider()} · streaming on")
 
-# Empty-state hint so the chat doesn't look broken before the first message.
-if not st.session_state.chat_history:
-    st.info(
-        "👋 Tell me about your Dubai trip — origin city, dates/nights, who's "
-        "travelling, and your budget. Every API and tool call shows live in the "
-        "**🔧 Debug** sidebar so you can see exactly what data each answer is built on.",
-        icon="🧭",
-    )
+chat_tab, voice_tab, leads_tab, debug_tab = st.tabs(["💬 Chat", "📞 Voice", "🎯 Leads", "🔧 Debug"])
 
-# Replay chat history
-for entry in st.session_state.chat_history:
-    with st.chat_message(entry.get("role", "assistant")):
-        st.markdown(entry.get("content", ""))
-        cards = entry.get("cards") or {}
-        kind = cards.get("kind")
-        options = cards.get("options") or []
-        if kind and options:
-            for opt in options:
-                _render_option(kind, opt)
+with chat_tab:
+    # Empty-state hint so the chat doesn't look broken before the first message.
+    if not st.session_state.chat_history:
+        st.info(
+            "👋 Tell me about your Dubai trip — origin city, dates/nights, who's "
+            "travelling, and your budget. Every API and tool call shows live in the "
+            "**🔧 Debug** tab so you can see exactly what data each answer is built on.",
+            icon="🧭",
+        )
 
-# "Generate itinerary PDF" button: ask the agent to build it from the confirmed
-# trip details using the generate_itinerary_pdf tool (real, tool-sourced numbers).
-if st.session_state.get("pdf_request_pending"):
-    st.session_state.pdf_request_pending = False
-    _process_message(
-        "Please generate the itinerary PDF now using the trip details we've "
-        "confirmed (origin, dates, party, the flights/hotel/tours/visa we "
-        "discussed, the total, and the payment schedule). Call the "
-        "generate_itinerary_pdf tool with the real numbers — do not invent any."
-    )
-    st.rerun()
+    # Replay chat history — only render rich cards for the last 6 messages to
+    # avoid rerendering all hotel/flight cards on every interaction (causes freeze).
+    history = st.session_state.chat_history
+    RICH_WINDOW = 6
+    rich_start = max(0, len(history) - RICH_WINDOW)
+    for i, entry in enumerate(history):
+        with st.chat_message(entry.get("role", "assistant")):
+            st.markdown(entry.get("content", ""))
+            if i < rich_start:
+                continue  # skip heavy card rendering for old messages
+            cards = entry.get("cards") or {}
+            kind = cards.get("kind")
+            options = cards.get("options") or []
+            if kind and options:
+                for opt in options:
+                    _render_option(kind, opt)
+            if entry.get("schedule"):
+                _render_calendar(entry["schedule"])
 
-# Chat input — the single entry point now that Quickstart is gone.
+    # "Generate itinerary PDF" button: build from confirmed trip details using
+    # the generate_itinerary_pdf tool (real, tool-sourced numbers).
+    if st.session_state.get("pdf_request_pending"):
+        st.session_state.pdf_request_pending = False
+        _process_message(
+            "Please generate the itinerary PDF now using the trip details we've "
+            "confirmed (origin, dates, party, the flights/hotel/tours/visa we "
+            "discussed, the total, and the payment schedule). Call the "
+            "generate_itinerary_pdf tool with the real numbers — do not invent any."
+        )
+        st.rerun()
+
+with voice_tab:
+    _render_voice_tab()
+
+with leads_tab:
+    _render_leads_tab()
+
+with debug_tab:
+    st.caption(describe_current_provider())
+    _render_debug_inspector()
+
+# Chat input — must be at top level (Streamlit requires st.chat_input outside
+# tabs/columns). It drives the Chat tab.
 user_input = st.chat_input("Ask me anything about your Dubai trip…")
 if user_input:
     _process_message(user_input)

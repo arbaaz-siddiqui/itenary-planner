@@ -148,7 +148,7 @@ def call_flight_search(
         "Target": "test",
         "agentID": 0,
         "rateCategoryId": 0,
-        "supplierTime": "6",
+        "supplierTime": "3",
         "supplierId": 0,
         "suppliers": [],
         "isMobile": 0,
@@ -998,7 +998,12 @@ def discover_city_hotel_ids(city_id: int) -> tuple[tuple[int, float], ...]:
         raw = call_hotel_static_by_city(city_id=city_id, lookup_type="city")
     except Exception:
         return ()
-    items = raw.get("raw") if isinstance(raw, dict) else None
+    # GetStaticDataByCity returns {"CountryId": ..., "Hotels": [{HotelId, StarRating,
+    # Category, ...}, ...]} — thousands of hotels. Older code looked for "raw"/
+    # a top-level list and silently got nothing (→ only the 2 curated hotels showed).
+    items = None
+    if isinstance(raw, dict):
+        items = raw.get("Hotels") or raw.get("raw") or raw.get("result")
     if not isinstance(items, list):
         items = raw if isinstance(raw, list) else []
     out: list[tuple[int, float]] = []
