@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nikki — Dubai Trip Planner</title>
+  <script src="https://unpkg.com/@daily-co/daily-js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1117;
+      color: #e8eaf0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card {
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 16px;
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .logo-icon {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(135deg, #f59e0b, #ef4444);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+    }
+
+    .logo-text h1 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .logo-text p {
+      font-size: 12px;
+      color: #6b7280;
+    }
+
+    .agent-info {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: #12141e;
+      border: 1px solid #2a2d3a;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 24px;
+    }
+
+    .avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #8b5cf6, #ec4899);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      flex-shrink: 0;
+    }
+
+    .agent-details h2 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .agent-details p {
+      font-size: 12px;
+      color: #6b7280;
+    }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: #12141e;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      min-height: 42px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #374151;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+
+    .status-dot.idle     { background: #374151; }
+    .status-dot.loading  { background: #f59e0b; animation: pulse 1s infinite; }
+    .status-dot.active   { background: #10b981; animation: pulse 1.5s infinite; }
+    .status-dot.speaking { background: #6366f1; animation: pulse 0.8s infinite; }
+    .status-dot.error    { background: #ef4444; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    #status-text {
+      font-size: 13px;
+      color: #9ca3af;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #start-btn {
+      background: linear-gradient(135deg, #f59e0b, #ef4444);
+      color: #fff;
+    }
+
+    #start-btn:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 24px rgba(245,158,11,0.35);
+    }
+
+    #end-btn {
+      background: #1f2231;
+      color: #ef4444;
+      border: 1px solid #3d1f1f;
+      margin-top: 10px;
+      display: none;
+    }
+
+    #end-btn:hover:not(:disabled) { background: #2a1a1a; }
+
+    .transcript-section {
+      margin-top: 20px;
+    }
+
+    .transcript-section h3 {
+      font-size: 12px;
+      font-weight: 600;
+      color: #4b5563;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+    }
+
+    #transcript {
+      background: #12141e;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+      padding: 12px;
+      height: 200px;
+      overflow-y: auto;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #9ca3af;
+    }
+
+    #transcript:empty::before {
+      content: "Transcript will appear here during the call...";
+      color: #374151;
+      font-style: italic;
+    }
+
+    .transcript-line { margin-bottom: 6px; }
+    .transcript-line.agent { color: #a78bfa; }
+    .transcript-line.user  { color: #34d399; }
+    .transcript-line.system { color: #f59e0b; font-style: italic; }
+
+    .mute-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .btn-icon {
+      flex: 1;
+      padding: 10px;
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+      color: #9ca3af;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background 0.2s;
+    }
+
+    .btn-icon:hover { background: #1f2231; }
+    .btn-icon.active { border-color: #6366f1; color: #6366f1; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <div class="logo-icon">✈️</div>
+    <div class="logo-text">
+      <h1>Gujju Tours</h1>
+      <p>Dubai Trip Planner</p>
+    </div>
+  </div>
+
+  <div class="agent-info">
+    <div class="avatar">👩‍💼</div>
+    <div class="agent-details">
+      <h2>Nikki</h2>
+      <p>Travel Consultant · Hinglish · Available now</p>
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <div class="status-dot idle" id="status-dot"></div>
+    <span id="status-text">Ready to connect</span>
+  </div>
+
+  <button class="btn" id="start-btn" onclick="startCall()">
+    📞 Start Call with Nikki
+  </button>
+
+  <div class="mute-row" id="mute-row" style="display:none">
+    <button class="btn-icon" id="mute-btn" onclick="toggleMute()">🎙️ Mute</button>
+    <button class="btn-icon" onclick="endCall()" style="color:#ef4444">📵 End</button>
+  </div>
+
+  <div class="transcript-section">
+    <h3>Transcript</h3>
+    <div id="transcript"></div>
+  </div>
+</div>
+
+<script>
+  let callFrame = null;
+  let muted = false;
+
+  function setStatus(state, text) {
+    const dot = document.getElementById('status-dot');
+    dot.className = `status-dot ${state}`;
+    document.getElementById('status-text').textContent = text;
+  }
+
+  function appendTranscript(role, text) {
+    const el = document.getElementById('transcript');
+    const line = document.createElement('div');
+    line.className = `transcript-line ${role}`;
+    const prefix = role === 'agent' ? 'Nikki' : role === 'user' ? 'You' : '';
+    line.textContent = prefix ? `${prefix}: ${text}` : text;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
+  }
+
+  async function startCall() {
+    const btn = document.getElementById('start-btn');
+    btn.disabled = true;
+    setStatus('loading', 'Creating room...');
+
+    let roomUrl, token;
+    try {
+      const resp = await fetch('/start-call', { method: 'POST' });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(err.detail || `Server error ${resp.status}`);
+      }
+      const data = await resp.json();
+      roomUrl = data.room_url;
+      token   = data.token;
+    } catch (err) {
+      setStatus('error', `Error: ${err.message}`);
+      btn.disabled = false;
+      return;
+    }
+
+    setStatus('loading', 'Joining call...');
+    appendTranscript('system', 'Connecting to Nikki...');
+
+    callFrame = window.DailyIframe.createCallObject({
+      audioSource: true,
+      videoSource: false,
+    });
+
+    // ── Daily event handlers ─────────────────────────────────────────────
+    callFrame.on('joined-meeting', () => {
+      setStatus('active', 'Connected — Nikki is listening');
+      appendTranscript('system', 'Call started. Nikki will greet you shortly.');
+      btn.style.display = 'none';
+      document.getElementById('mute-row').style.display = 'flex';
+    });
+
+    callFrame.on('left-meeting', () => {
+      setStatus('idle', 'Call ended');
+      appendTranscript('system', 'Call ended.');
+      btn.style.display = 'block';
+      btn.disabled = false;
+      document.getElementById('mute-row').style.display = 'none';
+      callFrame = null;
+    });
+
+    callFrame.on('error', (e) => {
+      setStatus('error', `Call error: ${e.errorMsg || 'Unknown error'}`);
+      appendTranscript('system', `Error: ${e.errorMsg || 'Unknown error'}`);
+      btn.disabled = false;
+    });
+
+    // Transcription from Daily (if enabled on the room)
+    callFrame.on('app-message', (event) => {
+      try {
+        const msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+        if (msg.type === 'transcript') {
+          appendTranscript(msg.role === 'bot' ? 'agent' : 'user', msg.text);
+        }
+      } catch (_) { /* non-transcript message */ }
+    });
+
+    callFrame.on('participant-updated', (event) => {
+      const p = event.participant;
+      if (p.local) return;
+      // Bot joined/left indicator
+      if (p.user_name === 'Nikki') {
+        if (p.tracks?.audio?.state === 'playable') {
+          setStatus('speaking', 'Nikki is speaking...');
+        } else {
+          setStatus('active', 'Connected — listening');
+        }
+      }
+    });
+
+    try {
+      await callFrame.join({ url: roomUrl, token });
+    } catch (err) {
+      setStatus('error', `Join failed: ${err.message}`);
+      appendTranscript('system', `Join failed: ${err.message}`);
+      btn.disabled = false;
+      btn.style.display = 'block';
+    }
+  }
+
+  function toggleMute() {
+    if (!callFrame) return;
+    muted = !muted;
+    callFrame.setLocalAudio(!muted);
+    const btn = document.getElementById('mute-btn');
+    btn.textContent = muted ? '🔇 Unmute' : '🎙️ Mute';
+    btn.classList.toggle('active', muted);
+  }
+
+  function endCall() {
+    if (!callFrame) return;
+    callFrame.leave();
+  }
+</script>
+</body>
+</html>

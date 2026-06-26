@@ -1,0 +1,12 @@
+# Pipecat with Daily transport, Groq STT+LLM, and Cartesia TTS
+pipecat-ai[daily,groq,cartesia]>=0.0.50
+
+# Web server
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+
+# HTTP client (Daily room management)
+httpx>=0.27.0
+
+# Environment variable loading
+python-dotenv>=1.0.0
