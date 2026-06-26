@@ -10,6 +10,7 @@ Includes:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -23,10 +24,13 @@ from typing import Any
 
 import structlog
 from filelock import FileLock
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.prebuilt import create_react_agent
+from langgraph.prebuilt import ToolNode
 
 from agent_tools import ALL_TOOLS
 from llm import build_llm, get_active_model_id
@@ -92,8 +96,22 @@ def _load_prompt(name: str) -> str:
 
 
 def load_system_prompt(*, surface: str = "streamlit") -> str:
-    base = _load_prompt(f"system_prompt_{SYSTEM_PROMPT_VERSION}.md")
     today = datetime.now().strftime("%A, %d %B %Y")
+
+    if surface == "voice":
+        # Voice uses its own lean prompt — the base prompt's pre-search intake
+        # rules (party split, budget, rooms required before searching) break
+        # phone calls. system_prompt_voice.md is built for the phone flow.
+        parts = [
+            _load_prompt("system_prompt_voice.md").rstrip(),
+            "",
+            "## Current context",
+            f"- Today's date: {today}",
+            f"- Surface: {surface}",
+        ]
+        return "\n".join(parts)
+
+    base = _load_prompt(f"system_prompt_{SYSTEM_PROMPT_VERSION}.md")
     parts = [
         base.rstrip(),
         "",
@@ -103,9 +121,74 @@ def load_system_prompt(*, surface: str = "streamlit") -> str:
     ]
     if surface == "whatsapp":
         parts.extend(["", _load_prompt("whatsapp_addendum.md").rstrip()])
-    elif surface == "voice":
-        parts.extend(["", _load_prompt("voice_addendum.md").rstrip()])
     return "\n".join(parts)
+
+
+# =============================================================================
+# Parallel ToolNode — runs all tool calls in a single LLM response concurrently
+# =============================================================================
+class ParallelToolNode(ToolNode):
+    """Drop-in replacement for LangGraph's ToolNode that executes all tool calls
+    from one AI message in parallel using asyncio.gather.
+
+    When the LLM emits multiple tool_calls in one response (e.g. search_flights
+    + search_hotels), the default ToolNode runs them sequentially:  10s + 6s = 16s.
+    This node runs them concurrently:  max(10s, 6s) = 10s — saves ~6s per turn.
+    """
+
+    async def _arun_tool(self, tool_call: dict[str, Any], tools_by_name: dict[str, Any]) -> ToolMessage:
+        tool_name = tool_call.get("name", "")
+        tool_args = tool_call.get("args", {})
+        tool_call_id = tool_call.get("id", "")
+        t = tools_by_name.get(tool_name)
+        if t is None:
+            return ToolMessage(
+                content=f"Tool '{tool_name}' not found.",
+                tool_call_id=tool_call_id,
+                name=tool_name,
+            )
+        try:
+            if asyncio.iscoroutinefunction(getattr(t, "ainvoke", None)):
+                result = await t.ainvoke(tool_args)
+            else:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, t.invoke, tool_args)
+            content = json.dumps(result, default=str) if not isinstance(result, str) else result
+        except Exception as e:  # noqa: BLE001
+            content = f"Tool error: {e}"
+        return ToolMessage(content=content, tool_call_id=tool_call_id, name=tool_name)
+
+    async def ainvoke(self, state: Any, config: Any = None, **kwargs: Any) -> Any:
+        messages = state.get("messages", []) if isinstance(state, dict) else []
+        last_ai = next(
+            (m for m in reversed(messages) if _message_role(m) in {"ai", "assistant"}),
+            None,
+        )
+        if last_ai is None:
+            return await super().ainvoke(state, config, **kwargs)
+
+        tool_calls = _safe_attr(last_ai, "tool_calls") or []
+        if len(tool_calls) <= 1:
+            return await super().ainvoke(state, config, **kwargs)
+
+        tools_by_name: dict[str, Any] = self.tools_by_name  # type: ignore[attr-defined]
+
+        tool_messages = await asyncio.gather(
+            *[self._arun_tool(tc, tools_by_name) for tc in tool_calls]
+        )
+        return {"messages": list(tool_messages)}
+
+    def invoke(self, state: Any, config: Any = None, **kwargs: Any) -> Any:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                    fut = ex.submit(asyncio.run, self.ainvoke(state, config, **kwargs))
+                    return fut.result()
+            return loop.run_until_complete(self.ainvoke(state, config, **kwargs))
+        except Exception:  # noqa: BLE001
+            return super().invoke(state, config, **kwargs)
 
 
 # =============================================================================
@@ -135,9 +218,11 @@ def build_react_agent(
             "may return empty. Use the all-services agent token (e.g. GT-021).",
         )
 
+    parallel_tools = ParallelToolNode(ALL_TOOLS)
+
     return create_react_agent(
         model=llm,
-        tools=ALL_TOOLS,
+        tools=parallel_tools,
         prompt=load_system_prompt(surface=surface),
         checkpointer=checkpointer,
     )
@@ -473,7 +558,9 @@ def stream_and_log(
         Populates `result` (a StreamResult) and logs the turn on completion.
     """
     holder = result if result is not None else StreamResult()
-    config = {"configurable": {"thread_id": thread_id}}
+    config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+    if surface == "voice":
+        config["recursion_limit"] = 25
     start = time.perf_counter()
 
     for mode, chunk in agent.stream(

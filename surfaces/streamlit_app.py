@@ -711,7 +711,7 @@ def _render_voice_tab() -> None:
         st.info("No calls yet. Place a call above, talk to the agent, then click Refresh.")
         return
 
-    def _truncate(obj, max_chars: int = 500) -> str:
+    def _truncate(obj, max_chars: int = 50000) -> str:
         s = json.dumps(obj, indent=2, default=str) if not isinstance(obj, str) else obj
         return s if len(s) <= max_chars else s[:max_chars] + f"\n... [{len(s)-max_chars} chars truncated]"
 
