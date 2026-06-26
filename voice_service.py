@@ -41,6 +41,7 @@ _logging.getLogger("dotenv.main").setLevel(_logging.ERROR)
 load_dotenv()  # pull VAPI_* + LLM + booking creds from the planner .env
 
 from agent import (
+    StreamResult,
     build_react_agent,
     build_sqlite_checkpoint,
     configure_logging,
@@ -48,6 +49,7 @@ from agent import (
     extract_tool_calls,
     get_logger,
     invoke_and_log,
+    stream_and_log,
 )
 from booking_api.http_client import http_requests_since, latest_http_seq
 
@@ -112,6 +114,18 @@ def place_call(number: str, *, schedule_unix: int | None = None) -> dict[str, An
             d = json.loads(r.read().decode())
             log.info("voice_call_placed", number=number, call_id=d.get("id"), status=d.get("status"))
             return {"call_id": d.get("id"), "status": d.get("status"), "number": number}
+    except urllib.error.HTTPError as e:  # type: ignore[attr-defined]
+        body_text = ""
+        try:
+            body_text = e.read().decode()
+        except Exception:  # noqa: BLE001
+            pass
+        log.error("voice_call_failed", number=number, http_status=e.code, response=body_text)
+        try:
+            detail = json.loads(body_text).get("message") or body_text
+        except Exception:  # noqa: BLE001
+            detail = body_text or str(e)
+        return {"error": f"Vapi error {e.code}: {detail}", "number": number}
     except Exception as e:  # noqa: BLE001
         log.error("voice_call_failed", number=number, error=str(e))
         return {"error": str(e), "number": number}
@@ -153,9 +167,13 @@ def clear_trace() -> None:
 # =============================================================================
 # Planner agent (the brain)
 # =============================================================================
-@lru_cache(maxsize=1)
+_voice_agent_instance: object | None = None
+
 def get_voice_agent() -> object:
-    return build_react_agent(surface="voice", checkpoint_store=build_sqlite_checkpoint())
+    global _voice_agent_instance
+    if _voice_agent_instance is None:
+        _voice_agent_instance = build_react_agent(surface="voice", checkpoint_store=build_sqlite_checkpoint())
+    return _voice_agent_instance
 
 
 # If a thread gets corrupted (interrupted tool call), we bump this salt so the
@@ -175,7 +193,13 @@ _URL = re.compile(r"https?://\S+", re.IGNORECASE)
 _HEAD = re.compile(r"^#{1,6}\s+", re.MULTILINE)
 _EMPH = re.compile(r"[*_`#~]+")
 _BULLET = re.compile(r"^\s*[-*•]\s+", re.MULTILINE)
-_RUPEE = re.compile(r"₹\s*([\d,]+)")          # ₹1,00,000 → "1 lakh rupees" etc.
+_RUPEE = re.compile(r"₹\s*([\d,]+)")           # ₹1,00,000 → "1.3 lakh rupees"
+_PLAIN_LAKH = re.compile(r"\b(\d+\.\d+)\s*lakh\b", re.IGNORECASE)  # 1.33073 lakh → 1.3 lakh
+_BAGGAGE = re.compile(                          # strip baggage/refund details entirely
+    r"(baggage|baggaj|check[-\s]?in|hand\s*bag|cabin\s*bag|refundable|non[-\s]?refundable"
+    r"|kg\s*check|kg\s*hand|\d+\s*kg)[^.]*",
+    re.IGNORECASE,
+)
 
 
 def _humanise_numbers(text: str) -> str:
@@ -188,13 +212,13 @@ def _humanise_numbers(text: str) -> str:
         except ValueError:
             return m.group(0)
         if n >= 10_00_000:
-            cr = n / 10_00_000
-            return f"{cr:g} crore rupees"
+            cr = round(n / 10_00_000, 1)
+            return f"{cr} crore rupees"
         if n >= 1_00_000:
-            lk = n / 1_00_000
-            return f"{lk:g} lakh rupees"
+            lk = round(n / 1_00_000, 1)
+            return f"{lk} lakh rupees"
         if n >= 1_000:
-            return f"{n:,} rupees"
+            return f"{round(n / 1000, 1)} thousand rupees"
         return f"{n} rupees"
     return _RUPEE.sub(_replace, text)
 
@@ -250,13 +274,27 @@ def _fix_gender(text: str) -> str:
     return text
 
 
+_EMOJI = re.compile(
+    "[\U00010000-\U0010ffff"   # supplementary planes (most emoji)
+    "\U0001F300-\U0001F9FF"    # misc symbols & pictographs
+    "\U00002600-\U000027BF"    # misc symbols
+    "\U0000FE00-\U0000FE0F"    # variation selectors
+    "]+",
+    flags=re.UNICODE,
+)
+# Strip CJK characters (Chinese/Japanese/Korean) — LLM occasionally slips these in
+# when the conversation mixes Hindi scripts. TTS reads them incorrectly.
+_CJK = re.compile(r"[一-鿿぀-ヿ가-힯]+", flags=re.UNICODE)
+_NUMBERED_ITEM = re.compile(r"^\s*\d+\.\s+", re.MULTILINE)  # "1. foo" → strip number
+
+
 def format_for_voice(text: str) -> str:
     """Make agent text safe and natural for text-to-speech.
 
     Pipeline:
-    1. Strip all markdown (tables, headings, bullets, emphasis, URLs)
-    2. Humanise currency figures (₹ → spoken rupees)
-    3. Collapse whitespace into spoken-friendly sentences
+    1. Strip markdown, emoji, numbered lists, URLs
+    2. Humanise currency figures
+    3. Hard-truncate to 2 sentences so TTS stays short
     """
     if not text:
         return ""
@@ -264,66 +302,211 @@ def format_for_voice(text: str) -> str:
     text = _URL.sub("", text)
     text = _HEAD.sub("", text)
     text = _BULLET.sub("", text)
+    text = _NUMBERED_ITEM.sub("", text)
     text = _EMPH.sub("", text)
+    text = _EMOJI.sub("", text)
+    text = _CJK.sub("", text)       # strip accidental Chinese/Japanese/Korean chars
+    text = _BAGGAGE.sub("", text)   # strip baggage weights, refund status
+    # Round ugly decimals: 1.33073 lakh → 1.3 lakh
+    text = _PLAIN_LAKH.sub(lambda m: f"{round(float(m.group(1)), 1)} lakh", text)
     text = text.replace("&", " and ")
     text = _humanise_numbers(text)
     text = _fix_gender(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{2,}", ". ", text)
     text = re.sub(r"\n", " ", text)
+    # Strip inline numbered list markers like " 2. " " 3. " left after joining lines
+    text = re.sub(r"\s+\d+\.\s+", " ", text)
     text = re.sub(r"\s+([.,!?])", r"\1", text)
-    return re.sub(r"\.{2,}", ".", text).strip()
+    text = re.sub(r"\.{2,}", ".", text).strip()
+
+    # Hard cap: keep only first 2 sentences so the agent never rambles on voice.
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    if len(sentences) > 2:
+        text = " ".join(sentences[:2])
+
+    return text
 
 
-# Filler phrases spoken IMMEDIATELY while the agent thinks — kills dead air.
-# Each value is a SHORT human-sounding phrase (under 5 words) — sounds like a
-# real person reacting, not a hold message. Vapi speaks this while the LLM runs.
-_FILLERS: dict[str, str] = {
-    "flight":    "Hmm, flights dekh rahi hoon.",
-    "fly":       "Haan, flights check karti hoon.",
-    "hotel":     "Haan ji, hotels dekh rahi hoon.",
-    "stay":      "Acha, hotels check karti hoon.",
-    "room":      "Hmm, rooms dekh rahi hoon.",
-    "tour":      "Haan, tours abhi dekhti hoon.",
-    "safari":    "Haan ji, safari options check kar rahi hoon.",
-    "burj":      "Hmm, tours dekh rahi hoon.",
-    "transfer":  "Haan, transfers check karti hoon.",
-    "taxi":      "Acha, taxi options dekh rahi hoon.",
-    "visa":      "Haan, visa details abhi dekhti hoon.",
-    "budget":    "Hmm, numbers calculate kar rahi hoon.",
-    "cost":      "Haan, pricing check karti hoon.",
-    "price":     "Acha, prices dekh rahi hoon.",
-    "plan":      "Haan bilkul, abhi dekhti hoon.",
-    "trip":      "Hmm, trip plan check kar rahi hoon.",
-    "itinerary": "Haan ji, abhi dekhti hoon.",
-}
-_DEFAULT_FILLER = "Haan, ek second."
+# =============================================================================
+# Emotion / intent detection
+# =============================================================================
+# Intent influences: filler phrase, response brevity instruction, search urgency.
+# Detected purely from text — no audio model needed.
+
+_URGENCY_SIGNALS = re.compile(
+    r"\b(urgent|urgently|asap|jaldi|abhi|turant|immediately|right now|aaj|kal|tomorrow|today)\b",
+    re.IGNORECASE,
+)
+_CONFUSION_SIGNALS = re.compile(
+    r"\b(matlab|kya matlab|samjha nahi|samajh nahi|kya|what|huh|pardon|sorry\?|"
+    r"again|dobara|repeat|clear nahi|nahi samjha|nahi samjhi)\b",
+    re.IGNORECASE,
+)
+_DETAIL_SIGNALS = re.compile(
+    r"\b(detail|details|bata|batao|explain|explain karo|full|poori|puri|complete|sab kuch|"
+    r"zyada|aur batao|more info|everything|all options|sab options)\b",
+    re.IGNORECASE,
+)
+_SATISFACTION_SIGNALS = re.compile(
+    r"\b(theek hai|theek|accha|acha|sahi|sahi hai|ok|okay|perfect|bilkul|done|haan theek|"
+    r"sounds good|book karo|confirm|yes)\b",
+    re.IGNORECASE,
+)
 
 
-def _filler_for(transcript: str) -> str:
+def _detect_intent(transcript: str) -> dict[str, bool]:
+    return {
+        "urgent":     bool(_URGENCY_SIGNALS.search(transcript)),
+        "confused":   bool(_CONFUSION_SIGNALS.search(transcript)),
+        "wants_detail": bool(_DETAIL_SIGNALS.search(transcript)),
+        "satisfied":  bool(_SATISFACTION_SIGNALS.search(transcript)),
+    }
+
+
+# =============================================================================
+# Smart filler — echo back what we understood + context-aware urgency
+# =============================================================================
+
+# Patterns to pull structured facts out of the transcript for echo-back.
+_ROUTE_RE = re.compile(
+    r"\b(delhi|mumbai|bangalore|bengaluru|hyderabad|chennai|kolkata|pune|ahmedabad|"
+    r"jaipur|dubai|london|singapore|bangkok|paris|new york|sydney)\b",
+    re.IGNORECASE,
+)
+_DATE_RE = re.compile(
+    r"\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|"
+    r"apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|"
+    r"nov(?:ember)?|dec(?:ember)?)|"
+    r"\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|"
+    r"(?:aaj|kal|parso|next week|is week|is mahine))\b",
+    re.IGNORECASE,
+)
+
+
+def _build_smart_filler(transcript: str, intent: dict[str, bool]) -> str:
+    """Build a context-aware filler that echoes back what we understood.
+
+    Goal: caller immediately hears "yes she got it" + the system starts thinking.
+    If we can pull cities/dates from the transcript, we echo them back.
+    Otherwise fall back to a keyword-based filler.
+    """
+    t_lower = transcript.lower()
+
+    cities = _ROUTE_RE.findall(transcript)
+    dates = _DATE_RE.findall(transcript)
+
+    # Echo-back filler when we have enough info
+    if len(cities) >= 2:
+        origin, dest = cities[0].title(), cities[1].title()
+        if dates:
+            date_str = dates[0]
+            return f"{origin} se {dest}, {date_str} — abhi check kar rahi hoon."
+        return f"{origin} se {dest} ke liye dekh rahi hoon, ek second."
+    if len(cities) == 1:
+        dest = cities[0].title()
+        if dates:
+            return f"{dest} ke liye {dates[0]} — abhi check kar rahi hoon."
+        if "hotel" in t_lower or "stay" in t_lower or "room" in t_lower:
+            return f"Haan, {dest} mein hotels dekh rahi hoon."
+        if "flight" in t_lower or "fly" in t_lower:
+            return f"Haan, {dest} ke liye flights dekh rahi hoon."
+        return f"Haan, {dest} ke baare mein dekh rahi hoon."
+
+    # No cities — fall back to keyword / intent based fillers
+    if intent.get("confused"):
+        return "Haan ji, main samjhati hoon."
+    if intent.get("urgent"):
+        return "Haan, abhi check karti hoon!"
+    if "flight" in t_lower or "fly" in t_lower:
+        return "Hmm, flights dekh rahi hoon."
+    if "hotel" in t_lower or "stay" in t_lower or "room" in t_lower:
+        return "Haan ji, hotels dekh rahi hoon."
+    if "tour" in t_lower or "safari" in t_lower or "burj" in t_lower:
+        return "Haan, tours abhi dekhti hoon."
+    if "transfer" in t_lower or "taxi" in t_lower:
+        return "Acha, transfers check karti hoon."
+    if "visa" in t_lower:
+        return "Haan, visa details abhi dekhti hoon."
+    if "budget" in t_lower or "cost" in t_lower or "price" in t_lower:
+        return "Acha, pricing dekh rahi hoon."
+    return "Haan, ek second."
+
+
+# =============================================================================
+# Backchanneling — short natural acknowledgment phrases
+# =============================================================================
+# Vapi sends a POST as soon as user finishes speaking. We can't insert sounds
+# WHILE the user speaks (that's telephony-level, not LLM-level). But we can
+# send a very short acknowledgment as the first SSE chunk — it plays in
+# <200ms, making it feel like the agent was listening attentively.
+_BACKCHANNEL_PHRASES = [
+    "Haan.",
+    "Hmm.",
+    "Acha.",
+    "Ji haan.",
+    "Haan ji.",
+    "Samajh gayi.",
+    "Bilkul.",
+]
+_backchannel_idx: int = 0
+
+
+def _pick_backchannel(transcript: str, intent: dict[str, bool]) -> str:
+    """Pick a natural backchannel phrase that matches the context."""
+    global _backchannel_idx  # noqa: PLW0603
     t = transcript.lower()
-    for keyword, filler in _FILLERS.items():
-        if keyword in t:
-            return filler
-    return _DEFAULT_FILLER
+    if intent.get("confused"):
+        return "Acha,"
+    if intent.get("urgent"):
+        return "Haan ji,"
+    if intent.get("satisfied"):
+        return "Bilkul,"
+    if "thank" in t or "shukriya" in t or "dhanyawad" in t:
+        return "Khushi hui."
+    # Rotate through the list so it doesn't sound like a broken record
+    phrase = _BACKCHANNEL_PHRASES[_backchannel_idx % len(_BACKCHANNEL_PHRASES)]
+    _backchannel_idx += 1
+    return phrase
 
+
+# =============================================================================
+# Response length instruction injected into user message
+# =============================================================================
+
+def _length_instruction(intent: dict[str, bool]) -> str:
+    """Return a short instruction appended to the user message to guide reply length."""
+    if intent.get("wants_detail"):
+        return " [DETAIL MODE: give more info this turn — up to 4 sentences OK]"
+    if intent.get("confused"):
+        return " [CONFUSED CALLER: simplify — one very short sentence only]"
+    return ""  # default: voice_addendum 2-sentence rule applies
+
+
+# =============================================================================
+# Planner helpers
+# =============================================================================
 
 def run_planner_turn(transcript: str, session_id: str) -> str:
-    """Run ONE planner turn, capture the trace (turns + API calls), return speakable text."""
+    """Run ONE planner turn (blocking), return speakable text.
+
+    Used by the non-streaming /voice endpoint and as fallback.
+    """
     thread_id = thread_id_for_session(session_id)
     transcript = (transcript or "").strip()
     if not transcript:
         return "Sorry, I didn't catch that — could you say it again?"
 
-    cursor = latest_http_seq()  # mark, so we capture only this turn's API calls
+    intent = _detect_intent(transcript)
+    augmented = transcript + _length_instruction(intent)
+
+    cursor = latest_http_seq()
     start = time.perf_counter()
-    reply = ""
-    api_calls: list[dict[str, Any]] = []
     tools: list[dict[str, Any]] = []
 
     def _invoke(tid: str):
         resp = invoke_and_log(
-            get_voice_agent(), surface="voice", thread_id=tid, user_message=transcript
+            get_voice_agent(), surface="voice", thread_id=tid, user_message=augmented
         )
         text = format_for_voice(extract_assistant_text(resp)) or (
             "Let me have a team member follow up with the exact details."
@@ -335,15 +518,12 @@ def run_planner_turn(transcript: str, session_id: str) -> str:
             tcs.append({"tool": tc.get("tool_name"), "input": tc.get("input"), "output": out_full})
         return text, tcs
 
+    reply = ""
     try:
         reply, tools = _invoke(thread_id)
     except Exception as e:  # noqa: BLE001
-        etype = type(e).__name__
         emsg = str(e)
-        log.error("voice_agent_failed", error=emsg, error_type=etype)
-        # A corrupted thread (tool_calls with no ToolMessage — e.g. an earlier
-        # turn was interrupted) poisons EVERY later turn. Recover by starting a
-        # fresh thread for this caller and retrying once, so the call continues.
+        log.error("voice_agent_failed", error=emsg, error_type=type(e).__name__)
         if "INVALID_CHAT_HISTORY" in emsg or "tool_calls" in emsg or "ToolMessage" in emsg:
             try:
                 _SESSION_SALT[session_id] = _SESSION_SALT.get(session_id, 0) + 1
@@ -356,18 +536,76 @@ def run_planner_turn(transcript: str, session_id: str) -> str:
         else:
             reply = "Sorry, I hit a snag on my side. Please try again in a moment."
 
-    api_calls = http_requests_since(cursor)  # exact booking-API calls this turn
     _record_turn(
         session_id,
         {
             "user": transcript,
             "agent": reply,
             "latency_s": round(time.perf_counter() - start, 1),
-            "api_calls": api_calls,
+            "api_calls": http_requests_since(cursor),
             "tools": tools,
         },
     )
     return reply
+
+
+def _stream_planner_turn(
+    transcript: str,
+    session_id: str,
+    on_token: Any,  # callable(token: str) -> None, called for each streamed token
+) -> str:
+    """Stream a planner turn, calling on_token for each text token as it arrives.
+
+    Returns the final full reply (post-processed) so the caller can record trace.
+    Tokens yielded via on_token are RAW (not format_for_voice'd) so the TTS
+    starts speaking immediately. The returned full string IS cleaned for trace.
+    """
+    thread_id = thread_id_for_session(session_id)
+    transcript = (transcript or "").strip()
+    if not transcript:
+        return "Sorry, I didn't catch that — could you say it again?"
+
+    intent = _detect_intent(transcript)
+    augmented = transcript + _length_instruction(intent)
+
+    result = StreamResult()
+    full_text = ""
+
+    try:
+        for token in stream_and_log(
+            get_voice_agent(),
+            surface="voice",
+            thread_id=thread_id,
+            user_message=augmented,
+            result=result,
+        ):
+            on_token(token)
+            full_text += token
+    except Exception as e:  # noqa: BLE001
+        emsg = str(e)
+        log.error("voice_stream_failed", error=emsg)
+        if "INVALID_CHAT_HISTORY" in emsg or "tool_calls" in emsg or "ToolMessage" in emsg:
+            try:
+                _SESSION_SALT[session_id] = _SESSION_SALT.get(session_id, 0) + 1
+                fresh_tid = thread_id_for_session(session_id)
+                for token in stream_and_log(
+                    get_voice_agent(),
+                    surface="voice",
+                    thread_id=fresh_tid,
+                    user_message=augmented,
+                    result=result,
+                ):
+                    on_token(token)
+                    full_text += token
+            except Exception as e2:  # noqa: BLE001
+                log.error("voice_stream_retry_failed", error=str(e2))
+                full_text = "Sorry, let me start that again — could you tell me where you'd like to travel?"
+                on_token(full_text)
+        else:
+            full_text = "Sorry, I hit a snag on my side. Please try again in a moment."
+            on_token(full_text)
+
+    return format_for_voice(full_text) or full_text
 
 
 # =============================================================================
@@ -423,14 +661,17 @@ async def vapi_chat_completions(request: Request) -> Any:
     cid = f"chatcmpl-{session_id}"
     streaming = body.get("stream", True)
 
-    # Heartbeat phrases spoken every ~4s while the agent is searching.
-    # Keeps the call feeling alive during long API waits (flights take 10-12s).
+    # Heartbeat phrases spoken every ~4s while the agent is searching tools.
+    # Keeps the call alive during long API waits (flights take 10-12s).
     _HEARTBEATS = [
         "Thoda waqt dijiye, results check ho rahe hain...",
         "Haan, almost aa gaye...",
         "Bas ek second aur...",
         "Results aa rahe hain, please hold...",
     ]
+
+    # Detect intent once — used for both filler and length instruction
+    intent = _detect_intent(transcript) if transcript.strip() else {}
 
     async def gen():
         yield _sse_chunk(cid, model, {"role": "assistant"}, None)
@@ -441,32 +682,44 @@ async def vapi_chat_completions(request: Request) -> Any:
             yield "data: [DONE]\n\n"
             return
 
-        # 1. Speak filler immediately so caller hears something right away
-        yield _sse_chunk(cid, model, {"content": _filler_for(transcript)}, None)
+        # HOW VAPI CUSTOM LLM STREAMING ACTUALLY WORKS:
+        # Vapi buffers ALL SSE chunks and sends the concatenated text to TTS
+        # as ONE utterance. Token-by-token streaming does NOT improve latency.
+        # The ONLY way to get immediate speech is to send a short complete
+        # sentence FIRST (Vapi speaks it), then send the real answer (Vapi
+        # speaks it next). Two sentence chunks = two TTS utterances in sequence.
 
-        # 2. Run planner in a thread so we can send heartbeats while it works
+        # 1. Backchannel + smart filler — sent immediately, Vapi speaks this
+        #    while run_planner_turn() is still running in the background.
+        backchannel = _pick_backchannel(transcript, intent)
+        filler = _build_smart_filler(transcript, intent)
+        immediate = backchannel + " " + filler
+        yield _sse_chunk(cid, model, {"content": immediate}, None)
+
+        # 2. Run planner (blocking in executor so we don't block the event loop)
         loop = asyncio.get_event_loop()
-        result_holder: list[str] = []
+        cursor_before = latest_http_seq()
+        start_time = time.perf_counter()
 
-        def _run():
-            result_holder.append(run_planner_turn(transcript, session_id))
+        future = loop.run_in_executor(None, run_planner_turn, transcript, session_id)
 
-        thread = threading.Thread(target=_run, daemon=True)
-        thread.start()
-
+        # 3. While planner runs, send heartbeats every 4s so Vapi doesn't time out
         heartbeat_idx = 0
-        while thread.is_alive():
-            await asyncio.sleep(4)
-            if thread.is_alive():  # still running — speak a heartbeat
-                yield _sse_chunk(cid, model, {"content": " " + _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]}, None)
+        while not future.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(future), timeout=4.0)
+            except asyncio.TimeoutError:
+                phrase = _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]
+                yield _sse_chunk(cid, model, {"content": " " + phrase}, None)
                 heartbeat_idx += 1
 
-        # 3. Results are back — prepend a brief "thanks for waiting" if we sent heartbeats
-        reply = result_holder[0] if result_holder else "Sorry, kuch issue aa gaya. Dobara try karein?"
-        if heartbeat_idx > 0:
-            thanks = "Shukriya rukne ke liye — "
-            reply = thanks + reply
-        yield _sse_chunk(cid, model, {"content": reply}, None)
+        try:
+            final_reply = future.result()
+        except Exception:
+            final_reply = "Sorry, kuch issue aa gaya. Dobara try karein?"
+
+        # 4. Send the real answer
+        yield _sse_chunk(cid, model, {"content": " " + final_reply}, None)
         yield _sse_chunk(cid, model, {}, "stop")
         yield "data: [DONE]\n\n"
 

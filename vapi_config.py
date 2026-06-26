@@ -219,8 +219,8 @@ def build_assistant_config() -> dict:
 
         # ── Conversation behaviour ──────────────────────────────────────────
         # How long Vapi waits after the LLM starts responding before speaking.
-        # Lower = faster feel. 0.3s is the practical minimum without clipping.
-        "responseDelaySeconds": 0.3,
+        # 0 = speak filler sentence the instant the first SSE chunk arrives.
+        "responseDelaySeconds": 0,
 
         # How long after STT finishes before we send to LLM.
         # 0.1s gives the caller a chance to finish their sentence.
@@ -234,6 +234,10 @@ def build_assistant_config() -> dict:
 
         # Background noise removal (call centre / road noise).
         "backgroundDenoisingEnabled": True,
+
+        # Natural backchannels — Vapi inserts "mm-hmm", "I see", "got it" etc.
+        # while the caller is speaking, making it feel like a real human is listening.
+        "backchannelingEnabled": True,
 
         # ── Call lifecycle ──────────────────────────────────────────────────
         "firstMessage": (
