@@ -167,9 +167,13 @@ def clear_trace() -> None:
 # =============================================================================
 # Planner agent (the brain)
 # =============================================================================
-@lru_cache(maxsize=1)
+_voice_agent_instance: object | None = None
+
 def get_voice_agent() -> object:
-    return build_react_agent(surface="voice", checkpoint_store=build_sqlite_checkpoint())
+    global _voice_agent_instance
+    if _voice_agent_instance is None:
+        _voice_agent_instance = build_react_agent(surface="voice", checkpoint_store=build_sqlite_checkpoint())
+    return _voice_agent_instance
 
 
 # If a thread gets corrupted (interrupted tool call), we bump this salt so the
@@ -678,71 +682,44 @@ async def vapi_chat_completions(request: Request) -> Any:
             yield "data: [DONE]\n\n"
             return
 
-        # 1. Backchannel — short immediate acknowledgment ("Haan.", "Acha.") that
-        #    plays in <200ms so the caller knows the agent heard them.
+        # HOW VAPI CUSTOM LLM STREAMING ACTUALLY WORKS:
+        # Vapi buffers ALL SSE chunks and sends the concatenated text to TTS
+        # as ONE utterance. Token-by-token streaming does NOT improve latency.
+        # The ONLY way to get immediate speech is to send a short complete
+        # sentence FIRST (Vapi speaks it), then send the real answer (Vapi
+        # speaks it next). Two sentence chunks = two TTS utterances in sequence.
+
+        # 1. Backchannel + smart filler — sent immediately, Vapi speaks this
+        #    while run_planner_turn() is still running in the background.
         backchannel = _pick_backchannel(transcript, intent)
-        yield _sse_chunk(cid, model, {"content": backchannel + " "}, None)
-
-        # 2. Smart filler — echo back what we understood ("Delhi se Dubai...")
-        #    Plays while the LLM starts thinking.
         filler = _build_smart_filler(transcript, intent)
-        yield _sse_chunk(cid, model, {"content": filler + " "}, None)
+        immediate = backchannel + " " + filler
+        yield _sse_chunk(cid, model, {"content": immediate}, None)
 
-        # 3. Stream LLM tokens as they arrive — TTS starts speaking before LLM
-        #    finishes generating. Use a queue to bridge the sync generator and
-        #    the async SSE stream.
-        token_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        # 2. Run planner (blocking in executor so we don't block the event loop)
         loop = asyncio.get_event_loop()
         cursor_before = latest_http_seq()
         start_time = time.perf_counter()
 
-        # Token callback — called from the sync thread, puts tokens into the queue
-        def _on_token(tok: str) -> None:
-            loop.call_soon_threadsafe(token_queue.put_nowait, tok)
+        future = loop.run_in_executor(None, run_planner_turn, transcript, session_id)
 
-        # Run the streaming planner in a thread executor
-        future = loop.run_in_executor(
-            None, _stream_planner_turn, transcript, session_id, _on_token
-        )
-
-        # Drain the token queue, sending each token as an SSE chunk.
-        # Also send heartbeats if the LLM hasn't yielded a token in ~4s
-        # (this happens during tool calls — the LLM is silent while tools run).
+        # 3. While planner runs, send heartbeats every 4s so Vapi doesn't time out
         heartbeat_idx = 0
-        tokens_received = 0
-
-        while not future.done() or not token_queue.empty():
+        while not future.done():
             try:
-                token = await asyncio.wait_for(token_queue.get(), timeout=4.0)
-                if token is not None:
-                    tokens_received += 1
-                    yield _sse_chunk(cid, model, {"content": token}, None)
+                await asyncio.wait_for(asyncio.shield(future), timeout=4.0)
             except asyncio.TimeoutError:
-                # No token in 4s → LLM is waiting on tool results, send heartbeat
-                if not future.done():
-                    phrase = _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]
-                    yield _sse_chunk(cid, model, {"content": " " + phrase + " "}, None)
-                    heartbeat_idx += 1
+                phrase = _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]
+                yield _sse_chunk(cid, model, {"content": " " + phrase}, None)
+                heartbeat_idx += 1
 
-        # Signal done — future has a trace-recorded reply but we already streamed it
         try:
             final_reply = future.result()
         except Exception:
-            final_reply = ""
+            final_reply = "Sorry, kuch issue aa gaya. Dobara try karein?"
 
-        # Record trace (streaming doesn't call _record_turn, so do it now)
-        latency = round(time.perf_counter() - start_time, 1)
-        _record_turn(
-            session_id,
-            {
-                "user": transcript,
-                "agent": final_reply,
-                "latency_s": latency,
-                "api_calls": http_requests_since(cursor_before),
-                "tools": [],
-            },
-        )
-
+        # 4. Send the real answer
+        yield _sse_chunk(cid, model, {"content": " " + final_reply}, None)
         yield _sse_chunk(cid, model, {}, "stop")
         yield "data: [DONE]\n\n"
 
