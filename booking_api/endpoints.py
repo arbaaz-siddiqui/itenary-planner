@@ -148,7 +148,7 @@ def call_flight_search(
         "Target": "test",
         "agentID": 0,
         "rateCategoryId": 0,
-        "supplierTime": "6",
+        "supplierTime": "3",
         "supplierId": 0,
         "suppliers": [],
         "isMobile": 0,
