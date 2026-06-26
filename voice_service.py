@@ -689,21 +689,27 @@ async def vapi_chat_completions(request: Request) -> Any:
         # sentence FIRST (Vapi speaks it), then send the real answer (Vapi
         # speaks it next). Two sentence chunks = two TTS utterances in sequence.
 
-        # 1. Backchannel + smart filler — sent immediately, Vapi speaks this
-        #    while run_planner_turn() is still running in the background.
+        # HOW VAPI HEARTBEATS WORK:
+        # Vapi DOES stream SSE chunks to TTS in real-time — each chunk triggers
+        # a new TTS utterance. BUT only if the chunks arrive BEFORE Vapi's own
+        # LLM response timeout (~20s). We send filler+heartbeats as real chunks
+        # and Vapi speaks each one as it arrives.
+        #
+        # The re-search problem (agent re-runs search every turn) is a separate
+        # issue — the agent isn't using SQLite checkpoint correctly for voice.
+
+        # 1. Filler — spoken immediately (~200ms after caller stops)
         backchannel = _pick_backchannel(transcript, intent)
         filler = _build_smart_filler(transcript, intent)
-        immediate = backchannel + " " + filler
-        yield _sse_chunk(cid, model, {"content": immediate}, None)
+        yield _sse_chunk(cid, model, {"content": backchannel + " " + filler}, None)
 
-        # 2. Run planner (blocking in executor so we don't block the event loop)
+        # 2. Run planner in background thread
         loop = asyncio.get_event_loop()
         cursor_before = latest_http_seq()
         start_time = time.perf_counter()
-
         future = loop.run_in_executor(None, run_planner_turn, transcript, session_id)
 
-        # 3. While planner runs, send heartbeats every 4s so Vapi doesn't time out
+        # 3. Send a heartbeat every 4s while planner runs — Vapi speaks each one
         heartbeat_idx = 0
         while not future.done():
             try:
@@ -718,7 +724,9 @@ async def vapi_chat_completions(request: Request) -> Any:
         except Exception:
             final_reply = "Sorry, kuch issue aa gaya. Dobara try karein?"
 
-        # 4. Send the real answer
+        # 4. Real answer — Vapi speaks this after all heartbeats
+        if heartbeat_idx > 0:
+            final_reply = "Results aa gaye. " + final_reply
         yield _sse_chunk(cid, model, {"content": " " + final_reply}, None)
         yield _sse_chunk(cid, model, {}, "stop")
         yield "data: [DONE]\n\n"
