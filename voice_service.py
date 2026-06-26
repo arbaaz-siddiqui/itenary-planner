@@ -41,6 +41,7 @@ _logging.getLogger("dotenv.main").setLevel(_logging.ERROR)
 load_dotenv()  # pull VAPI_* + LLM + booking creds from the planner .env
 
 from agent import (
+    StreamResult,
     build_react_agent,
     build_sqlite_checkpoint,
     configure_logging,
@@ -48,6 +49,7 @@ from agent import (
     extract_tool_calls,
     get_logger,
     invoke_and_log,
+    stream_and_log,
 )
 from booking_api.http_client import http_requests_since, latest_http_seq
 
@@ -306,55 +308,185 @@ def format_for_voice(text: str) -> str:
     return text
 
 
-# Filler phrases spoken IMMEDIATELY while the agent thinks — kills dead air.
-# Each value is a SHORT human-sounding phrase (under 5 words) — sounds like a
-# real person reacting, not a hold message. Vapi speaks this while the LLM runs.
-_FILLERS: dict[str, str] = {
-    "flight":    "Hmm, flights dekh rahi hoon.",
-    "fly":       "Haan, flights check karti hoon.",
-    "hotel":     "Haan ji, hotels dekh rahi hoon.",
-    "stay":      "Acha, hotels check karti hoon.",
-    "room":      "Hmm, rooms dekh rahi hoon.",
-    "tour":      "Haan, tours abhi dekhti hoon.",
-    "safari":    "Haan ji, safari options check kar rahi hoon.",
-    "burj":      "Hmm, tours dekh rahi hoon.",
-    "transfer":  "Haan, transfers check karti hoon.",
-    "taxi":      "Acha, taxi options dekh rahi hoon.",
-    "visa":      "Haan, visa details abhi dekhti hoon.",
-    "budget":    "Hmm, numbers calculate kar rahi hoon.",
-    "cost":      "Haan, pricing check karti hoon.",
-    "price":     "Acha, prices dekh rahi hoon.",
-    "plan":      "Haan bilkul, abhi dekhti hoon.",
-    "trip":      "Hmm, trip plan check kar rahi hoon.",
-    "itinerary": "Haan ji, abhi dekhti hoon.",
-}
-_DEFAULT_FILLER = "Haan, ek second."
+# =============================================================================
+# Emotion / intent detection
+# =============================================================================
+# Intent influences: filler phrase, response brevity instruction, search urgency.
+# Detected purely from text — no audio model needed.
+
+_URGENCY_SIGNALS = re.compile(
+    r"\b(urgent|urgently|asap|jaldi|abhi|turant|immediately|right now|aaj|kal|tomorrow|today)\b",
+    re.IGNORECASE,
+)
+_CONFUSION_SIGNALS = re.compile(
+    r"\b(matlab|kya matlab|samjha nahi|samajh nahi|kya|what|huh|pardon|sorry\?|"
+    r"again|dobara|repeat|clear nahi|nahi samjha|nahi samjhi)\b",
+    re.IGNORECASE,
+)
+_DETAIL_SIGNALS = re.compile(
+    r"\b(detail|details|bata|batao|explain|explain karo|full|poori|puri|complete|sab kuch|"
+    r"zyada|aur batao|more info|everything|all options|sab options)\b",
+    re.IGNORECASE,
+)
+_SATISFACTION_SIGNALS = re.compile(
+    r"\b(theek hai|theek|accha|acha|sahi|sahi hai|ok|okay|perfect|bilkul|done|haan theek|"
+    r"sounds good|book karo|confirm|yes)\b",
+    re.IGNORECASE,
+)
 
 
-def _filler_for(transcript: str) -> str:
+def _detect_intent(transcript: str) -> dict[str, bool]:
+    return {
+        "urgent":     bool(_URGENCY_SIGNALS.search(transcript)),
+        "confused":   bool(_CONFUSION_SIGNALS.search(transcript)),
+        "wants_detail": bool(_DETAIL_SIGNALS.search(transcript)),
+        "satisfied":  bool(_SATISFACTION_SIGNALS.search(transcript)),
+    }
+
+
+# =============================================================================
+# Smart filler — echo back what we understood + context-aware urgency
+# =============================================================================
+
+# Patterns to pull structured facts out of the transcript for echo-back.
+_ROUTE_RE = re.compile(
+    r"\b(delhi|mumbai|bangalore|bengaluru|hyderabad|chennai|kolkata|pune|ahmedabad|"
+    r"jaipur|dubai|london|singapore|bangkok|paris|new york|sydney)\b",
+    re.IGNORECASE,
+)
+_DATE_RE = re.compile(
+    r"\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|"
+    r"apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|"
+    r"nov(?:ember)?|dec(?:ember)?)|"
+    r"\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|"
+    r"(?:aaj|kal|parso|next week|is week|is mahine))\b",
+    re.IGNORECASE,
+)
+
+
+def _build_smart_filler(transcript: str, intent: dict[str, bool]) -> str:
+    """Build a context-aware filler that echoes back what we understood.
+
+    Goal: caller immediately hears "yes she got it" + the system starts thinking.
+    If we can pull cities/dates from the transcript, we echo them back.
+    Otherwise fall back to a keyword-based filler.
+    """
+    t_lower = transcript.lower()
+
+    cities = _ROUTE_RE.findall(transcript)
+    dates = _DATE_RE.findall(transcript)
+
+    # Echo-back filler when we have enough info
+    if len(cities) >= 2:
+        origin, dest = cities[0].title(), cities[1].title()
+        if dates:
+            date_str = dates[0]
+            return f"{origin} se {dest}, {date_str} — abhi check kar rahi hoon."
+        return f"{origin} se {dest} ke liye dekh rahi hoon, ek second."
+    if len(cities) == 1:
+        dest = cities[0].title()
+        if dates:
+            return f"{dest} ke liye {dates[0]} — abhi check kar rahi hoon."
+        if "hotel" in t_lower or "stay" in t_lower or "room" in t_lower:
+            return f"Haan, {dest} mein hotels dekh rahi hoon."
+        if "flight" in t_lower or "fly" in t_lower:
+            return f"Haan, {dest} ke liye flights dekh rahi hoon."
+        return f"Haan, {dest} ke baare mein dekh rahi hoon."
+
+    # No cities — fall back to keyword / intent based fillers
+    if intent.get("confused"):
+        return "Haan ji, main samjhati hoon."
+    if intent.get("urgent"):
+        return "Haan, abhi check karti hoon!"
+    if "flight" in t_lower or "fly" in t_lower:
+        return "Hmm, flights dekh rahi hoon."
+    if "hotel" in t_lower or "stay" in t_lower or "room" in t_lower:
+        return "Haan ji, hotels dekh rahi hoon."
+    if "tour" in t_lower or "safari" in t_lower or "burj" in t_lower:
+        return "Haan, tours abhi dekhti hoon."
+    if "transfer" in t_lower or "taxi" in t_lower:
+        return "Acha, transfers check karti hoon."
+    if "visa" in t_lower:
+        return "Haan, visa details abhi dekhti hoon."
+    if "budget" in t_lower or "cost" in t_lower or "price" in t_lower:
+        return "Acha, pricing dekh rahi hoon."
+    return "Haan, ek second."
+
+
+# =============================================================================
+# Backchanneling — short natural acknowledgment phrases
+# =============================================================================
+# Vapi sends a POST as soon as user finishes speaking. We can't insert sounds
+# WHILE the user speaks (that's telephony-level, not LLM-level). But we can
+# send a very short acknowledgment as the first SSE chunk — it plays in
+# <200ms, making it feel like the agent was listening attentively.
+_BACKCHANNEL_PHRASES = [
+    "Haan.",
+    "Hmm.",
+    "Acha.",
+    "Ji haan.",
+    "Haan ji.",
+    "Samajh gayi.",
+    "Bilkul.",
+]
+_backchannel_idx: int = 0
+
+
+def _pick_backchannel(transcript: str, intent: dict[str, bool]) -> str:
+    """Pick a natural backchannel phrase that matches the context."""
+    global _backchannel_idx  # noqa: PLW0603
     t = transcript.lower()
-    for keyword, filler in _FILLERS.items():
-        if keyword in t:
-            return filler
-    return _DEFAULT_FILLER
+    if intent.get("confused"):
+        return "Acha,"
+    if intent.get("urgent"):
+        return "Haan ji,"
+    if intent.get("satisfied"):
+        return "Bilkul,"
+    if "thank" in t or "shukriya" in t or "dhanyawad" in t:
+        return "Khushi hui."
+    # Rotate through the list so it doesn't sound like a broken record
+    phrase = _BACKCHANNEL_PHRASES[_backchannel_idx % len(_BACKCHANNEL_PHRASES)]
+    _backchannel_idx += 1
+    return phrase
 
+
+# =============================================================================
+# Response length instruction injected into user message
+# =============================================================================
+
+def _length_instruction(intent: dict[str, bool]) -> str:
+    """Return a short instruction appended to the user message to guide reply length."""
+    if intent.get("wants_detail"):
+        return " [DETAIL MODE: give more info this turn — up to 4 sentences OK]"
+    if intent.get("confused"):
+        return " [CONFUSED CALLER: simplify — one very short sentence only]"
+    return ""  # default: voice_addendum 2-sentence rule applies
+
+
+# =============================================================================
+# Planner helpers
+# =============================================================================
 
 def run_planner_turn(transcript: str, session_id: str) -> str:
-    """Run ONE planner turn, capture the trace (turns + API calls), return speakable text."""
+    """Run ONE planner turn (blocking), return speakable text.
+
+    Used by the non-streaming /voice endpoint and as fallback.
+    """
     thread_id = thread_id_for_session(session_id)
     transcript = (transcript or "").strip()
     if not transcript:
         return "Sorry, I didn't catch that — could you say it again?"
 
-    cursor = latest_http_seq()  # mark, so we capture only this turn's API calls
+    intent = _detect_intent(transcript)
+    augmented = transcript + _length_instruction(intent)
+
+    cursor = latest_http_seq()
     start = time.perf_counter()
-    reply = ""
-    api_calls: list[dict[str, Any]] = []
     tools: list[dict[str, Any]] = []
 
     def _invoke(tid: str):
         resp = invoke_and_log(
-            get_voice_agent(), surface="voice", thread_id=tid, user_message=transcript
+            get_voice_agent(), surface="voice", thread_id=tid, user_message=augmented
         )
         text = format_for_voice(extract_assistant_text(resp)) or (
             "Let me have a team member follow up with the exact details."
@@ -366,15 +498,12 @@ def run_planner_turn(transcript: str, session_id: str) -> str:
             tcs.append({"tool": tc.get("tool_name"), "input": tc.get("input"), "output": out_full})
         return text, tcs
 
+    reply = ""
     try:
         reply, tools = _invoke(thread_id)
     except Exception as e:  # noqa: BLE001
-        etype = type(e).__name__
         emsg = str(e)
-        log.error("voice_agent_failed", error=emsg, error_type=etype)
-        # A corrupted thread (tool_calls with no ToolMessage — e.g. an earlier
-        # turn was interrupted) poisons EVERY later turn. Recover by starting a
-        # fresh thread for this caller and retrying once, so the call continues.
+        log.error("voice_agent_failed", error=emsg, error_type=type(e).__name__)
         if "INVALID_CHAT_HISTORY" in emsg or "tool_calls" in emsg or "ToolMessage" in emsg:
             try:
                 _SESSION_SALT[session_id] = _SESSION_SALT.get(session_id, 0) + 1
@@ -387,18 +516,76 @@ def run_planner_turn(transcript: str, session_id: str) -> str:
         else:
             reply = "Sorry, I hit a snag on my side. Please try again in a moment."
 
-    api_calls = http_requests_since(cursor)  # exact booking-API calls this turn
     _record_turn(
         session_id,
         {
             "user": transcript,
             "agent": reply,
             "latency_s": round(time.perf_counter() - start, 1),
-            "api_calls": api_calls,
+            "api_calls": http_requests_since(cursor),
             "tools": tools,
         },
     )
     return reply
+
+
+def _stream_planner_turn(
+    transcript: str,
+    session_id: str,
+    on_token: Any,  # callable(token: str) -> None, called for each streamed token
+) -> str:
+    """Stream a planner turn, calling on_token for each text token as it arrives.
+
+    Returns the final full reply (post-processed) so the caller can record trace.
+    Tokens yielded via on_token are RAW (not format_for_voice'd) so the TTS
+    starts speaking immediately. The returned full string IS cleaned for trace.
+    """
+    thread_id = thread_id_for_session(session_id)
+    transcript = (transcript or "").strip()
+    if not transcript:
+        return "Sorry, I didn't catch that — could you say it again?"
+
+    intent = _detect_intent(transcript)
+    augmented = transcript + _length_instruction(intent)
+
+    result = StreamResult()
+    full_text = ""
+
+    try:
+        for token in stream_and_log(
+            get_voice_agent(),
+            surface="voice",
+            thread_id=thread_id,
+            user_message=augmented,
+            result=result,
+        ):
+            on_token(token)
+            full_text += token
+    except Exception as e:  # noqa: BLE001
+        emsg = str(e)
+        log.error("voice_stream_failed", error=emsg)
+        if "INVALID_CHAT_HISTORY" in emsg or "tool_calls" in emsg or "ToolMessage" in emsg:
+            try:
+                _SESSION_SALT[session_id] = _SESSION_SALT.get(session_id, 0) + 1
+                fresh_tid = thread_id_for_session(session_id)
+                for token in stream_and_log(
+                    get_voice_agent(),
+                    surface="voice",
+                    thread_id=fresh_tid,
+                    user_message=augmented,
+                    result=result,
+                ):
+                    on_token(token)
+                    full_text += token
+            except Exception as e2:  # noqa: BLE001
+                log.error("voice_stream_retry_failed", error=str(e2))
+                full_text = "Sorry, let me start that again — could you tell me where you'd like to travel?"
+                on_token(full_text)
+        else:
+            full_text = "Sorry, I hit a snag on my side. Please try again in a moment."
+            on_token(full_text)
+
+    return format_for_voice(full_text) or full_text
 
 
 # =============================================================================
@@ -454,14 +641,17 @@ async def vapi_chat_completions(request: Request) -> Any:
     cid = f"chatcmpl-{session_id}"
     streaming = body.get("stream", True)
 
-    # Heartbeat phrases spoken every ~4s while the agent is searching.
-    # Keeps the call feeling alive during long API waits (flights take 10-12s).
+    # Heartbeat phrases spoken every ~4s while the agent is searching tools.
+    # Keeps the call alive during long API waits (flights take 10-12s).
     _HEARTBEATS = [
         "Thoda waqt dijiye, results check ho rahe hain...",
         "Haan, almost aa gaye...",
         "Bas ek second aur...",
         "Results aa rahe hain, please hold...",
     ]
+
+    # Detect intent once — used for both filler and length instruction
+    intent = _detect_intent(transcript) if transcript.strip() else {}
 
     async def gen():
         yield _sse_chunk(cid, model, {"role": "assistant"}, None)
@@ -472,32 +662,71 @@ async def vapi_chat_completions(request: Request) -> Any:
             yield "data: [DONE]\n\n"
             return
 
-        # 1. Speak filler immediately so caller hears something right away
-        yield _sse_chunk(cid, model, {"content": _filler_for(transcript)}, None)
+        # 1. Backchannel — short immediate acknowledgment ("Haan.", "Acha.") that
+        #    plays in <200ms so the caller knows the agent heard them.
+        backchannel = _pick_backchannel(transcript, intent)
+        yield _sse_chunk(cid, model, {"content": backchannel + " "}, None)
 
-        # 2. Run planner in executor (non-blocking) + send heartbeats every 4s
+        # 2. Smart filler — echo back what we understood ("Delhi se Dubai...")
+        #    Plays while the LLM starts thinking.
+        filler = _build_smart_filler(transcript, intent)
+        yield _sse_chunk(cid, model, {"content": filler + " "}, None)
+
+        # 3. Stream LLM tokens as they arrive — TTS starts speaking before LLM
+        #    finishes generating. Use a queue to bridge the sync generator and
+        #    the async SSE stream.
+        token_queue: asyncio.Queue[str | None] = asyncio.Queue()
         loop = asyncio.get_event_loop()
-        future = loop.run_in_executor(None, run_planner_turn, transcript, session_id)
+        cursor_before = latest_http_seq()
+        start_time = time.perf_counter()
 
+        # Token callback — called from the sync thread, puts tokens into the queue
+        def _on_token(tok: str) -> None:
+            loop.call_soon_threadsafe(token_queue.put_nowait, tok)
+
+        # Run the streaming planner in a thread executor
+        future = loop.run_in_executor(
+            None, _stream_planner_turn, transcript, session_id, _on_token
+        )
+
+        # Drain the token queue, sending each token as an SSE chunk.
+        # Also send heartbeats if the LLM hasn't yielded a token in ~4s
+        # (this happens during tool calls — the LLM is silent while tools run).
         heartbeat_idx = 0
-        while not future.done():
+        tokens_received = 0
+
+        while not future.done() or not token_queue.empty():
             try:
-                await asyncio.wait_for(asyncio.shield(future), timeout=4.0)
+                token = await asyncio.wait_for(token_queue.get(), timeout=4.0)
+                if token is not None:
+                    tokens_received += 1
+                    yield _sse_chunk(cid, model, {"content": token}, None)
             except asyncio.TimeoutError:
-                # Still running — send a heartbeat phrase
-                phrase = _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]
-                yield _sse_chunk(cid, model, {"content": " " + phrase}, None)
-                heartbeat_idx += 1
+                # No token in 4s → LLM is waiting on tool results, send heartbeat
+                if not future.done():
+                    phrase = _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]
+                    yield _sse_chunk(cid, model, {"content": " " + phrase + " "}, None)
+                    heartbeat_idx += 1
 
+        # Signal done — future has a trace-recorded reply but we already streamed it
         try:
-            reply = future.result()
+            final_reply = future.result()
         except Exception:
-            reply = "Sorry, kuch issue aa gaya. Dobara try karein?"
+            final_reply = ""
 
-        # 3. Results are back
-        if heartbeat_idx > 0:
-            reply = "Shukriya rukne ke liye. " + reply
-        yield _sse_chunk(cid, model, {"content": reply}, None)
+        # Record trace (streaming doesn't call _record_turn, so do it now)
+        latency = round(time.perf_counter() - start_time, 1)
+        _record_turn(
+            session_id,
+            {
+                "user": transcript,
+                "agent": final_reply,
+                "latency_s": latency,
+                "api_calls": http_requests_since(cursor_before),
+                "tools": [],
+            },
+        )
+
         yield _sse_chunk(cid, model, {}, "stop")
         yield "data: [DONE]\n\n"
 
