@@ -114,6 +114,18 @@ def place_call(number: str, *, schedule_unix: int | None = None) -> dict[str, An
             d = json.loads(r.read().decode())
             log.info("voice_call_placed", number=number, call_id=d.get("id"), status=d.get("status"))
             return {"call_id": d.get("id"), "status": d.get("status"), "number": number}
+    except urllib.error.HTTPError as e:  # type: ignore[attr-defined]
+        body_text = ""
+        try:
+            body_text = e.read().decode()
+        except Exception:  # noqa: BLE001
+            pass
+        log.error("voice_call_failed", number=number, http_status=e.code, response=body_text)
+        try:
+            detail = json.loads(body_text).get("message") or body_text
+        except Exception:  # noqa: BLE001
+            detail = body_text or str(e)
+        return {"error": f"Vapi error {e.code}: {detail}", "number": number}
     except Exception as e:  # noqa: BLE001
         log.error("voice_call_failed", number=number, error=str(e))
         return {"error": str(e), "number": number}
@@ -266,6 +278,9 @@ _EMOJI = re.compile(
     "]+",
     flags=re.UNICODE,
 )
+# Strip CJK characters (Chinese/Japanese/Korean) — LLM occasionally slips these in
+# when the conversation mixes Hindi scripts. TTS reads them incorrectly.
+_CJK = re.compile(r"[一-鿿぀-ヿ가-힯]+", flags=re.UNICODE)
 _NUMBERED_ITEM = re.compile(r"^\s*\d+\.\s+", re.MULTILINE)  # "1. foo" → strip number
 
 
@@ -286,6 +301,7 @@ def format_for_voice(text: str) -> str:
     text = _NUMBERED_ITEM.sub("", text)
     text = _EMPH.sub("", text)
     text = _EMOJI.sub("", text)
+    text = _CJK.sub("", text)       # strip accidental Chinese/Japanese/Korean chars
     text = _BAGGAGE.sub("", text)   # strip baggage weights, refund status
     # Round ugly decimals: 1.33073 lakh → 1.3 lakh
     text = _PLAIN_LAKH.sub(lambda m: f"{round(float(m.group(1)), 1)} lakh", text)
