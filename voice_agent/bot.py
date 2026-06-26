@@ -4,20 +4,19 @@ Stack:
   STT  : Groq Whisper (whisper-large-v3-turbo)
   LLM  : Groq Llama 3.3 70B with tool calling
   TTS  : Cartesia Sonic-2
-  Transport: Daily.co WebRTC
+  Transport: FastAPI WebSocket (works on Windows — daily-python is Linux/macOS only)
 
-Run directly (for testing without server.py):
-    python bot.py --room-url <url> --token <token>
+Usage (called from server.py via asyncio.create_task):
+    await run_bot(websocket)
 
 Environment variables:
     GROQ_API_KEY
     CARTESIA_API_KEY
-    DAILY_SAMPLE_ROOM_URL   (optional, only needed for direct run)
+    CARTESIA_VOICE_ID   (optional, defaults to a Hindi female voice)
 """
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import logging
@@ -26,6 +25,7 @@ import sys
 from typing import Any
 
 from dotenv import load_dotenv
+from starlette.websockets import WebSocket
 
 load_dotenv()
 
@@ -40,18 +40,19 @@ if _PROJECT_ROOT not in sys.path:
 # Pipecat imports
 # ---------------------------------------------------------------------------
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import (
-    EndFrame,
-    LLMMessagesFrame,
-)
+from pipecat.frames.frames import EndFrame, LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.groq.llm import GroqLLMService
 from pipecat.services.groq.stt import GroqSTTService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.network.fastapi_websocket import (
+    FastAPIWebsocketParams,
+    FastAPIWebsocketTransport,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +66,11 @@ try:
     from mcp_tools.search_transfers import _impl as search_airport_transfer_dubai_impl
     from mcp_tools.get_visa_info import _impl as get_visa_info_impl
     _TOOLS_AVAILABLE = True
-    logger.info("Travel tools imported successfully from parent project.")
+    logger.info("Travel tools imported from parent project.")
 except ImportError as e:
-    logger.warning("Could not import travel tools: %s — tool calls will return stubs.", e)
+    logger.warning("Travel tools not available: %s — using stubs.", e)
     _TOOLS_AVAILABLE = False
 
-    # Stub implementations so the pipeline still boots for testing
     def search_flights_impl(**kw):  # type: ignore[misc]
         return {"error": True, "message": "Travel tools not available in this environment."}
 
@@ -88,14 +88,14 @@ except ImportError as e:
 
 
 # ---------------------------------------------------------------------------
-# System prompt — Nikki, female Hinglish travel agent (matches vapi_config.py)
+# System prompt — Nikki, female Hinglish travel agent
 # ---------------------------------------------------------------------------
 SYSTEM_PROMPT = """You are Nikki — an experienced female travel consultant at Gujju Tours. You are on a phone call helping a customer plan a Dubai trip.
 
 ## SCRIPT — ROMAN ONLY, NEVER DEVANAGARI
 ALWAYS write in Roman script (English letters). NEVER use Devanagari (Hindi script like haan, bilkul, shandar).
 Even when customer speaks in Hindi, YOUR reply must be in Roman Hinglish — never Devanagari.
-WRONG: Bilkul in Devanagari script.
+WRONG: "Bilkul in Devanagari script."
 RIGHT: "Bilkul! Dubai bahut accha choice hai."
 
 ## GENDER — YOU ARE A WOMAN, ALWAYS FEMININE VERBS
@@ -138,9 +138,7 @@ City → Dates → Kitne log → Budget → Search → 1-2 options briefly → H
 - Go silent while searching — always say a waiting phrase first
 
 ## ERROR HANDLING
-If a tool call fails or returns an error, say:
-"Ek moment, system mein thodi dikkat aayi — phir se try karti hoon."
-Then try once more or gracefully offer to check manually.
+If a tool call fails, say: "Ek moment, system mein thodi dikkat aayi — phir se try karti hoon."
 
 ## HANDOFF
 "Bahut badhiya sir! Main booking team ko details forward kar rahi hoon — woh fifteen-twenty minutes mein call karenge aapko."
@@ -159,36 +157,17 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_flights",
-            "description": (
-                "Search for flights between an Indian city and Dubai. "
-                "Use this when the customer asks about flights, airfare, or travel costs."
-            ),
+            "description": "Search for flights between an Indian city and Dubai.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "origin_city": {
-                        "type": "string",
-                        "description": "Indian source city name, e.g. 'Delhi', 'Mumbai'.",
-                    },
-                    "destination_city": {
-                        "type": "string",
-                        "description": "Destination city, typically 'Dubai'.",
-                    },
-                    "departure_date": {
-                        "type": "string",
-                        "description": "ISO date yyyy-mm-dd.",
-                    },
-                    "return_date": {
-                        "type": "string",
-                        "description": "ISO date for return flight; omit for one-way.",
-                    },
-                    "adults": {"type": "integer", "description": "Number of adult passengers."},
-                    "children": {"type": "integer", "description": "Number of child passengers."},
-                    "cabin": {
-                        "type": "string",
-                        "enum": ["Y", "S", "C", "F"],
-                        "description": "Y=economy, S=premium economy, C=business, F=first.",
-                    },
+                    "origin_city": {"type": "string", "description": "Indian source city, e.g. 'Delhi'."},
+                    "destination_city": {"type": "string", "description": "Destination city, e.g. 'Dubai'."},
+                    "departure_date": {"type": "string", "description": "ISO date yyyy-mm-dd."},
+                    "return_date": {"type": "string", "description": "ISO return date; omit for one-way."},
+                    "adults": {"type": "integer"},
+                    "children": {"type": "integer"},
+                    "cabin": {"type": "string", "enum": ["Y", "S", "C", "F"]},
                 },
                 "required": ["origin_city", "destination_city", "departure_date"],
             },
@@ -198,28 +177,18 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_hotels",
-            "description": (
-                "Search for hotel availability in Dubai. "
-                "Use when customer asks about hotels, accommodation, or where to stay."
-            ),
+            "description": "Search for hotel availability in Dubai.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "destination_city": {
-                        "type": "string",
-                        "description": "City, e.g. 'Dubai'.",
-                    },
+                    "destination_city": {"type": "string"},
                     "check_in": {"type": "string", "description": "ISO date yyyy-mm-dd."},
                     "check_out": {"type": "string", "description": "ISO date yyyy-mm-dd."},
-                    "adults": {"type": "integer", "description": "Number of adults."},
-                    "children": {"type": "integer", "description": "Number of children."},
-                    "min_stars": {"type": "number", "description": "Minimum star rating (1-5)."},
-                    "max_stars": {"type": "number", "description": "Maximum star rating (1-5)."},
-                    "amenities": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Required amenities, e.g. ['pool', 'spa', 'gym'].",
-                    },
+                    "adults": {"type": "integer"},
+                    "children": {"type": "integer"},
+                    "min_stars": {"type": "number"},
+                    "max_stars": {"type": "number"},
+                    "amenities": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": ["destination_city", "check_in", "check_out"],
             },
@@ -229,22 +198,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_tours",
-            "description": (
-                "Search for tours and activities in Dubai such as Desert Safari, "
-                "Burj Khalifa, dhow cruise, etc."
-            ),
+            "description": "Search for Dubai tours and activities.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "destination_city": {
-                        "type": "string",
-                        "description": "City, e.g. 'Dubai'.",
-                    },
+                    "destination_city": {"type": "string"},
                     "travel_date": {"type": "string", "description": "ISO date yyyy-mm-dd."},
-                    "tour_category_id": {
-                        "type": "integer",
-                        "description": "Category: 1=all, 2=desert safari, 3=city tours.",
-                    },
+                    "tour_category_id": {"type": "integer"},
                 },
                 "required": ["destination_city", "travel_date"],
             },
@@ -254,31 +214,16 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_airport_transfer_dubai",
-            "description": (
-                "Search for Dubai airport to hotel transfer options. "
-                "Use when customer asks about airport pickup, taxi, or transfers."
-            ),
+            "description": "Search for Dubai airport transfers.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "hotel_lat": {
-                        "type": "number",
-                        "description": "Hotel latitude coordinate.",
-                    },
-                    "hotel_lng": {
-                        "type": "number",
-                        "description": "Hotel longitude coordinate.",
-                    },
+                    "hotel_lat": {"type": "number"},
+                    "hotel_lng": {"type": "number"},
                     "arrival_date": {"type": "string", "description": "ISO date yyyy-mm-dd."},
-                    "arrival_time": {
-                        "type": "string",
-                        "description": "Arrival time HH:MM, default 12:00.",
-                    },
-                    "return_date": {
-                        "type": "string",
-                        "description": "Return date if round-trip transfer needed.",
-                    },
-                    "adults": {"type": "integer", "description": "Number of passengers."},
+                    "arrival_time": {"type": "string"},
+                    "return_date": {"type": "string"},
+                    "adults": {"type": "integer"},
                 },
                 "required": ["hotel_lat", "hotel_lng", "arrival_date"],
             },
@@ -288,23 +233,15 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_visa_info",
-            "description": (
-                "Get Dubai visa requirements and pricing for Indian nationals."
-            ),
+            "description": "Get Dubai visa requirements for Indian nationals.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "destination_country": {
-                        "type": "string",
-                        "description": "Destination country, e.g. 'UAE'.",
-                    },
-                    "nationality_country": {
-                        "type": "string",
-                        "description": "Traveller nationality, e.g. 'India'.",
-                    },
-                    "travel_date": {"type": "string", "description": "ISO date yyyy-mm-dd."},
-                    "adults": {"type": "integer", "description": "Number of adults."},
-                    "children": {"type": "integer", "description": "Number of children."},
+                    "destination_country": {"type": "string"},
+                    "nationality_country": {"type": "string"},
+                    "travel_date": {"type": "string"},
+                    "adults": {"type": "integer"},
+                    "children": {"type": "integer"},
                 },
                 "required": ["destination_country", "nationality_country", "travel_date"],
             },
@@ -312,7 +249,6 @@ TOOLS = [
     },
 ]
 
-# Map tool name → callable
 TOOL_DISPATCH: dict[str, Any] = {
     "search_flights": search_flights_impl,
     "search_hotels": search_hotels_impl,
@@ -326,7 +262,6 @@ TOOL_DISPATCH: dict[str, Any] = {
 # Tool call executor — runs blocking I/O in a thread pool
 # ---------------------------------------------------------------------------
 async def _execute_tool(tool_name: str, tool_args: dict[str, Any]) -> str:
-    """Execute a travel tool and return a JSON string result."""
     fn = TOOL_DISPATCH.get(tool_name)
     if fn is None:
         return json.dumps({"error": True, "message": f"Unknown tool: {tool_name}"})
@@ -336,40 +271,30 @@ async def _execute_tool(tool_name: str, tool_args: dict[str, Any]) -> str:
         return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as exc:
         logger.exception("Tool %s raised an exception", tool_name)
-        return json.dumps(
-            {
-                "error": True,
-                "message": "Ek moment, system mein thodi dikkat aayi.",
-                "detail": str(exc),
-            }
-        )
+        return json.dumps({"error": True, "message": "System error.", "detail": str(exc)})
 
 
 # ---------------------------------------------------------------------------
-# Pipeline builder
+# Pipeline builder — one call = one WebSocket connection
 # ---------------------------------------------------------------------------
-async def run_bot(room_url: str, token: str) -> None:
-    """Build and run the Pipecat pipeline for one Daily call session."""
+async def run_bot(websocket: WebSocket) -> None:
+    """Build and run the Pipecat pipeline for a single WebSocket session."""
 
     groq_api_key = os.environ["GROQ_API_KEY"]
     cartesia_api_key = os.environ["CARTESIA_API_KEY"]
-    cartesia_voice_id = os.environ.get(
-        "CARTESIA_VOICE_ID", "a0e99841-438c-4a64-b679-ae501e7d6091"
-    )
+    cartesia_voice_id = os.environ.get("CARTESIA_VOICE_ID", "a0e99841-438c-4a64-b679-ae501e7d6091")
 
     # ── Transport ────────────────────────────────────────────────────────────
-    transport = DailyTransport(
-        room_url=room_url,
-        token=token,
-        bot_name="Nikki",
-        params=DailyParams(
+    transport = FastAPIWebsocketTransport(
+        websocket=websocket,
+        params=FastAPIWebsocketParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            camera_out_enabled=False,
+            add_wav_header=True,
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
-            transcription_enabled=False,  # We use Groq Whisper STT instead
+            serializer=ProtobufFrameSerializer(),
         ),
     )
 
@@ -395,7 +320,7 @@ async def run_bot(room_url: str, token: str) -> None:
         language="en",
     )
 
-    # ── LLM context ─────────────────────────────────────────────────────────
+    # ── LLM context ──────────────────────────────────────────────────────────
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "assistant", "content": FIRST_MESSAGE},
@@ -421,62 +346,24 @@ async def run_bot(room_url: str, token: str) -> None:
         params=PipelineParams(allow_interruptions=True),
     )
 
-    # ── Event: greet caller on join ──────────────────────────────────────────
-    @transport.event_handler("on_first_participant_joined")
-    async def on_first_participant_joined(transport, participant):
-        await transport.capture_participant_transcription(participant["id"])
+    # ── Greet caller when WebSocket connects ──────────────────────────────────
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
         await task.queue_frames([LLMMessagesFrame(messages)])
 
-    # ── Event: end pipeline when caller leaves ────────────────────────────────
-    @transport.event_handler("on_participant_left")
-    async def on_participant_left(transport, participant, reason):
-        await task.queue_frame(EndFrame())
-
-    # ── Event: handle tool calls from Groq LLM ───────────────────────────────
+    # ── Handle tool calls from Groq LLM ──────────────────────────────────────
     @llm.event_handler("on_tool_call_started")
     async def on_tool_call_started(llm_service, tool_call):
-        """
-        Fires when Groq emits a tool call.  We execute the real travel tool
-        and push the result back into the conversation context.
-        """
         tool_name = tool_call.get("function", {}).get("name", "")
         raw_args = tool_call.get("function", {}).get("arguments", "{}")
         tool_call_id = tool_call.get("id", "")
-
         logger.info("Tool call: %s  args=%s", tool_name, raw_args)
-
         try:
             args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
         except json.JSONDecodeError:
             args = {}
-
         result_json = await _execute_tool(tool_name, args)
-
-        # Append tool result to conversation context so LLM sees the data
-        context.add_message(
-            {
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "content": result_json,
-            }
-        )
+        context.add_message({"role": "tool", "tool_call_id": tool_call_id, "content": result_json})
 
     runner = PipelineRunner()
     await runner.run(task)
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point — for standalone testing
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s — %(message)s",
-    )
-
-    parser = argparse.ArgumentParser(description="Pipecat voice bot")
-    parser.add_argument("--room-url", required=True, help="Daily.co room URL")
-    parser.add_argument("--token", required=True, help="Daily meeting token")
-    args = parser.parse_args()
-
-    asyncio.run(run_bot(room_url=args.room_url, token=args.token))

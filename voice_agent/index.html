@@ -3,8 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Nikki — Dubai Trip Planner</title>
-  <script src="https://unpkg.com/@daily-co/daily-js"></script>
+  <title>Nikki — Dubai Trip Planner (Pipecat POC)</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -19,370 +18,301 @@
     }
 
     .card {
-      background: #1a1d27;
-      border: 1px solid #2a2d3a;
+      background: #1a1d2e;
+      border: 1px solid #2d3050;
       border-radius: 16px;
-      padding: 40px 36px;
-      width: 100%;
-      max-width: 480px;
-      box-shadow: 0 24px 64px rgba(0,0,0,0.5);
-    }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 28px;
-    }
-
-    .logo-icon {
-      width: 44px;
-      height: 44px;
-      background: linear-gradient(135deg, #f59e0b, #ef4444);
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 22px;
-    }
-
-    .logo-text h1 {
-      font-size: 18px;
-      font-weight: 700;
-      color: #fff;
-    }
-
-    .logo-text p {
-      font-size: 12px;
-      color: #6b7280;
-    }
-
-    .agent-info {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      background: #12141e;
-      border: 1px solid #2a2d3a;
-      border-radius: 12px;
-      padding: 14px 16px;
-      margin-bottom: 24px;
+      padding: 48px 40px;
+      max-width: 420px;
+      width: 90%;
+      text-align: center;
     }
 
     .avatar {
-      width: 48px;
-      height: 48px;
+      width: 80px; height: 80px;
       border-radius: 50%;
-      background: linear-gradient(135deg, #8b5cf6, #ec4899);
+      background: linear-gradient(135deg, #6c63ff, #f6a623);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 2.4rem;
+      margin: 0 auto 20px;
+    }
+
+    h1 { font-size: 1.6rem; margin-bottom: 6px; }
+    .subtitle { color: #8b8fa8; font-size: 0.9rem; margin-bottom: 32px; }
+
+    .status {
+      background: #0f1117;
+      border: 1px solid #2d3050;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 0.85rem;
+      color: #8b8fa8;
+      margin-bottom: 24px;
+      min-height: 44px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 22px;
-      flex-shrink: 0;
-    }
-
-    .agent-details h2 {
-      font-size: 15px;
-      font-weight: 600;
-      color: #fff;
-    }
-
-    .agent-details p {
-      font-size: 12px;
-      color: #6b7280;
-    }
-
-    .status-bar {
-      display: flex;
-      align-items: center;
       gap: 8px;
-      padding: 10px 14px;
-      background: #12141e;
-      border: 1px solid #2a2d3a;
-      border-radius: 8px;
-      margin-bottom: 20px;
-      min-height: 42px;
     }
 
-    .status-dot {
-      width: 8px;
-      height: 8px;
+    .dot {
+      width: 8px; height: 8px;
       border-radius: 50%;
-      background: #374151;
+      background: #555;
       flex-shrink: 0;
       transition: background 0.3s;
     }
-
-    .status-dot.idle     { background: #374151; }
-    .status-dot.loading  { background: #f59e0b; animation: pulse 1s infinite; }
-    .status-dot.active   { background: #10b981; animation: pulse 1.5s infinite; }
-    .status-dot.speaking { background: #6366f1; animation: pulse 0.8s infinite; }
-    .status-dot.error    { background: #ef4444; }
+    .dot.green  { background: #22c55e; }
+    .dot.red    { background: #ef4444; }
+    .dot.yellow { background: #eab308; animation: pulse 1s infinite; }
 
     @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.3; }
+      0%,100% { opacity: 1; }
+      50%      { opacity: 0.4; }
     }
 
-    #status-text {
-      font-size: 13px;
-      color: #9ca3af;
-    }
-
-    .btn {
+    button {
       width: 100%;
       padding: 14px;
-      border: none;
       border-radius: 10px;
-      font-size: 15px;
+      border: none;
+      font-size: 1rem;
       font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: transform 0.1s, opacity 0.2s;
+    }
+    button:active { transform: scale(0.97); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #startBtn { background: linear-gradient(135deg, #6c63ff, #9b5cf6); color: #fff; }
+    #stopBtn  { background: #ef4444; color: #fff; display: none; margin-top: 12px; }
+
+    .note { color: #555; font-size: 0.75rem; margin-top: 20px; }
+
+    /* Waveform visualizer */
+    #waveform {
+      height: 40px;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
+      gap: 3px;
+      margin-bottom: 20px;
+      opacity: 0;
+      transition: opacity 0.4s;
     }
-
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    #start-btn {
-      background: linear-gradient(135deg, #f59e0b, #ef4444);
-      color: #fff;
+    #waveform.active { opacity: 1; }
+    .bar {
+      width: 4px;
+      background: #6c63ff;
+      border-radius: 2px;
+      transition: height 0.1s;
     }
-
-    #start-btn:hover:not(:disabled) {
-      transform: translateY(-1px);
-      box-shadow: 0 8px 24px rgba(245,158,11,0.35);
-    }
-
-    #end-btn {
-      background: #1f2231;
-      color: #ef4444;
-      border: 1px solid #3d1f1f;
-      margin-top: 10px;
-      display: none;
-    }
-
-    #end-btn:hover:not(:disabled) { background: #2a1a1a; }
-
-    .transcript-section {
-      margin-top: 20px;
-    }
-
-    .transcript-section h3 {
-      font-size: 12px;
-      font-weight: 600;
-      color: #4b5563;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 10px;
-    }
-
-    #transcript {
-      background: #12141e;
-      border: 1px solid #2a2d3a;
-      border-radius: 8px;
-      padding: 12px;
-      height: 200px;
-      overflow-y: auto;
-      font-size: 13px;
-      line-height: 1.6;
-      color: #9ca3af;
-    }
-
-    #transcript:empty::before {
-      content: "Transcript will appear here during the call...";
-      color: #374151;
-      font-style: italic;
-    }
-
-    .transcript-line { margin-bottom: 6px; }
-    .transcript-line.agent { color: #a78bfa; }
-    .transcript-line.user  { color: #34d399; }
-    .transcript-line.system { color: #f59e0b; font-style: italic; }
-
-    .mute-row {
-      display: flex;
-      gap: 10px;
-      margin-top: 10px;
-    }
-
-    .btn-icon {
-      flex: 1;
-      padding: 10px;
-      background: #1a1d27;
-      border: 1px solid #2a2d3a;
-      border-radius: 8px;
-      color: #9ca3af;
-      font-size: 12px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      transition: background 0.2s;
-    }
-
-    .btn-icon:hover { background: #1f2231; }
-    .btn-icon.active { border-color: #6366f1; color: #6366f1; }
   </style>
 </head>
 <body>
 <div class="card">
-  <div class="logo">
-    <div class="logo-icon">✈️</div>
-    <div class="logo-text">
-      <h1>Gujju Tours</h1>
-      <p>Dubai Trip Planner</p>
-    </div>
+  <div class="avatar">🧳</div>
+  <h1>Nikki</h1>
+  <p class="subtitle">AI Travel Consultant — Gujju Tours</p>
+
+  <div class="status" id="statusBox">
+    <span class="dot" id="dot"></span>
+    <span id="statusText">Ready to connect</span>
   </div>
 
-  <div class="agent-info">
-    <div class="avatar">👩‍💼</div>
-    <div class="agent-details">
-      <h2>Nikki</h2>
-      <p>Travel Consultant · Hinglish · Available now</p>
-    </div>
+  <div id="waveform">
+    <!-- bars injected by JS -->
   </div>
 
-  <div class="status-bar">
-    <div class="status-dot idle" id="status-dot"></div>
-    <span id="status-text">Ready to connect</span>
-  </div>
+  <button id="startBtn" onclick="startCall()">🎙️ Start Call with Nikki</button>
+  <button id="stopBtn"  onclick="stopCall()">⏹ End Call</button>
 
-  <button class="btn" id="start-btn" onclick="startCall()">
-    📞 Start Call with Nikki
-  </button>
-
-  <div class="mute-row" id="mute-row" style="display:none">
-    <button class="btn-icon" id="mute-btn" onclick="toggleMute()">🎙️ Mute</button>
-    <button class="btn-icon" onclick="endCall()" style="color:#ef4444">📵 End</button>
-  </div>
-
-  <div class="transcript-section">
-    <h3>Transcript</h3>
-    <div id="transcript"></div>
-  </div>
+  <p class="note">Uses your microphone. Speak naturally in Hindi or English.</p>
 </div>
 
+<audio id="remoteAudio" autoplay></audio>
+
 <script>
-  let callFrame = null;
-  let muted = false;
+// ─── Protobuf-lite frame codec (matches pipecat ProtobufFrameSerializer) ─────
+// Pipecat sends/receives binary protobuf frames. For a POC we use a simplified
+// hand-written codec that matches the wire format.
+//
+// Frame proto (simplified):
+//   message Frame {
+//     oneof frame { AudioRawFrame audio_raw = 8; ... }
+//   }
+//   message AudioRawFrame { bytes audio = 1; uint32 sample_rate = 2; uint32 num_channels = 3; }
+//
+// We only need AudioRawFrame: tag=8 (field 8, type 2=LEN), then the inner message.
+// Inner: tag=1 bytes, tag=2 varint, tag=3 varint.
 
-  function setStatus(state, text) {
-    const dot = document.getElementById('status-dot');
-    dot.className = `status-dot ${state}`;
-    document.getElementById('status-text').textContent = text;
+function encodeVarint(val) {
+  const buf = [];
+  while (val > 0x7f) { buf.push((val & 0x7f) | 0x80); val >>>= 7; }
+  buf.push(val);
+  return new Uint8Array(buf);
+}
+
+function encodeAudioFrame(pcm16, sampleRate, channels) {
+  // Build inner AudioRawFrame
+  const audioTag = new Uint8Array([0x0a]); // field 1, type 2 (LEN)
+  const audioLen = encodeVarint(pcm16.byteLength);
+  const srTag    = new Uint8Array([0x10]); // field 2, type 0 (VARINT)
+  const srVal    = encodeVarint(sampleRate);
+  const chTag    = new Uint8Array([0x18]); // field 3, type 0 (VARINT)
+  const chVal    = encodeVarint(channels);
+
+  const inner = concat([audioTag, audioLen, new Uint8Array(pcm16.buffer), srTag, srVal, chTag, chVal]);
+  // Wrap in outer Frame with field 8 (AudioRawFrame), type 2 (LEN)
+  const outerTag = new Uint8Array([0x42]); // (8 << 3) | 2 = 66 = 0x42
+  const outerLen = encodeVarint(inner.length);
+  return concat([outerTag, outerLen, inner]);
+}
+
+function concat(arrays) {
+  const total = arrays.reduce((s, a) => s + a.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const a of arrays) { out.set(a, off); off += a.length; }
+  return out;
+}
+
+// ─── State ──────────────────────────────────────────────────────────────────
+let ws = null;
+let audioCtx = null;
+let scriptNode = null;
+let mediaStream = null;
+let waveformAnimId = null;
+
+// Build waveform bars
+const waveformEl = document.getElementById('waveform');
+const BARS = 20;
+for (let i = 0; i < BARS; i++) {
+  const bar = document.createElement('div');
+  bar.className = 'bar';
+  bar.style.height = '4px';
+  waveformEl.appendChild(bar);
+}
+
+function setStatus(text, color) {
+  document.getElementById('statusText').textContent = text;
+  const dot = document.getElementById('dot');
+  dot.className = 'dot ' + (color || '');
+}
+
+function animateWaveform(active) {
+  const bars = waveformEl.querySelectorAll('.bar');
+  waveformEl.classList.toggle('active', active);
+  if (waveformAnimId) { clearInterval(waveformAnimId); waveformAnimId = null; }
+  if (!active) { bars.forEach(b => b.style.height = '4px'); return; }
+  waveformAnimId = setInterval(() => {
+    bars.forEach(b => {
+      const h = 4 + Math.random() * 30;
+      b.style.height = h + 'px';
+    });
+  }, 120);
+}
+
+async function startCall() {
+  document.getElementById('startBtn').disabled = true;
+  setStatus('Requesting microphone…', 'yellow');
+
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  } catch (e) {
+    setStatus('Microphone access denied.', 'red');
+    document.getElementById('startBtn').disabled = false;
+    return;
   }
 
-  function appendTranscript(role, text) {
-    const el = document.getElementById('transcript');
-    const line = document.createElement('div');
-    line.className = `transcript-line ${role}`;
-    const prefix = role === 'agent' ? 'Nikki' : role === 'user' ? 'You' : '';
-    line.textContent = prefix ? `${prefix}: ${text}` : text;
-    el.appendChild(line);
-    el.scrollTop = el.scrollHeight;
-  }
+  const wsUrl = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws';
+  setStatus('Connecting…', 'yellow');
+  ws = new WebSocket(wsUrl);
+  ws.binaryType = 'arraybuffer';
 
-  async function startCall() {
-    const btn = document.getElementById('start-btn');
-    btn.disabled = true;
-    setStatus('loading', 'Creating room...');
+  ws.onopen = () => {
+    setStatus('Connected — speak now!', 'green');
+    document.getElementById('startBtn').style.display = 'none';
+    document.getElementById('stopBtn').style.display = 'block';
+    startStreaming();
+  };
 
-    let roomUrl, token;
-    try {
-      const resp = await fetch('/start-call', { method: 'POST' });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-        throw new Error(err.detail || `Server error ${resp.status}`);
-      }
-      const data = await resp.json();
-      roomUrl = data.room_url;
-      token   = data.token;
-    } catch (err) {
-      setStatus('error', `Error: ${err.message}`);
-      btn.disabled = false;
-      return;
+  ws.onmessage = (evt) => {
+    if (evt.data instanceof ArrayBuffer) {
+      playAudio(evt.data);
     }
+  };
 
-    setStatus('loading', 'Joining call...');
-    appendTranscript('system', 'Connecting to Nikki...');
+  ws.onerror = (e) => { setStatus('WebSocket error.', 'red'); };
+  ws.onclose = () => {
+    setStatus('Call ended.', '');
+    cleanup();
+    document.getElementById('startBtn').style.display = 'block';
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('stopBtn').style.display = 'none';
+  };
+}
 
-    callFrame = window.DailyIframe.createCallObject({
-      audioSource: true,
-      videoSource: false,
-    });
+function startStreaming() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+  const source = audioCtx.createMediaStreamSource(mediaStream);
+  scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
 
-    // ── Daily event handlers ─────────────────────────────────────────────
-    callFrame.on('joined-meeting', () => {
-      setStatus('active', 'Connected — Nikki is listening');
-      appendTranscript('system', 'Call started. Nikki will greet you shortly.');
-      btn.style.display = 'none';
-      document.getElementById('mute-row').style.display = 'flex';
-    });
-
-    callFrame.on('left-meeting', () => {
-      setStatus('idle', 'Call ended');
-      appendTranscript('system', 'Call ended.');
-      btn.style.display = 'block';
-      btn.disabled = false;
-      document.getElementById('mute-row').style.display = 'none';
-      callFrame = null;
-    });
-
-    callFrame.on('error', (e) => {
-      setStatus('error', `Call error: ${e.errorMsg || 'Unknown error'}`);
-      appendTranscript('system', `Error: ${e.errorMsg || 'Unknown error'}`);
-      btn.disabled = false;
-    });
-
-    // Transcription from Daily (if enabled on the room)
-    callFrame.on('app-message', (event) => {
-      try {
-        const msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-        if (msg.type === 'transcript') {
-          appendTranscript(msg.role === 'bot' ? 'agent' : 'user', msg.text);
-        }
-      } catch (_) { /* non-transcript message */ }
-    });
-
-    callFrame.on('participant-updated', (event) => {
-      const p = event.participant;
-      if (p.local) return;
-      // Bot joined/left indicator
-      if (p.user_name === 'Nikki') {
-        if (p.tracks?.audio?.state === 'playable') {
-          setStatus('speaking', 'Nikki is speaking...');
-        } else {
-          setStatus('active', 'Connected — listening');
-        }
-      }
-    });
-
-    try {
-      await callFrame.join({ url: roomUrl, token });
-    } catch (err) {
-      setStatus('error', `Join failed: ${err.message}`);
-      appendTranscript('system', `Join failed: ${err.message}`);
-      btn.disabled = false;
-      btn.style.display = 'block';
+  scriptNode.onaudioprocess = (e) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const float32 = e.inputBuffer.getChannelData(0);
+    // Convert float32 [-1,1] → int16
+    const pcm16 = new Int16Array(float32.length);
+    for (let i = 0; i < float32.length; i++) {
+      pcm16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
     }
-  }
+    const frame = encodeAudioFrame(pcm16, 16000, 1);
+    ws.send(frame);
+  };
 
-  function toggleMute() {
-    if (!callFrame) return;
-    muted = !muted;
-    callFrame.setLocalAudio(!muted);
-    const btn = document.getElementById('mute-btn');
-    btn.textContent = muted ? '🔇 Unmute' : '🎙️ Mute';
-    btn.classList.toggle('active', muted);
-  }
+  source.connect(scriptNode);
+  scriptNode.connect(audioCtx.destination);
+  animateWaveform(true);
+}
 
-  function endCall() {
-    if (!callFrame) return;
-    callFrame.leave();
+// Simple audio playback queue for TTS output
+const audioQueue = [];
+let isPlaying = false;
+let playbackCtx = null;
+
+function playAudio(arrayBuffer) {
+  audioQueue.push(arrayBuffer);
+  if (!isPlaying) drainQueue();
+}
+
+async function drainQueue() {
+  if (!audioQueue.length) { isPlaying = false; return; }
+  isPlaying = true;
+  const buf = audioQueue.shift();
+  if (!playbackCtx) {
+    playbackCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
+  try {
+    const decoded = await playbackCtx.decodeAudioData(buf.slice(0));
+    const src = playbackCtx.createBufferSource();
+    src.buffer = decoded;
+    src.connect(playbackCtx.destination);
+    src.onended = drainQueue;
+    src.start();
+  } catch (e) {
+    drainQueue();
+  }
+}
+
+function stopCall() {
+  if (ws) ws.close();
+}
+
+function cleanup() {
+  if (scriptNode) { scriptNode.disconnect(); scriptNode = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  animateWaveform(false);
+}
 </script>
 </body>
 </html>
