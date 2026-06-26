@@ -15,6 +15,7 @@ and point Vapi's assistant model.url at  https://<ngrok>/api/webhook
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -149,11 +150,6 @@ def clear_trace() -> None:
         _KNOWN_SESSIONS.clear()
 
 
-def clear_trace() -> None:
-    with _TRACE_LOCK:
-        _TRACES.clear()
-
-
 # =============================================================================
 # Planner agent (the brain)
 # =============================================================================
@@ -280,26 +276,28 @@ def format_for_voice(text: str) -> str:
 
 
 # Filler phrases spoken IMMEDIATELY while the agent thinks — kills dead air.
+# Each value is a SHORT human-sounding phrase (under 5 words) — sounds like a
+# real person reacting, not a hold message. Vapi speaks this while the LLM runs.
 _FILLERS: dict[str, str] = {
-    "flight":    "Ek moment, flights dekh rahi hoon...",
-    "fly":       "Ek moment, flights dekh rahi hoon...",
-    "hotel":     "Please wait, hotels check kar rahi hoon...",
-    "stay":      "Please wait, hotels check kar rahi hoon...",
-    "room":      "Please wait, hotels check kar rahi hoon...",
-    "tour":      "Thodi si wait karein, tours dekh rahi hoon...",
-    "safari":    "Thodi si wait karein, safari options check kar rahi hoon...",
-    "burj":      "Thodi si wait karein, tours dekh rahi hoon...",
-    "transfer":  "Haan sir, transfers check kar rahi hoon...",
-    "taxi":      "Haan sir, transfers check kar rahi hoon...",
-    "visa":      "Just a moment, visa details dekh rahi hoon...",
-    "budget":    "Ek second, numbers calculate kar rahi hoon...",
-    "cost":      "Ek second, pricing check kar rahi hoon...",
-    "price":     "Ek second, pricing check kar rahi hoon...",
-    "plan":      "Haan bilkul, abhi dekhti hoon...",
-    "trip":      "Haan bilkul, abhi dekhti hoon...",
-    "itinerary": "Haan bilkul, abhi dekhti hoon...",
+    "flight":    "Hmm, flights dekh rahi hoon.",
+    "fly":       "Haan, flights check karti hoon.",
+    "hotel":     "Haan ji, hotels dekh rahi hoon.",
+    "stay":      "Acha, hotels check karti hoon.",
+    "room":      "Hmm, rooms dekh rahi hoon.",
+    "tour":      "Haan, tours abhi dekhti hoon.",
+    "safari":    "Haan ji, safari options check kar rahi hoon.",
+    "burj":      "Hmm, tours dekh rahi hoon.",
+    "transfer":  "Haan, transfers check karti hoon.",
+    "taxi":      "Acha, taxi options dekh rahi hoon.",
+    "visa":      "Haan, visa details abhi dekhti hoon.",
+    "budget":    "Hmm, numbers calculate kar rahi hoon.",
+    "cost":      "Haan, pricing check karti hoon.",
+    "price":     "Acha, prices dekh rahi hoon.",
+    "plan":      "Haan bilkul, abhi dekhti hoon.",
+    "trip":      "Hmm, trip plan check kar rahi hoon.",
+    "itinerary": "Haan ji, abhi dekhti hoon.",
 }
-_DEFAULT_FILLER = "Ek moment sir, dekh rahi hoon..."
+_DEFAULT_FILLER = "Haan, ek second."
 
 
 def _filler_for(transcript: str) -> str:
@@ -425,15 +423,49 @@ async def vapi_chat_completions(request: Request) -> Any:
     cid = f"chatcmpl-{session_id}"
     streaming = body.get("stream", True)
 
-    def gen():
+    # Heartbeat phrases spoken every ~4s while the agent is searching.
+    # Keeps the call feeling alive during long API waits (flights take 10-12s).
+    _HEARTBEATS = [
+        "Thoda waqt dijiye, results check ho rahe hain...",
+        "Haan, almost aa gaye...",
+        "Bas ek second aur...",
+        "Results aa rahe hain, please hold...",
+    ]
+
+    async def gen():
         yield _sse_chunk(cid, model, {"role": "assistant"}, None)
         if not transcript.strip():
-            reply = "Hello! I'm your Dubai trip planner. Where are you flying from?"
-        else:
-            # Stream a filler immediately — Vapi speaks this while agent searches.
-            # Keeps the call alive; no dead air while booking APIs respond.
-            yield _sse_chunk(cid, model, {"content": _filler_for(transcript)}, None)
-            reply = run_planner_turn(transcript, session_id)
+            reply = "Hello! Main Nikki hoon Gujju Tours se. Kahan jaana hai aapko?"
+            yield _sse_chunk(cid, model, {"content": reply}, None)
+            yield _sse_chunk(cid, model, {}, "stop")
+            yield "data: [DONE]\n\n"
+            return
+
+        # 1. Speak filler immediately so caller hears something right away
+        yield _sse_chunk(cid, model, {"content": _filler_for(transcript)}, None)
+
+        # 2. Run planner in a thread so we can send heartbeats while it works
+        loop = asyncio.get_event_loop()
+        result_holder: list[str] = []
+
+        def _run():
+            result_holder.append(run_planner_turn(transcript, session_id))
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+
+        heartbeat_idx = 0
+        while thread.is_alive():
+            await asyncio.sleep(4)
+            if thread.is_alive():  # still running — speak a heartbeat
+                yield _sse_chunk(cid, model, {"content": " " + _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]}, None)
+                heartbeat_idx += 1
+
+        # 3. Results are back — prepend a brief "thanks for waiting" if we sent heartbeats
+        reply = result_holder[0] if result_holder else "Sorry, kuch issue aa gaya. Dobara try karein?"
+        if heartbeat_idx > 0:
+            thanks = "Shukriya rukne ke liye — "
+            reply = thanks + reply
         yield _sse_chunk(cid, model, {"content": reply}, None)
         yield _sse_chunk(cid, model, {}, "stop")
         yield "data: [DONE]\n\n"
