@@ -175,7 +175,13 @@ _URL = re.compile(r"https?://\S+", re.IGNORECASE)
 _HEAD = re.compile(r"^#{1,6}\s+", re.MULTILINE)
 _EMPH = re.compile(r"[*_`#~]+")
 _BULLET = re.compile(r"^\s*[-*•]\s+", re.MULTILINE)
-_RUPEE = re.compile(r"₹\s*([\d,]+)")          # ₹1,00,000 → "1 lakh rupees" etc.
+_RUPEE = re.compile(r"₹\s*([\d,]+)")           # ₹1,00,000 → "1.3 lakh rupees"
+_PLAIN_LAKH = re.compile(r"\b(\d+\.\d+)\s*lakh\b", re.IGNORECASE)  # 1.33073 lakh → 1.3 lakh
+_BAGGAGE = re.compile(                          # strip baggage/refund details entirely
+    r"(baggage|baggaj|check[-\s]?in|hand\s*bag|cabin\s*bag|refundable|non[-\s]?refundable"
+    r"|kg\s*check|kg\s*hand|\d+\s*kg)[^.]*",
+    re.IGNORECASE,
+)
 
 
 def _humanise_numbers(text: str) -> str:
@@ -188,13 +194,13 @@ def _humanise_numbers(text: str) -> str:
         except ValueError:
             return m.group(0)
         if n >= 10_00_000:
-            cr = n / 10_00_000
-            return f"{cr:g} crore rupees"
+            cr = round(n / 10_00_000, 1)
+            return f"{cr} crore rupees"
         if n >= 1_00_000:
-            lk = n / 1_00_000
-            return f"{lk:g} lakh rupees"
+            lk = round(n / 1_00_000, 1)
+            return f"{lk} lakh rupees"
         if n >= 1_000:
-            return f"{n:,} rupees"
+            return f"{round(n / 1000, 1)} thousand rupees"
         return f"{n} rupees"
     return _RUPEE.sub(_replace, text)
 
@@ -278,6 +284,9 @@ def format_for_voice(text: str) -> str:
     text = _NUMBERED_ITEM.sub("", text)
     text = _EMPH.sub("", text)
     text = _EMOJI.sub("", text)
+    text = _BAGGAGE.sub("", text)   # strip baggage weights, refund status
+    # Round ugly decimals: 1.33073 lakh → 1.3 lakh
+    text = _PLAIN_LAKH.sub(lambda m: f"{round(float(m.group(1)), 1)} lakh", text)
     text = text.replace("&", " and ")
     text = _humanise_numbers(text)
     text = _fix_gender(text)
@@ -466,28 +475,28 @@ async def vapi_chat_completions(request: Request) -> Any:
         # 1. Speak filler immediately so caller hears something right away
         yield _sse_chunk(cid, model, {"content": _filler_for(transcript)}, None)
 
-        # 2. Run planner in a thread so we can send heartbeats while it works
+        # 2. Run planner in executor (non-blocking) + send heartbeats every 4s
         loop = asyncio.get_event_loop()
-        result_holder: list[str] = []
-
-        def _run():
-            result_holder.append(run_planner_turn(transcript, session_id))
-
-        thread = threading.Thread(target=_run, daemon=True)
-        thread.start()
+        future = loop.run_in_executor(None, run_planner_turn, transcript, session_id)
 
         heartbeat_idx = 0
-        while thread.is_alive():
-            await asyncio.sleep(4)
-            if thread.is_alive():  # still running — speak a heartbeat
-                yield _sse_chunk(cid, model, {"content": " " + _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]}, None)
+        while not future.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(future), timeout=4.0)
+            except asyncio.TimeoutError:
+                # Still running — send a heartbeat phrase
+                phrase = _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]
+                yield _sse_chunk(cid, model, {"content": " " + phrase}, None)
                 heartbeat_idx += 1
 
-        # 3. Results are back — prepend a brief "thanks for waiting" if we sent heartbeats
-        reply = result_holder[0] if result_holder else "Sorry, kuch issue aa gaya. Dobara try karein?"
+        try:
+            reply = future.result()
+        except Exception:
+            reply = "Sorry, kuch issue aa gaya. Dobara try karein?"
+
+        # 3. Results are back
         if heartbeat_idx > 0:
-            thanks = "Shukriya rukne ke liye — "
-            reply = thanks + reply
+            reply = "Shukriya rukne ke liye. " + reply
         yield _sse_chunk(cid, model, {"content": reply}, None)
         yield _sse_chunk(cid, model, {}, "stop")
         yield "data: [DONE]\n\n"
