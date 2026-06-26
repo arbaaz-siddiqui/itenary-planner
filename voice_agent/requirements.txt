@@ -1,10 +1,5 @@
-# Pipecat with WebSocket transport, Groq STT+LLM, and Cartesia TTS
-# NOTE: daily-python does not support Windows — using WebSocket transport instead
-pipecat-ai[groq,cartesia]==0.0.65
-
-# Web server (also serves the WebSocket endpoint via FastAPI)
+pipecat-ai[groq,silero,sarvam]==0.0.108
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
-
-# Environment variable loading
 python-dotenv>=1.0.0
+wsproto>=1.2.0

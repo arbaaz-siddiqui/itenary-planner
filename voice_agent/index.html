@@ -1,317 +1,265 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Nikki — Dubai Trip Planner (Pipecat POC)</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #0f1117;
-      color: #e8eaf0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .card {
-      background: #1a1d2e;
-      border: 1px solid #2d3050;
-      border-radius: 16px;
-      padding: 48px 40px;
-      max-width: 420px;
-      width: 90%;
-      text-align: center;
-    }
-
-    .avatar {
-      width: 80px; height: 80px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #6c63ff, #f6a623);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 2.4rem;
-      margin: 0 auto 20px;
-    }
-
-    h1 { font-size: 1.6rem; margin-bottom: 6px; }
-    .subtitle { color: #8b8fa8; font-size: 0.9rem; margin-bottom: 32px; }
-
-    .status {
-      background: #0f1117;
-      border: 1px solid #2d3050;
-      border-radius: 8px;
-      padding: 12px 16px;
-      font-size: 0.85rem;
-      color: #8b8fa8;
-      margin-bottom: 24px;
-      min-height: 44px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-    }
-
-    .dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: #555;
-      flex-shrink: 0;
-      transition: background 0.3s;
-    }
-    .dot.green  { background: #22c55e; }
-    .dot.red    { background: #ef4444; }
-    .dot.yellow { background: #eab308; animation: pulse 1s infinite; }
-
-    @keyframes pulse {
-      0%,100% { opacity: 1; }
-      50%      { opacity: 0.4; }
-    }
-
-    button {
-      width: 100%;
-      padding: 14px;
-      border-radius: 10px;
-      border: none;
-      font-size: 1rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: transform 0.1s, opacity 0.2s;
-    }
-    button:active { transform: scale(0.97); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    #startBtn { background: linear-gradient(135deg, #6c63ff, #9b5cf6); color: #fff; }
-    #stopBtn  { background: #ef4444; color: #fff; display: none; margin-top: 12px; }
-
-    .note { color: #555; font-size: 0.75rem; margin-top: 20px; }
-
-    /* Waveform visualizer */
-    #waveform {
-      height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 3px;
-      margin-bottom: 20px;
-      opacity: 0;
-      transition: opacity 0.4s;
-    }
-    #waveform.active { opacity: 1; }
-    .bar {
-      width: 4px;
-      background: #6c63ff;
-      border-radius: 2px;
-      transition: height 0.1s;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Nikki — Dubai Trip Planner</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #f0f0f0; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  h1 { font-size: 1.4rem; font-weight: 600; color: #f0a500; margin-bottom: 4px; }
+  p.sub { color: #888; font-size: 0.85rem; margin-bottom: 32px; }
+  #btn { width: 120px; height: 120px; border-radius: 50%; border: none; cursor: pointer; font-size: 2.5rem; background: #1a1a1a; border: 2px solid #333; transition: all 0.2s; }
+  #btn.active { background: #2a1a00; border-color: #f0a500; box-shadow: 0 0 20px #f0a50055; }
+  #btn.listening { background: #001a0a; border-color: #00cc66; box-shadow: 0 0 20px #00cc6644; }
+  #status { margin-top: 20px; font-size: 0.9rem; color: #888; text-align: center; min-height: 40px; }
+  #transcript { margin-top: 16px; width: 340px; background: #1a1a1a; border-radius: 12px; padding: 14px; font-size: 0.82rem; color: #bbb; max-height: 200px; overflow-y: auto; line-height: 1.5; }
+  .turn-user { color: #ccc; }
+  .turn-user span { color: #888; font-size: 0.75rem; }
+  .turn-agent { color: #f0a500; margin-top: 4px; }
+  .turn-agent span { color: #a06000; font-size: 0.75rem; }
+</style>
 </head>
 <body>
-<div class="card">
-  <div class="avatar">🧳</div>
-  <h1>Nikki</h1>
-  <p class="subtitle">AI Travel Consultant — Gujju Tours</p>
-
-  <div class="status" id="statusBox">
-    <span class="dot" id="dot"></span>
-    <span id="statusText">Ready to connect</span>
-  </div>
-
-  <div id="waveform">
-    <!-- bars injected by JS -->
-  </div>
-
-  <button id="startBtn" onclick="startCall()">🎙️ Start Call with Nikki</button>
-  <button id="stopBtn"  onclick="stopCall()">⏹ End Call</button>
-
-  <p class="note">Uses your microphone. Speak naturally in Hindi or English.</p>
-</div>
-
-<audio id="remoteAudio" autoplay></audio>
+<h1>Nikki — Gujju Tours</h1>
+<p class="sub">Dubai Trip Planner · Hinglish Voice</p>
+<button id="btn" onclick="toggleCall()">📞</button>
+<div id="status">Click to start call</div>
+<div id="transcript"></div>
 
 <script>
-// ─── Protobuf-lite frame codec (matches pipecat ProtobufFrameSerializer) ─────
-// Pipecat sends/receives binary protobuf frames. For a POC we use a simplified
-// hand-written codec that matches the wire format.
-//
-// Frame proto (simplified):
-//   message Frame {
-//     oneof frame { AudioRawFrame audio_raw = 8; ... }
-//   }
-//   message AudioRawFrame { bytes audio = 1; uint32 sample_rate = 2; uint32 num_channels = 3; }
-//
-// We only need AudioRawFrame: tag=8 (field 8, type 2=LEN), then the inner message.
-// Inner: tag=1 bytes, tag=2 varint, tag=3 varint.
+// ─── State ───────────────────────────────────────────────────────────────────
+let ws = null;
+let micStream = null;
+let audioCtx = null;
+let micProcessor = null;
+let nextPlayTime = 0;
+let active = false;
+const WS_URL = "ws://localhost:8765/ws";
 
-function encodeVarint(val) {
-  const buf = [];
-  while (val > 0x7f) { buf.push((val & 0x7f) | 0x80); val >>>= 7; }
-  buf.push(val);
-  return new Uint8Array(buf);
+const btn = document.getElementById("btn");
+const statusEl = document.getElementById("status");
+const transcriptEl = document.getElementById("transcript");
+
+// ─── Backchannel phrases (played immediately when agent is thinking) ──────────
+// These are short pre-recorded-style strings; we just display them as text
+// while the agent processes. The actual audio comes from TTS.
+const BACKCHANNELS = ["Hmm...", "Haan...", "Ok...", "Ji...", "Acha..."];
+let backchannelTimer = null;
+
+function showBackchannel() {
+  const phrase = BACKCHANNELS[Math.floor(Math.random() * BACKCHANNELS.length)];
+  setStatus("🎙️ " + phrase, "agent");
 }
 
-function encodeAudioFrame(pcm16, sampleRate, channels) {
-  // Build inner AudioRawFrame
-  const audioTag = new Uint8Array([0x0a]); // field 1, type 2 (LEN)
-  const audioLen = encodeVarint(pcm16.byteLength);
-  const srTag    = new Uint8Array([0x10]); // field 2, type 0 (VARINT)
-  const srVal    = encodeVarint(sampleRate);
-  const chTag    = new Uint8Array([0x18]); // field 3, type 0 (VARINT)
-  const chVal    = encodeVarint(channels);
+// ─── UI helpers ───────────────────────────────────────────────────────────────
+function setStatus(msg, mode) {
+  statusEl.textContent = msg;
+  btn.className = mode === "listening" ? "listening" : mode === "agent" ? "active" : "";
+}
 
-  const inner = concat([audioTag, audioLen, new Uint8Array(pcm16.buffer), srTag, srVal, chTag, chVal]);
-  // Wrap in outer Frame with field 8 (AudioRawFrame), type 2 (LEN)
-  const outerTag = new Uint8Array([0x42]); // (8 << 3) | 2 = 66 = 0x42
-  const outerLen = encodeVarint(inner.length);
-  return concat([outerTag, outerLen, inner]);
+function addTranscript(role, text) {
+  const div = document.createElement("div");
+  div.className = role === "user" ? "turn-user" : "turn-agent";
+  div.innerHTML = `<span>${role === "user" ? "You" : "Nikki"}</span><br>${text}`;
+  transcriptEl.appendChild(div);
+  transcriptEl.scrollTop = transcriptEl.scrollHeight;
+}
+
+// ─── Protobuf helpers ─────────────────────────────────────────────────────────
+function encodeVarint(n) {
+  const out = [];
+  while (n > 0x7f) { out.push((n & 0x7f) | 0x80); n >>>= 7; }
+  out.push(n & 0x7f);
+  return new Uint8Array(out);
 }
 
 function concat(arrays) {
-  const total = arrays.reduce((s, a) => s + a.length, 0);
-  const out = new Uint8Array(total);
+  const len = arrays.reduce((s, a) => s + a.length, 0);
+  const out = new Uint8Array(len);
   let off = 0;
   for (const a of arrays) { out.set(a, off); off += a.length; }
   return out;
 }
 
-// ─── State ──────────────────────────────────────────────────────────────────
-let ws = null;
-let audioCtx = null;
-let scriptNode = null;
-let mediaStream = null;
-let waveformAnimId = null;
-
-// Build waveform bars
-const waveformEl = document.getElementById('waveform');
-const BARS = 20;
-for (let i = 0; i < BARS; i++) {
-  const bar = document.createElement('div');
-  bar.className = 'bar';
-  bar.style.height = '4px';
-  waveformEl.appendChild(bar);
+function encodeAudioFrame(pcm16, sampleRate, channels) {
+  const pcmBytes = new Uint8Array(pcm16.buffer, pcm16.byteOffset, pcm16.byteLength);
+  // Inner AudioRawFrame: field3=audio, field4=sample_rate, field5=num_channels
+  const inner = concat([
+    new Uint8Array([0x1a]), encodeVarint(pcmBytes.length), pcmBytes,
+    new Uint8Array([0x20]), encodeVarint(sampleRate),
+    new Uint8Array([0x28]), encodeVarint(channels),
+  ]);
+  // Outer Frame: field2=audio_raw_frame
+  return concat([new Uint8Array([0x12]), encodeVarint(inner.length), inner]);
 }
 
-function setStatus(text, color) {
-  document.getElementById('statusText').textContent = text;
-  const dot = document.getElementById('dot');
-  dot.className = 'dot ' + (color || '');
-}
-
-function animateWaveform(active) {
-  const bars = waveformEl.querySelectorAll('.bar');
-  waveformEl.classList.toggle('active', active);
-  if (waveformAnimId) { clearInterval(waveformAnimId); waveformAnimId = null; }
-  if (!active) { bars.forEach(b => b.style.height = '4px'); return; }
-  waveformAnimId = setInterval(() => {
-    bars.forEach(b => {
-      const h = 4 + Math.random() * 30;
-      b.style.height = h + 'px';
-    });
-  }, 120);
-}
-
-async function startCall() {
-  document.getElementById('startBtn').disabled = true;
-  setStatus('Requesting microphone…', 'yellow');
-
-  try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-  } catch (e) {
-    setStatus('Microphone access denied.', 'red');
-    document.getElementById('startBtn').disabled = false;
-    return;
+// ─── Incoming audio decode ────────────────────────────────────────────────────
+function decodeVarint(buf, offset) {
+  let result = 0, shift = 0;
+  while (offset < buf.length) {
+    const b = buf[offset++];
+    result |= (b & 0x7f) << shift;
+    if (!(b & 0x80)) break;
+    shift += 7;
   }
+  return { value: result, offset };
+}
 
-  const wsUrl = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws';
-  setStatus('Connecting…', 'yellow');
-  ws = new WebSocket(wsUrl);
-  ws.binaryType = 'arraybuffer';
+function parseAudioRawFrame(buf) {
+  let offset = 0, audio = null, sr = 24000, ch = 1;
+  while (offset < buf.length) {
+    const tag = buf[offset++];
+    const fieldNum = tag >> 3, wireType = tag & 0x7;
+    if (wireType === 2) {
+      const { value: len, offset: o } = decodeVarint(buf, offset);
+      offset = o;
+      if (fieldNum === 3) audio = buf.slice(offset, offset + len);
+      offset += len;
+    } else if (wireType === 0) {
+      const { value, offset: o } = decodeVarint(buf, offset);
+      offset = o;
+      if (fieldNum === 4) sr = value;
+      if (fieldNum === 5) ch = value;
+    } else break;
+  }
+  return audio ? { audio, sampleRate: sr, channels: ch } : null;
+}
+
+function decodeAudioFrame(buf) {
+  let offset = 0;
+  while (offset < buf.length) {
+    const tag = buf[offset++];
+    const fieldNum = tag >> 3, wireType = tag & 0x7;
+    if (wireType === 2) {
+      const { value: len, offset: o } = decodeVarint(buf, offset);
+      offset = o;
+      if (fieldNum === 2) return parseAudioRawFrame(buf.slice(offset, offset + len));
+      offset += len;
+    } else break;
+  }
+  return null;
+}
+
+// ─── WAV header stripping ─────────────────────────────────────────────────────
+function stripWavHeader(bytes) {
+  const isWav = bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46;
+  if (!isWav) return { pcm: bytes, sampleRate: 24000 };
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const sr = view.getUint32(24, true);
+  return { pcm: bytes.slice(44), sampleRate: sr };
+}
+
+// ─── PCM16 playback ───────────────────────────────────────────────────────────
+function playPCM16(pcmBytes, sampleRate, channels) {
+  if (!audioCtx || audioCtx.state === "closed") return;
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  const samples = pcmBytes.length / 2;
+  const floats = new Float32Array(samples);
+  const view = new DataView(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.byteLength);
+  for (let i = 0; i < samples; i++) floats[i] = view.getInt16(i * 2, true) / 32768;
+  const buf = audioCtx.createBuffer(channels, samples, sampleRate);
+  buf.copyToChannel(floats, 0);
+  if (channels > 1) buf.copyToChannel(floats, 1);
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(audioCtx.destination);
+  const now = audioCtx.currentTime;
+  const when = Math.max(now, nextPlayTime);
+  src.start(when);
+  nextPlayTime = when + buf.duration;
+}
+
+// ─── Mic capture ─────────────────────────────────────────────────────────────
+async function startMic() {
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 }, video: false });
+  const srcNode = audioCtx.createMediaStreamSource(micStream);
+  const bufSize = 2048;
+  micProcessor = audioCtx.createScriptProcessor(bufSize, 1, 1);
+  micProcessor.onaudioprocess = (e) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const f32 = e.inputBuffer.getChannelData(0);
+    const pcm = new Int16Array(f32.length);
+    for (let i = 0; i < f32.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, f32[i] * 32768));
+    ws.send(encodeAudioFrame(pcm, audioCtx.sampleRate, 1));
+  };
+  srcNode.connect(micProcessor);
+  micProcessor.connect(audioCtx.destination);
+}
+
+// ─── WebSocket ────────────────────────────────────────────────────────────────
+function connectWS() {
+  ws = new WebSocket(WS_URL);
+  ws.binaryType = "arraybuffer";
 
   ws.onopen = () => {
-    setStatus('Connected — speak now!', 'green');
-    document.getElementById('startBtn').style.display = 'none';
-    document.getElementById('stopBtn').style.display = 'block';
-    startStreaming();
+    setStatus("🎙️ Connected — speak now", "listening");
+    startMic();
   };
 
-  ws.onmessage = (evt) => {
-    if (evt.data instanceof ArrayBuffer) {
-      playAudio(evt.data);
+  ws.onmessage = (event) => {
+    clearTimeout(backchannelTimer);
+    if (typeof event.data === "string") {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "transcript") {
+          addTranscript("user", msg.text);
+          // Show backchannel after 600ms if no audio comes back quickly
+          backchannelTimer = setTimeout(showBackchannel, 600);
+          setStatus("💭 Thinking...", "");
+        } else if (msg.type === "llm_start") {
+          backchannelTimer = setTimeout(showBackchannel, 600);
+          setStatus("💭 Thinking...", "");
+        }
+      } catch {}
+      return;
     }
+    const frame = decodeAudioFrame(new Uint8Array(event.data));
+    if (!frame) return;
+    const { pcm, sampleRate } = stripWavHeader(frame.audio);
+    if (pcm.length < 2) return;
+    playPCM16(pcm, sampleRate, frame.channels);
+    setStatus("🔊 Nikki is speaking...", "agent");
   };
 
-  ws.onerror = (e) => { setStatus('WebSocket error.', 'red'); };
   ws.onclose = () => {
-    setStatus('Call ended.', '');
-    cleanup();
-    document.getElementById('startBtn').style.display = 'block';
-    document.getElementById('startBtn').disabled = false;
-    document.getElementById('stopBtn').style.display = 'none';
+    setStatus("Call ended", "");
+    btn.textContent = "📞";
+    btn.className = "";
+    active = false;
+    stopMic();
+  };
+
+  ws.onerror = () => {
+    setStatus("❌ Connection failed — is the server running?", "");
+    active = false;
   };
 }
 
-function startStreaming() {
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-  const source = audioCtx.createMediaStreamSource(mediaStream);
-  scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
-
-  scriptNode.onaudioprocess = (e) => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const float32 = e.inputBuffer.getChannelData(0);
-    // Convert float32 [-1,1] → int16
-    const pcm16 = new Int16Array(float32.length);
-    for (let i = 0; i < float32.length; i++) {
-      pcm16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
-    }
-    const frame = encodeAudioFrame(pcm16, 16000, 1);
-    ws.send(frame);
-  };
-
-  source.connect(scriptNode);
-  scriptNode.connect(audioCtx.destination);
-  animateWaveform(true);
+function stopMic() {
+  if (micProcessor) { micProcessor.disconnect(); micProcessor = null; }
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
 }
 
-// Simple audio playback queue for TTS output
-const audioQueue = [];
-let isPlaying = false;
-let playbackCtx = null;
-
-function playAudio(arrayBuffer) {
-  audioQueue.push(arrayBuffer);
-  if (!isPlaying) drainQueue();
-}
-
-async function drainQueue() {
-  if (!audioQueue.length) { isPlaying = false; return; }
-  isPlaying = true;
-  const buf = audioQueue.shift();
-  if (!playbackCtx) {
-    playbackCtx = new (window.AudioContext || window.webkitAudioContext)();
+// ─── Main toggle ──────────────────────────────────────────────────────────────
+async function toggleCall() {
+  if (!active) {
+    // AudioContext MUST be created inside user gesture (Chrome autoplay policy)
+    audioCtx = new AudioContext({ sampleRate: 24000 });
+    nextPlayTime = 0;
+    active = true;
+    btn.textContent = "⏹️";
+    setStatus("🔌 Connecting...", "");
+    connectWS();
+  } else {
+    active = false;
+    if (ws) { ws.close(); ws = null; }
+    stopMic();
+    if (audioCtx) { audioCtx.close(); audioCtx = null; }
+    clearTimeout(backchannelTimer);
+    setStatus("Click to start call", "");
+    btn.textContent = "📞";
+    btn.className = "";
   }
-  try {
-    const decoded = await playbackCtx.decodeAudioData(buf.slice(0));
-    const src = playbackCtx.createBufferSource();
-    src.buffer = decoded;
-    src.connect(playbackCtx.destination);
-    src.onended = drainQueue;
-    src.start();
-  } catch (e) {
-    drainQueue();
-  }
-}
-
-function stopCall() {
-  if (ws) ws.close();
-}
-
-function cleanup() {
-  if (scriptNode) { scriptNode.disconnect(); scriptNode = null; }
-  if (audioCtx) { audioCtx.close(); audioCtx = null; }
-  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
-  animateWaveform(false);
 }
 </script>
 </body>

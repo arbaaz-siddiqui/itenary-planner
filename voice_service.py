@@ -280,26 +280,28 @@ def format_for_voice(text: str) -> str:
 
 
 # Filler phrases spoken IMMEDIATELY while the agent thinks — kills dead air.
+# Each value is a SHORT human-sounding phrase (under 5 words) — sounds like a
+# real person reacting, not a hold message. Vapi speaks this while the LLM runs.
 _FILLERS: dict[str, str] = {
-    "flight":    "Ek moment, flights dekh rahi hoon...",
-    "fly":       "Ek moment, flights dekh rahi hoon...",
-    "hotel":     "Please wait, hotels check kar rahi hoon...",
-    "stay":      "Please wait, hotels check kar rahi hoon...",
-    "room":      "Please wait, hotels check kar rahi hoon...",
-    "tour":      "Thodi si wait karein, tours dekh rahi hoon...",
-    "safari":    "Thodi si wait karein, safari options check kar rahi hoon...",
-    "burj":      "Thodi si wait karein, tours dekh rahi hoon...",
-    "transfer":  "Haan sir, transfers check kar rahi hoon...",
-    "taxi":      "Haan sir, transfers check kar rahi hoon...",
-    "visa":      "Just a moment, visa details dekh rahi hoon...",
-    "budget":    "Ek second, numbers calculate kar rahi hoon...",
-    "cost":      "Ek second, pricing check kar rahi hoon...",
-    "price":     "Ek second, pricing check kar rahi hoon...",
-    "plan":      "Haan bilkul, abhi dekhti hoon...",
-    "trip":      "Haan bilkul, abhi dekhti hoon...",
-    "itinerary": "Haan bilkul, abhi dekhti hoon...",
+    "flight":    "Hmm, flights dekh rahi hoon.",
+    "fly":       "Haan, flights check karti hoon.",
+    "hotel":     "Haan ji, hotels dekh rahi hoon.",
+    "stay":      "Acha, hotels check karti hoon.",
+    "room":      "Hmm, rooms dekh rahi hoon.",
+    "tour":      "Haan, tours abhi dekhti hoon.",
+    "safari":    "Haan ji, safari options check kar rahi hoon.",
+    "burj":      "Hmm, tours dekh rahi hoon.",
+    "transfer":  "Haan, transfers check karti hoon.",
+    "taxi":      "Acha, taxi options dekh rahi hoon.",
+    "visa":      "Haan, visa details abhi dekhti hoon.",
+    "budget":    "Hmm, numbers calculate kar rahi hoon.",
+    "cost":      "Haan, pricing check karti hoon.",
+    "price":     "Acha, prices dekh rahi hoon.",
+    "plan":      "Haan bilkul, abhi dekhti hoon.",
+    "trip":      "Hmm, trip plan check kar rahi hoon.",
+    "itinerary": "Haan ji, abhi dekhti hoon.",
 }
-_DEFAULT_FILLER = "Ek moment sir, dekh rahi hoon..."
+_DEFAULT_FILLER = "Haan, ek second."
 
 
 def _filler_for(transcript: str) -> str:
