@@ -250,13 +250,24 @@ def _fix_gender(text: str) -> str:
     return text
 
 
+_EMOJI = re.compile(
+    "[\U00010000-\U0010ffff"   # supplementary planes (most emoji)
+    "\U0001F300-\U0001F9FF"    # misc symbols & pictographs
+    "\U00002600-\U000027BF"    # misc symbols
+    "\U0000FE00-\U0000FE0F"    # variation selectors
+    "]+",
+    flags=re.UNICODE,
+)
+_NUMBERED_ITEM = re.compile(r"^\s*\d+\.\s+", re.MULTILINE)  # "1. foo" → strip number
+
+
 def format_for_voice(text: str) -> str:
     """Make agent text safe and natural for text-to-speech.
 
     Pipeline:
-    1. Strip all markdown (tables, headings, bullets, emphasis, URLs)
-    2. Humanise currency figures (₹ → spoken rupees)
-    3. Collapse whitespace into spoken-friendly sentences
+    1. Strip markdown, emoji, numbered lists, URLs
+    2. Humanise currency figures
+    3. Hard-truncate to 2 sentences so TTS stays short
     """
     if not text:
         return ""
@@ -264,15 +275,26 @@ def format_for_voice(text: str) -> str:
     text = _URL.sub("", text)
     text = _HEAD.sub("", text)
     text = _BULLET.sub("", text)
+    text = _NUMBERED_ITEM.sub("", text)
     text = _EMPH.sub("", text)
+    text = _EMOJI.sub("", text)
     text = text.replace("&", " and ")
     text = _humanise_numbers(text)
     text = _fix_gender(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{2,}", ". ", text)
     text = re.sub(r"\n", " ", text)
+    # Strip inline numbered list markers like " 2. " " 3. " left after joining lines
+    text = re.sub(r"\s+\d+\.\s+", " ", text)
     text = re.sub(r"\s+([.,!?])", r"\1", text)
-    return re.sub(r"\.{2,}", ".", text).strip()
+    text = re.sub(r"\.{2,}", ".", text).strip()
+
+    # Hard cap: keep only first 2 sentences so the agent never rambles on voice.
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    if len(sentences) > 2:
+        text = " ".join(sentences[:2])
+
+    return text
 
 
 # Filler phrases spoken IMMEDIATELY while the agent thinks — kills dead air.
