@@ -15,6 +15,7 @@ and point Vapi's assistant model.url at  https://<ngrok>/api/webhook
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -147,11 +148,6 @@ def clear_trace() -> None:
     with _TRACE_LOCK:
         _TRACES.clear()
         _KNOWN_SESSIONS.clear()
-
-
-def clear_trace() -> None:
-    with _TRACE_LOCK:
-        _TRACES.clear()
 
 
 # =============================================================================
@@ -427,15 +423,49 @@ async def vapi_chat_completions(request: Request) -> Any:
     cid = f"chatcmpl-{session_id}"
     streaming = body.get("stream", True)
 
-    def gen():
+    # Heartbeat phrases spoken every ~4s while the agent is searching.
+    # Keeps the call feeling alive during long API waits (flights take 10-12s).
+    _HEARTBEATS = [
+        "Thoda waqt dijiye, results check ho rahe hain...",
+        "Haan, almost aa gaye...",
+        "Bas ek second aur...",
+        "Results aa rahe hain, please hold...",
+    ]
+
+    async def gen():
         yield _sse_chunk(cid, model, {"role": "assistant"}, None)
         if not transcript.strip():
-            reply = "Hello! I'm your Dubai trip planner. Where are you flying from?"
-        else:
-            # Stream a filler immediately — Vapi speaks this while agent searches.
-            # Keeps the call alive; no dead air while booking APIs respond.
-            yield _sse_chunk(cid, model, {"content": _filler_for(transcript)}, None)
-            reply = run_planner_turn(transcript, session_id)
+            reply = "Hello! Main Nikki hoon Gujju Tours se. Kahan jaana hai aapko?"
+            yield _sse_chunk(cid, model, {"content": reply}, None)
+            yield _sse_chunk(cid, model, {}, "stop")
+            yield "data: [DONE]\n\n"
+            return
+
+        # 1. Speak filler immediately so caller hears something right away
+        yield _sse_chunk(cid, model, {"content": _filler_for(transcript)}, None)
+
+        # 2. Run planner in a thread so we can send heartbeats while it works
+        loop = asyncio.get_event_loop()
+        result_holder: list[str] = []
+
+        def _run():
+            result_holder.append(run_planner_turn(transcript, session_id))
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+
+        heartbeat_idx = 0
+        while thread.is_alive():
+            await asyncio.sleep(4)
+            if thread.is_alive():  # still running — speak a heartbeat
+                yield _sse_chunk(cid, model, {"content": " " + _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]}, None)
+                heartbeat_idx += 1
+
+        # 3. Results are back — prepend a brief "thanks for waiting" if we sent heartbeats
+        reply = result_holder[0] if result_holder else "Sorry, kuch issue aa gaya. Dobara try karein?"
+        if heartbeat_idx > 0:
+            thanks = "Shukriya rukne ke liye — "
+            reply = thanks + reply
         yield _sse_chunk(cid, model, {"content": reply}, None)
         yield _sse_chunk(cid, model, {}, "stop")
         yield "data: [DONE]\n\n"
