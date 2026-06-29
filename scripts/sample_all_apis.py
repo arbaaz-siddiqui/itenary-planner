@@ -430,6 +430,7 @@ def make_endpoints() -> list[dict[str, Any]]:
         },
         # ------------------------------------------------------------------
         # 14. HotelSearch — POST /api/xconnect/Availabilitywithcancellation
+        # Client URL: hotel_id=384, city_id=244520, checkin 08-05-2026, checkout 08-08-2026
         # ------------------------------------------------------------------
         {
             "name": "HotelSearch",
@@ -448,16 +449,16 @@ def make_endpoints() -> list[dict[str, Any]]:
                         }
                     ],
                     "CityID": "244520",
-                    "CheckInDate": "12-20-2026",
-                    "CheckOutDate": "12-22-2026",
-                    "NoofNights": "2",
+                    "CheckInDate": "08-05-2026",
+                    "CheckOutDate": "08-08-2026",
+                    "NoofNights": "3",
                     "Nationality": "India",
                     "Filters": {
                         "IsRecommendedOnly": "0",
                         "IsShowRooms": "1",
                         "IsOnlyAvailable": "1",
-                        "StarRating": {"Min": 1, "Max": 5},
-                        "HotelIDs": "509,206",
+                        "StarRating": {"Min": 3, "Max": 5},
+                        "HotelIDs": "384",
                     },
                 },
                 "AdvancedOptions": {
@@ -468,6 +469,73 @@ def make_endpoints() -> list[dict[str, Any]]:
                 "IsMobile": 1,
                 "IsSearch": 1,
             },
+        },
+        # ------------------------------------------------------------------
+        # 15. GetCitiesWithHotel — POST (hotel static token)
+        # ------------------------------------------------------------------
+        {
+            "name": "HotelCities",
+            "method": "POST",
+            "path": "/api/xconnect/GetCitiesWithHotel",
+            "headers": standard_headers(),
+            "body": {"Request": {"CityName": "dubai"}},
+        },
+        # ------------------------------------------------------------------
+        # 16. GetStaticDataByCity — POST (hotel static token)
+        # ------------------------------------------------------------------
+        {
+            "name": "HotelStaticByCity",
+            "method": "POST",
+            "path": "/api/xconnect/GetStaticDataByCity",
+            "headers": standard_headers(),
+            "body": {"Request": {"CityID": "244520", "Type": "city", "LocationId": ""}},
+        },
+        # ------------------------------------------------------------------
+        # 17. GetHotelStaticDataOptimize — POST (hotel static token)
+        # ------------------------------------------------------------------
+        {
+            "name": "HotelStaticData",
+            "method": "POST",
+            "path": "/api/xconnect/GetHotelStaticDataOptimize",
+            "headers": standard_headers(),
+            "body": {
+                "IsMobile": 1,
+                "Request": {
+                    "CityId": "244520",
+                    "HotelIDs": "384",
+                    "LanguageId": 0,
+                    "IsShowRooms": 0,
+                },
+            },
+        },
+        # ------------------------------------------------------------------
+        # 18. GetPropertyDescriptions — POST (hotel static token)
+        # ------------------------------------------------------------------
+        {
+            "name": "HotelDescriptions",
+            "method": "POST",
+            "path": "/api/xconnect/GetPropertyDescriptions",
+            "headers": standard_headers(),
+            "body": {
+                "IsMobile": 1,
+                "Request": {
+                    "CityId": "244520",
+                    "HotelIds": "384",
+                    "LanguageId": 0,
+                    "IsShowRooms": 1,
+                },
+                "token": "",
+            },
+        },
+        # ------------------------------------------------------------------
+        # 19. GetHotelGuestReview — POST (hotel static token)
+        # ------------------------------------------------------------------
+        {
+            "name": "HotelGuestReview",
+            "method": "POST",
+            "path": "/api/xconnect/GetHotelGuestReview",
+            "headers": standard_headers(),
+            "body": {"Request": {"HotelId": 384}},
         },
     ]
 
@@ -600,7 +668,7 @@ def call_endpoint(spec: dict[str, Any]) -> dict[str, Any]:
 def main() -> int:
     print(c("\n╔════════════════════════════════════════════════════════════╗", "cyan"))
     print(c("║  Gujju Tours / Technoheaven — API Sampler                 ║", "cyan"))
-    print(c("║  Hits all 14 endpoints, saves to api_samples.json         ║", "cyan"))
+    print(c("║  Hits all 19 endpoints, saves to api_samples.json         ║", "cyan"))
     print(c("╚════════════════════════════════════════════════════════════╝", "cyan"))
     print(f"\nBase URL: {BASE_URL}")
     print("Token expiry: 2027-05-25 (per JWT claim)\n")

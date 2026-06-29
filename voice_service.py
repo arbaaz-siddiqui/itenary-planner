@@ -682,38 +682,40 @@ async def vapi_chat_completions(request: Request) -> Any:
             yield "data: [DONE]\n\n"
             return
 
-        # HOW VAPI CUSTOM LLM STREAMING ACTUALLY WORKS:
-        # Vapi buffers ALL SSE chunks and sends the concatenated text to TTS
-        # as ONE utterance. Token-by-token streaming does NOT improve latency.
-        # The ONLY way to get immediate speech is to send a short complete
-        # sentence FIRST (Vapi speaks it), then send the real answer (Vapi
-        # speaks it next). Two sentence chunks = two TTS utterances in sequence.
+        # HOW VAPI STREAMING WORKS (confirmed by testing):
+        # Each SSE chunk = one TTS utterance spoken immediately as it arrives.
+        # So: chunk1 spoken → chunk2 spoken → ... in sequence.
+        # Key rule: keep each chunk SHORT (one sentence) so TTS finishes it
+        # quickly and the next chunk plays before too much silence builds up.
+        # WRONG: bundle backchannel + filler + heartbeats into one chunk — Vapi
+        #        speaks the whole thing at once, heartbeats pile up and play after.
+        # RIGHT: send each phrase as its own chunk with a small async gap so
+        #        Vapi has time to start speaking before the next chunk arrives.
 
-        # HOW VAPI HEARTBEATS WORK:
-        # Vapi DOES stream SSE chunks to TTS in real-time — each chunk triggers
-        # a new TTS utterance. BUT only if the chunks arrive BEFORE Vapi's own
-        # LLM response timeout (~20s). We send filler+heartbeats as real chunks
-        # and Vapi speaks each one as it arrives.
-        #
-        # The re-search problem (agent re-runs search every turn) is a separate
-        # issue — the agent isn't using SQLite checkpoint correctly for voice.
-
-        # 1. Filler — spoken immediately (~200ms after caller stops)
+        # 1. Backchannel — immediate, ~1 word, spoken in <500ms
         backchannel = _pick_backchannel(transcript, intent)
-        filler = _build_smart_filler(transcript, intent)
-        yield _sse_chunk(cid, model, {"content": backchannel + " " + filler}, None)
+        yield _sse_chunk(cid, model, {"content": backchannel}, None)
 
-        # 2. Run planner in background thread
+        # 2. Filler — echoes back what we understood, sent 300ms later so
+        #    Vapi finishes speaking the backchannel first
+        await asyncio.sleep(0.3)
+        filler = _build_smart_filler(transcript, intent)
+        yield _sse_chunk(cid, model, {"content": " " + filler}, None)
+
+        # 3. Run planner in background thread (starts immediately alongside filler)
         loop = asyncio.get_event_loop()
         cursor_before = latest_http_seq()
         start_time = time.perf_counter()
         future = loop.run_in_executor(None, run_planner_turn, transcript, session_id)
 
-        # 3. Send a heartbeat every 4s while planner runs — Vapi speaks each one
+        # 4. Heartbeat every 4s while planner runs — each one is a fresh short
+        #    chunk so Vapi speaks it immediately as a new utterance.
+        #    Gap between heartbeats = 4s, giving TTS ~3s to speak + 1s silence.
         heartbeat_idx = 0
         while not future.done():
             try:
                 await asyncio.wait_for(asyncio.shield(future), timeout=4.0)
+                break  # future completed within 4s window
             except asyncio.TimeoutError:
                 phrase = _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]
                 yield _sse_chunk(cid, model, {"content": " " + phrase}, None)
@@ -724,9 +726,7 @@ async def vapi_chat_completions(request: Request) -> Any:
         except Exception:
             final_reply = "Sorry, kuch issue aa gaya. Dobara try karein?"
 
-        # 4. Real answer — Vapi speaks this after all heartbeats
-        if heartbeat_idx > 0:
-            final_reply = "Results aa gaye. " + final_reply
+        # 5. Real answer — comes in as its own chunk, Vapi speaks after last heartbeat
         yield _sse_chunk(cid, model, {"content": " " + final_reply}, None)
         yield _sse_chunk(cid, model, {}, "stop")
         yield "data: [DONE]\n\n"
