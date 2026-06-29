@@ -10,7 +10,6 @@ Currently supported:
 
 from __future__ import annotations
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
@@ -18,7 +17,13 @@ from core import InvalidSettingError, MissingApiKey
 from settings import get_llm_settings
 
 
-def build_anthropic_llm(*, temperature: float = 0.3, max_tokens: int = 4096) -> ChatAnthropic:
+def build_anthropic_llm(*, temperature: float = 0.3, max_tokens: int = 4096) -> BaseChatModel:
+    try:
+        from langchain_anthropic import ChatAnthropic
+    except ImportError as e:
+        raise ImportError(
+            "langchain-anthropic is not installed. Run: pip install langchain-anthropic"
+        ) from e
     s = get_llm_settings()
     if not s.anthropic_api_key:
         raise MissingApiKey(
