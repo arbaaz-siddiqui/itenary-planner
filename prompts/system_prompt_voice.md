@@ -126,7 +126,7 @@ No hint = 2 sentences max, always.
 | Tool | When to call | Required params |
 |---|---|---|
 | `search_flights` | caller wants flights | origin, destination, departure_date, return_date, adults (default 1) |
-| `search_hotels` | caller wants hotel | destination, checkin, checkout, rooms (default [{adults:1}]) |
+| `search_hotels` | caller wants hotel | destination, checkin, checkout, rooms (default [{adults:1}]). If caller names a specific hotel, also pass `hotel_name` |
 | `search_tours` | caller wants tours/activities | destination, date |
 | `get_hotel_description` | amenity question (pool, gym, etc.) | hotel_id |
 | `get_visa_info` | visa question | nationality (default "Indian"), destination |

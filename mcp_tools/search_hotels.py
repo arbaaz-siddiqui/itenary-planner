@@ -58,6 +58,54 @@ def _hotel_ids_to_search(
     return out
 
 
+def _resolve_hotel_by_name(name_query: str, city_id: int) -> int | None:
+    """Fuzzy-match a hotel name to its ID using the live city inventory.
+    Returns the best-matching hotel_id or None if no confident match found."""
+    if not name_query:
+        return None
+    q = name_query.lower().strip()
+    discovered = discover_city_hotel_ids(city_id)
+    from booking_api import call_hotel_static_data
+    from reference_data_loader import get_hotel_ids_for_city
+    city_key = q  # rough fallback; actual city_key not needed just for curated IDs
+    # Always include curated IDs + top 200 discovery (curated first so known hotels match)
+    curated = list(get_hotel_ids_for_city("dubai"))
+    top_discovered = [hid for hid, _ in (discovered or [])[:200]]
+    seen: set[int] = set()
+    candidate_ids: list[int] = []
+    for hid in [*curated, *top_discovered]:
+        if hid not in seen:
+            seen.add(hid)
+            candidate_ids.append(hid)
+    if not candidate_ids:
+        return None
+    try:
+        raw = call_hotel_static_data(hotel_ids=candidate_ids)
+    except Exception:
+        return None
+    info = raw.get("PropertyInfo") if isinstance(raw, dict) else None
+    if not isinstance(info, list):
+        return None
+    best_id: int | None = None
+    best_score = 0
+    for h in info:
+        if not isinstance(h, dict):
+            continue
+        hid = h.get("hotelID") or h.get("HotelId") or h.get("hotelId")
+        hname = (h.get("HotelName") or h.get("hotelName") or "").lower()
+        if not hid or not hname:
+            continue
+        # Score: count how many query words appear in hotel name
+        words = [w for w in q.split() if len(w) > 2]
+        score = sum(1 for w in words if w in hname)
+        if score > best_score:
+            best_score = score
+            best_id = int(hid)
+    # Require at least 2 matching words (or 1 if query is a single word)
+    min_score = 1 if len(q.split()) <= 2 else 2
+    return best_id if best_score >= min_score else None
+
+
 def _fetch_hotel_names(hotel_ids: list[int]) -> dict[str, str]:
     """Real {hotel_id: HotelName} from GetHotelStaticDataOptimize, so discovered
     hotels show their actual name (e.g. "Mövenpick Dubai Creek") instead of the
@@ -124,8 +172,16 @@ def _impl(
     max_stars: float = 5,
     max_results: int = 5,
     amenities: list[str] | None = None,
+    hotel_name: str | None = None,
 ) -> dict[str, Any]:
     """Search hotels in the destination city. Returns options + per-night pricing.
+
+    `hotel_name`: when the customer asks for a SPECIFIC hotel by name (e.g.
+    "Howard Johnson", "Marriott", "Burj Al Arab"), pass the name here. The tool
+    will resolve it to the exact hotel ID and search ONLY that hotel — so the
+    customer gets a direct answer about availability and price for that property.
+    If the named hotel is unavailable, the response will say so clearly instead
+    of returning unrelated alternatives.
 
     `amenities`: optional list of must-have facility keywords the customer asked
     for, e.g. ["pool", "bar", "spa", "gym"]. When given, each returned hotel is
@@ -155,9 +211,24 @@ def _impl(
             }
         city_id = int(city["city_id"])
         city_key = city["name"].lower()
-        # Curated hotels + a batch of LIVE discovery IDs (real Dubai inventory),
-        # not just the two hardcoded reference hotels.
-        hotel_ids = _hotel_ids_to_search(city_id, city_key, min_stars, max_stars)
+
+        # Specific hotel requested by name — resolve to ID and search only that hotel
+        specific_hotel_id: int | None = None
+        if hotel_name and hotel_name.strip():
+            specific_hotel_id = _resolve_hotel_by_name(hotel_name.strip(), city_id)
+            if specific_hotel_id:
+                hotel_ids = [specific_hotel_id]
+            else:
+                return {
+                    "error": True,
+                    "message": f"Could not find a hotel matching '{hotel_name}' in {city['name']}. Try a different name or search without specifying a hotel.",
+                    "error_type": "HotelNotFound",
+                    "hotel_name_searched": hotel_name,
+                }
+        else:
+            # Curated hotels + a batch of LIVE discovery IDs (real Dubai inventory),
+            # not just the two hardcoded reference hotels.
+            hotel_ids = _hotel_ids_to_search(city_id, city_key, min_stars, max_stars)
         if not hotel_ids:
             return {
                 "error": True,
@@ -201,6 +272,18 @@ def _impl(
             hotel_stars=star_map,
             max_results=max_results * 2,
         )
+
+        # Specific hotel searched but not available — say so clearly
+        if specific_hotel_id and not options:
+            return {
+                "error": False,
+                "available": False,
+                "message": f"'{hotel_name}' (hotel ID {specific_hotel_id}) is not available for {check_in} to {check_out}. No rooms found for those dates. Suggest trying different dates.",
+                "hotel_name_searched": hotel_name,
+                "hotel_id": specific_hotel_id,
+                "options": [],
+                "total_results": 0,
+            }
         # Filter by stars, but NEVER drop a hotel whose rating is unknown (0):
         # the availability API omits stars, so an unknown rating must not be
         # treated as "below min" — that silently zeroed out all results before.
