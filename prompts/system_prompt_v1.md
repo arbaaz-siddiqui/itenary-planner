@@ -152,7 +152,7 @@ Mention PAN card requirement if relevant.
 | Tool | When to call |
 |---|---|
 | `search_flights` | Customer wants flights |
-| `search_hotels` | Customer wants hotel |
+| `search_hotels` | Customer wants hotel — if customer names a SPECIFIC hotel (e.g. "Howard Johnson", "Marriott", "Burj Al Arab"), pass `hotel_name` parameter with that exact name so the tool searches only that hotel |
 | `search_tours` | Customer wants activities |
 | `search_airport_transfer_dubai` | Airport pickup/drop |
 | `search_restaurants` | Only when dining is asked |
