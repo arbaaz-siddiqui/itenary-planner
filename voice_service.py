@@ -151,6 +151,14 @@ def _record_turn(session_id: str, turn: dict[str, Any]) -> None:
         _TRACES[session_id].append(turn)
 
 
+def _patch_last_turn(session_id: str, extra: dict[str, Any]) -> None:
+    """Merge extra fields into the most recent turn for this session."""
+    with _TRACE_LOCK:
+        turns = _TRACES.get(session_id)
+        if turns:
+            turns[-1].update(extra)
+
+
 def get_trace(session_id: str | None = None) -> dict[str, list[dict[str, Any]]]:
     with _TRACE_LOCK:
         if session_id:
@@ -672,8 +680,15 @@ async def vapi_chat_completions(request: Request) -> Any:
 
     # Detect intent once — used for both filler and length instruction
     intent = _detect_intent(transcript) if transcript.strip() else {}
+    # Log raw session extraction to diagnose re-search bug
+    raw_call_id = (body.get("call") or {}).get("id", "MISSING")
+    raw_meta_id = (body.get("metadata") or {}).get("callId", "MISSING")
+    log.info("voice_turn_start", session=session_id[:8], transcript=transcript[:120])
+    print(f"\n*** TURN session={session_id} call.id={raw_call_id} meta.callId={raw_meta_id}", flush=True)
+    print(f"    transcript: {transcript[:120]}", flush=True)
 
     async def gen():
+        t0 = time.perf_counter()
         yield _sse_chunk(cid, model, {"role": "assistant"}, None)
         if not transcript.strip():
             reply = "Hello! Main Nikki hoon Gujju Tours se. Kahan jaana hai aapko?"
@@ -682,43 +697,38 @@ async def vapi_chat_completions(request: Request) -> Any:
             yield "data: [DONE]\n\n"
             return
 
-        # HOW VAPI STREAMING WORKS (confirmed by testing):
-        # Each SSE chunk = one TTS utterance spoken immediately as it arrives.
-        # So: chunk1 spoken → chunk2 spoken → ... in sequence.
-        # Key rule: keep each chunk SHORT (one sentence) so TTS finishes it
-        # quickly and the next chunk plays before too much silence builds up.
-        # WRONG: bundle backchannel + filler + heartbeats into one chunk — Vapi
-        #        speaks the whole thing at once, heartbeats pile up and play after.
-        # RIGHT: send each phrase as its own chunk with a small async gap so
-        #        Vapi has time to start speaking before the next chunk arrives.
-
-        # 1. Backchannel — immediate, ~1 word, spoken in <500ms
+        # 1. Backchannel + filler — spoken immediately (~200ms after caller stops).
+        # await sleep(0) yields control back to FastAPI so it flushes this chunk
+        # to Vapi over TCP before we block the executor. Without it the event loop
+        # stays synchronous and Vapi may not receive the chunk until the first
+        # wait_for timeout fires 4s later.
         backchannel = _pick_backchannel(transcript, intent)
-        yield _sse_chunk(cid, model, {"content": backchannel}, None)
-
-        # 2. Filler — echoes back what we understood, sent 300ms later so
-        #    Vapi finishes speaking the backchannel first
-        await asyncio.sleep(0.3)
         filler = _build_smart_filler(transcript, intent)
-        yield _sse_chunk(cid, model, {"content": " " + filler}, None)
+        filler_text = backchannel + " " + filler
+        yield _sse_chunk(cid, model, {"content": filler_text}, None)
+        await asyncio.sleep(0)  # flush to Vapi NOW before executor starts
+        t_filler = round(time.perf_counter() - t0, 3)
+        log.info("voice_filler_sent", session=session_id[:8], t_s=t_filler, text=filler_text)
+        print(f"💬 FILLER [{session_id[:8]}] @{t_filler}s → {filler_text}", flush=True)
 
-        # 3. Run planner in background thread (starts immediately alongside filler)
+        # 2. Run planner in background thread
         loop = asyncio.get_event_loop()
-        cursor_before = latest_http_seq()
-        start_time = time.perf_counter()
         future = loop.run_in_executor(None, run_planner_turn, transcript, session_id)
 
-        # 4. Heartbeat every 4s while planner runs — each one is a fresh short
-        #    chunk so Vapi speaks it immediately as a new utterance.
-        #    Gap between heartbeats = 4s, giving TTS ~3s to speak + 1s silence.
+        # 3. Heartbeat every 4s while planner runs — Vapi speaks each as it arrives
         heartbeat_idx = 0
+        heartbeat_log: list[dict[str, Any]] = []
         while not future.done():
             try:
                 await asyncio.wait_for(asyncio.shield(future), timeout=4.0)
-                break  # future completed within 4s window
             except asyncio.TimeoutError:
                 phrase = _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]
                 yield _sse_chunk(cid, model, {"content": " " + phrase}, None)
+                await asyncio.sleep(0)  # flush each heartbeat immediately
+                t_hb = round(time.perf_counter() - t0, 3)
+                heartbeat_log.append({"text": phrase, "t_s": t_hb})
+                log.info("voice_heartbeat_sent", session=session_id[:8], t_s=t_hb, idx=heartbeat_idx, text=phrase)
+                print(f"💓 HEARTBEAT [{session_id[:8]}] @{t_hb}s → {phrase}", flush=True)
                 heartbeat_idx += 1
 
         try:
@@ -726,7 +736,23 @@ async def vapi_chat_completions(request: Request) -> Any:
         except Exception:
             final_reply = "Sorry, kuch issue aa gaya. Dobara try karein?"
 
-        # 5. Real answer — comes in as its own chunk, Vapi speaks after last heartbeat
+        t_results = round(time.perf_counter() - t0, 3)
+        log.info("voice_results_sent", session=session_id[:8], t_s=t_results, heartbeats=heartbeat_idx, reply=final_reply[:80])
+        print(f"✅ RESULTS [{session_id[:8]}] @{t_results}s ({heartbeat_idx} heartbeats) → {final_reply[:80]}", flush=True)
+
+        # Patch timing into the trace entry NOW — before yielding [DONE].
+        # Code after the last yield in an async generator never executes (the
+        # generator is exhausted and GC'd), so the patch must happen here.
+        _patch_last_turn(session_id, {
+            "filler": filler_text,
+            "t_filler_s": t_filler,
+            "heartbeats": heartbeat_log,
+            "t_results_s": t_results,
+        })
+
+        # 4. Real answer
+        if heartbeat_idx > 0:
+            final_reply = "Results aa gaye. " + final_reply
         yield _sse_chunk(cid, model, {"content": " " + final_reply}, None)
         yield _sse_chunk(cid, model, {}, "stop")
         yield "data: [DONE]\n\n"

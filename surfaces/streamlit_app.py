@@ -724,8 +724,30 @@ def _render_voice_tab() -> None:
             if len(turns) > 5:
                 st.caption(f"Showing last 5 of {len(turns)} turns.")
             for i, turn in reversed(visible_turns):
-                st.markdown(f"**Turn {i}**  ·  _{turn.get('latency_s')}s_")
+                total_s = turn.get('latency_s', '?')
+                t_filler = turn.get('t_filler_s')
+                t_results = turn.get('t_results_s')
+                timing_str = f"total {total_s}s"
+                if t_filler is not None:
+                    timing_str += f"  ·  filler @{t_filler}s"
+                if t_results is not None:
+                    timing_str += f"  ·  results @{t_results}s"
+                st.markdown(f"**Turn {i}**  ·  _{timing_str}_")
                 st.markdown(f"🧑 **Caller:** {turn.get('user', '')}")
+
+                # Filler / backchannel line
+                filler_text = turn.get('filler')
+                if filler_text:
+                    st.markdown(f"💬 **Filler sent** `@{t_filler}s`: _{filler_text}_")
+
+                # Heartbeats
+                heartbeats = turn.get('heartbeats') or []
+                for hb in heartbeats:
+                    st.markdown(f"💓 **Heartbeat** `@{hb.get('t_s')}s`: _{hb.get('text')}_")
+
+                if t_results is not None:
+                    st.markdown(f"✅ **Results spoken** `@{t_results}s`")
+
                 st.markdown(f"🤖 **Agent:** {turn.get('agent', '')}")
                 tools = turn.get("tools") or []
                 if tools:

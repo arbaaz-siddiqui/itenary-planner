@@ -214,30 +214,36 @@ def build_assistant_config() -> dict:
         # ── Ears (STT) ──────────────────────────────────────────────────────
         "transcriber": _stt_config(),
 
-        # ── Voice (TTS) ─────────────────────────────────────────────────────
-        "voice": _tts_config(),
+        # ── Voice (TTS) + chunk plan — flush SSE chunks to TTS immediately ───
+        # chunkPlan.minCharacters=1: Vapi flushes to TTS the instant ANY chunk
+        # lands, not after buffering to the default ~30 chars. This is what makes
+        # filler phrases play immediately instead of all at the end.
+        "voice": {
+            **_tts_config(),
+            "chunkPlan": {
+                "enabled": True,
+                "minCharacters": 1,
+                "punctuationBoundaries": [".", "!", "?", ","],
+                "formatPlan": {
+                    "enabled": False,
+                },
+            },
+        },
 
         # ── Conversation behaviour ──────────────────────────────────────────
-        # How long Vapi waits after the LLM starts responding before speaking.
-        # 0 = speak filler sentence the instant the first SSE chunk arrives.
         "responseDelaySeconds": 0,
-
-        # How long after STT finishes before we send to LLM.
-        # 0.1s gives the caller a chance to finish their sentence.
         "llmRequestDelaySeconds": 0.1,
-
-        # Caller can interrupt the agent mid-sentence — natural conversation.
         "interruptionsEnabled": True,
-
-        # Allow interrupting even the first message (no forced intro monologue).
         "firstMessageInterruptionsEnabled": True,
-
-        # Background noise removal (call centre / road noise).
         "backgroundDenoisingEnabled": True,
-
-        # Natural backchannels — Vapi inserts "mm-hmm", "I see", "got it" etc.
-        # while the caller is speaking, making it feel like a real human is listening.
         "backchannelingEnabled": True,
+
+        # ── Start speaking plan — no delay, no smart buffering ──────────────
+        "startSpeakingPlan": {
+            "waitSeconds": 0,
+            "smartEndpointingEnabled": False,
+        },
+
 
         # ── Call lifecycle ──────────────────────────────────────────────────
         "firstMessage": (
@@ -250,8 +256,10 @@ def build_assistant_config() -> dict:
             "Lovely speaking with you! "
         ),
 
-        # Silence for 30s → end call gracefully
-        "silenceTimeoutSeconds": 30,
+        # Silence for 60s → end call gracefully.
+        # 30s was too short — if the agent is speaking a heartbeat and the caller
+        # is quiet, Vapi was counting that silence and cutting the call early.
+        "silenceTimeoutSeconds": 60,
         "maxDurationSeconds": 2700,   # 45 min hard cap
 
         # What to say if the call hits the time limit
@@ -311,7 +319,7 @@ def create_assistant() -> dict:
     """Create a new Vapi assistant. Prints the new assistant ID."""
     config = build_assistant_config()
     result = _vapi_request("POST", "/assistant", config)
-    print(f"✅ Assistant created: {result['id']}")
+    print(f"[OK] Assistant created: {result['id']}")
     print(f"   Add to .env:  VAPI_ASSISTANT_ID={result['id']}")
     return result
 
@@ -323,7 +331,7 @@ def update_assistant(assistant_id: str | None = None) -> dict:
         raise ValueError("No VAPI_ASSISTANT_ID set — run create_assistant() first.")
     config = build_assistant_config()
     result = _vapi_request("PATCH", f"/assistant/{aid}", config)
-    print(f"✅ Assistant updated: {aid}")
+    print(f"[OK] Assistant updated: {aid}")
     return result
 
 
