@@ -44,6 +44,22 @@ def hotel_static_headers() -> dict[str, str]:
     }
 
 
+def transfer_headers() -> dict[str, str]:
+    """Headers for transfer endpoints (TransferList / TransferDetail).
+
+    Transfer inventory is bound to the GT-018 account, so these carry the
+    dedicated transfer token (falls back to the main token when unset).
+    """
+    s = get_booking_api_settings()
+    return {
+        "Authorization": f"Bearer {s.transfer_bearer()}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+        "X-Trace-Id": _new_trace_id(),
+    }
+
+
 def flight_search_headers() -> dict[str, str]:
     """Headers for /api/Flight/search."""
     s = get_booking_api_settings()

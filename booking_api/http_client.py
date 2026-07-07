@@ -11,8 +11,14 @@ import logging
 import threading
 import time
 from collections import deque
+from datetime import datetime
 from functools import lru_cache
 from typing import Any
+
+
+def _now() -> str:
+    """Wall-clock timestamp HH:MM:SS.mmm for API call tracing."""
+    return datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
 import requests
 from requests.exceptions import RequestException, Timeout
@@ -116,6 +122,12 @@ class BookingApiClient:
         self.timeout_secs = timeout_secs
         self.max_retries = max_retries
         self.session = requests.Session()
+        # Flight search fans out ~40 concurrent provider calls; the default urllib3
+        # pool (maxsize=10) thrashes ("Connection pool is full, discarding
+        # connection"). Size the pool for the fan-out so connections are reused.
+        adapter = requests.adapters.HTTPAdapter(pool_connections=50, pool_maxsize=50)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path if path.startswith('/') else '/' + path}"
@@ -139,7 +151,7 @@ class BookingApiClient:
             try:
                 # Plainly visible in the terminal so you can TRACE exactly which
                 # booking API the agent hit on each turn (no assumptions).
-                logger.info("[BOOKING-API] --> %s %s (attempt %d)", method, path, attempt)
+                logger.info("[BOOKING-API] [%s] --> %s %s (attempt %d)", _now(), method, path, attempt)
                 response = self.session.request(
                     method=method,
                     url=url,
@@ -196,7 +208,7 @@ class BookingApiClient:
                 response_body=_resp_body,
             )
             # Trace the result so you can confirm the call really happened + succeeded.
-            logger.info("[BOOKING-API] <-- %s %s [%d ms]", sc, path, int(elapsed_ms))
+            logger.info("[BOOKING-API] [%s] <-- %s %s [%d ms]", _now(), sc, path, int(elapsed_ms))
             if sc == 401:
                 raise BookingApiUnauthorized(
                     f"401 Unauthorized for {path}",

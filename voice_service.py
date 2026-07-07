@@ -488,7 +488,7 @@ def _length_instruction(intent: dict[str, bool]) -> str:
         return " [DETAIL MODE: give more info this turn — up to 4 sentences OK]"
     if intent.get("confused"):
         return " [CONFUSED CALLER: simplify — one very short sentence only]"
-    return ""  # default: voice_addendum 2-sentence rule applies
+    return ""  # default: system_prompt_voice.md 2-sentence rule applies
 
 
 # =============================================================================

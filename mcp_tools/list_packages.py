@@ -56,7 +56,7 @@ def _impl(
 
         list_raw = call_list_packages(
             country_id=int(city["country_id"]),
-            city_id=int(city.get("city_id") or 0),
+            city_id=0,  # API requires cityID=0 (country-level, not city-specific)
             check_in=check_in,
             check_out=check_out,
             nights=nights,

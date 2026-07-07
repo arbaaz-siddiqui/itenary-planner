@@ -1,6 +1,8 @@
 """booking_api — All HTTP interactions with the Technoheaven booking API."""
 
 from booking_api.endpoints import (
+    call_entity_search,
+    call_visa_countries,
     call_currency_roe,
     call_flight_details,
     call_flight_search,
@@ -57,6 +59,8 @@ __all__ = [
     "call_transfer_details",
     "call_transfer_search",
     "call_visa_info",
+    "call_entity_search",
+    "call_visa_countries",
     "discover_city_hotel_ids",
     "get_client",
 ]

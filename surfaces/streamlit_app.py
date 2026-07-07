@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from datetime import datetime
 from typing import Any
 
 import streamlit as st
@@ -182,18 +183,55 @@ def _render_calendar(days: list[dict[str, Any]]) -> None:
         components.html(render_calendar_html(days), height=cal_height, scrolling=False)
 
 
+def _render_timestamp(ts: str | None) -> None:
+    """Render a small, light-grey timestamp above a chat message."""
+    if not ts:
+        return
+    st.markdown(
+        f"<div style='font-size:0.72rem;color:#9a9a9a;margin-bottom:2px;'>{ts}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _now_stamp() -> str:
+    """Human-friendly timestamp for chat messages, e.g. '7 Aug, 12:27 PM'."""
+    return datetime.now().strftime("%-d %b, %-I:%M %p") if _supports_dash() else datetime.now().strftime("%d %b, %I:%M %p")
+
+
+def _supports_dash() -> bool:
+    """strftime %-d works on Unix, not Windows. Detect once."""
+    try:
+        datetime.now().strftime("%-d")
+        return True
+    except ValueError:
+        return False
+
+
 def _render_hotel(o: dict[str, Any]) -> None:
     with st.container(border=True):
         name = o.get("hotel_name") or "Hotel"
         stars = int(o.get("stars", 0) or 0)
-        # Supplier API has no hotel photos — show an elegant gradient tile (never
-        # a fake photo), keeping the layout image-rich and consistent with tours.
         img_col, body_col = st.columns([1, 2])
         with img_col:
-            st.markdown(
-                placeholder_tile_html(name, kind="hotel", sub="⭐" * stars if stars else ""),
-                unsafe_allow_html=True,
-            )
+            # Use real hotel image if available, else gradient placeholder
+            img_urls = o.get("image_urls") or []
+            first_img = img_urls[0] if img_urls else None
+            if first_img:
+                try:
+                    # Prepend base URL if relative path
+                    if not first_img.startswith("http"):
+                        first_img = "https://stagingapi.gujjutours.com/" + first_img.lstrip("/")
+                    st.image(first_img, width=220)
+                except Exception:
+                    st.markdown(
+                        placeholder_tile_html(name, kind="hotel", sub="⭐" * stars if stars else ""),
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.markdown(
+                    placeholder_tile_html(name, kind="hotel", sub="⭐" * stars if stars else ""),
+                    unsafe_allow_html=True,
+                )
         with body_col:
             c1, c2 = st.columns([3, 1])
             with c1:
@@ -265,6 +303,15 @@ def _render_transfer(o: dict[str, Any]) -> None:
 
 def _render_restaurant(o: dict[str, Any]) -> None:
     with st.container(border=True):
+        # Show image if available
+        img_url = o.get("image_url") or (o.get("image_urls") or [None])[0]
+        if img_url:
+            if not img_url.startswith("http"):
+                img_url = "https://stagingapi.gujjutours.com/" + img_url.lstrip("/")
+            try:
+                st.image(img_url, width=300)
+            except Exception:
+                pass
         c1, c2 = st.columns([3, 1])
         with c1:
             st.markdown(f"**🍽️ {o.get('name', 'Restaurant')}**")
@@ -894,11 +941,15 @@ def _summarize_tc(tc: dict[str, Any]) -> str:
 
 
 def _process_message(user_message: str) -> None:
-    st.session_state.chat_history.append({"role": "user", "content": user_message})
+    user_ts = _now_stamp()
+    st.session_state.chat_history.append(
+        {"role": "user", "content": user_message, "ts": user_ts}
+    )
     st.session_state.turn_number += 1
     turn = st.session_state.turn_number
 
     with st.chat_message("user"):
+        _render_timestamp(user_ts)
         st.markdown(user_message)
 
     # Mark the HTTP cursor BEFORE the turn so we can collect exactly the supplier
@@ -907,6 +958,8 @@ def _process_message(user_message: str) -> None:
     result = StreamResult()
 
     with st.chat_message("assistant"):
+        assistant_ts = _now_stamp()
+        _render_timestamp(assistant_ts)
         # Show a live "thinking / searching" status during the silent gap while
         # the agent reasons + calls booking APIs (before any text streams). As
         # tools fire, reflect which one in the status so the wait feels alive.
@@ -1013,6 +1066,7 @@ def _process_message(user_message: str) -> None:
                 "content": assistant_text,
                 "cards": cards_payload,
                 "schedule": schedule_days or None,
+                "ts": assistant_ts,
             }
         )
 
@@ -1070,6 +1124,7 @@ with chat_tab:
     rich_start = max(0, len(history) - RICH_WINDOW)
     for i, entry in enumerate(history):
         with st.chat_message(entry.get("role", "assistant")):
+            _render_timestamp(entry.get("ts"))
             st.markdown(entry.get("content", ""))
             if i < rich_start:
                 continue  # skip heavy card rendering for old messages

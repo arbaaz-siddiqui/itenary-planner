@@ -70,8 +70,8 @@ _PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 
 def _load_voice_prompt() -> str:
-    p = _PROMPTS_DIR / "system_prompt_voice.md"
-    return p.read_text(encoding="utf-8") if p.exists() else ""
+    from agent import load_system_prompt
+    return load_system_prompt(surface="voice")
 
 
 # =============================================================================

@@ -53,13 +53,24 @@ class BookingApiSettings(BaseSettings):
         default="https://stagingb2c.gujjutours.com", validation_alias="BOOKING_B2C_BASE_URL"
     )
     token: str = Field(default="", validation_alias="BOOKING_TOKEN")
+    # Flight search/details `Target` field: "test" (staging fares) or "production"
+    # (live fares). The supplier returns different inventory per target.
+    flight_target: str = Field(default="test", validation_alias="BOOKING_FLIGHT_TARGET")
     # Hotel static-content endpoints use a separate Hotels-only account token.
     # Falls back to the main token when unset so a single-token setup still works.
     hotel_static_token: str = Field(default="", validation_alias="BOOKING_HOTEL_STATIC_TOKEN")
+    # Transfer inventory (TransferList/TransferDetail) is bound to the GT-018
+    # account — the main GT-021 token returns statusCode 404/empty for transfers.
+    # Falls back to the main token when unset.
+    transfer_token: str = Field(default="", validation_alias="BOOKING_TRANSFER_TOKEN")
 
     def hotel_static_bearer(self) -> str:
         """Token for hotel static-content endpoints (falls back to main token)."""
         return self.hotel_static_token or self.token
+
+    def transfer_bearer(self) -> str:
+        """Token for transfer endpoints (falls back to main token)."""
+        return self.transfer_token or self.token
 
     @staticmethod
     def _token_service_types(token: str) -> list[str]:
@@ -81,17 +92,15 @@ class BookingApiSettings(BaseSettings):
             return []
 
     def main_token_missing_services(self) -> list[str]:
-        """Services the configured BOOKING_TOKEN is MISSING vs. what the app needs.
-
-        The main token must grant Hotels/Flight/etc. An Activities-only token
-        silently returns null for hotels — this lets startup warn loudly instead.
-        Empty list = all good (or token unset/undecodable, which we don't warn on).
+        """Historically warned when the token's `serviceType` JWT claim didn't list
+        every service. DISABLED: the current GT-018 (Manoj) token lists only
+        ["Activities"] in that claim yet works for flights, hotels, transfers,
+        restaurants, and visa alike — confirmed by live calls and the client. The
+        supplier does NOT enforce the claim, so the check was a false alarm that
+        also recommended the wrong token (GT-021, which returns empty for
+        transfers). Always returns [] now; kept for API compatibility.
         """
-        granted = set(self._token_service_types(self.token))
-        if not granted:
-            return []  # unset or undecodable — separate concern, don't false-alarm
-        required = {"Hotels", "Flight", "Packages", "Restaurant", "Transfer", "Visa"}
-        return sorted(required - granted)
+        return []
     tenant_id: str = Field(
         default="A29CD3EE-D050-A34A-3A53-3A20E4FAF5F3",
         validation_alias="BOOKING_TENANT_ID",
