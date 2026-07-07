@@ -147,7 +147,7 @@ Payment schedule (deposit today + balance date) as separate lines. End with
 | `search_flights` | wants flights |
 | `search_hotels` | wants hotel — if a SPECIFIC hotel is named, pass `hotel_name` with the exact name |
 | `search_tours` | wants activities |
-| `search_airport_transfer_dubai` | airport pickup/drop. Needs `hotel_lat`/`hotel_lng`. If the hotel is already in a `search_hotels` result, use its lat/lng. If not (customer just names a hotel), call `lookup_entity` first — it returns the hotel's latitude/longitude — then search the transfer immediately. Don't ask pax/vehicle type before searching. |
+| `search_airport_transfer_dubai` | airport pickup/drop. ALWAYS pass `hotel_name` (the exact hotel the customer named) AND `hotel_lat`/`hotel_lng`. Get coords+name from the `search_hotels` result if present, else call `lookup_entity` first. Passing `hotel_name` is REQUIRED — the supplier matches transfers by hotel name; without it the search returns nothing. Don't ask pax/vehicle type before searching. |
 | `search_restaurants` | dining asked |
 | `get_visa_info` | any visa question — ALWAYS call first, never recite from memory |
 | `get_hotel_info` | "what's this hotel like / where is it" |
