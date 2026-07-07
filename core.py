@@ -489,6 +489,10 @@ class HotelOption(BaseModel):
     currency_original: str = "INR"
     start_price_original: float = 0.0
     stars: float = 0.0
+    latitude: float | None = None
+    longitude: float | None = None
+    full_address: str = ""
+    image_urls: list[str] = Field(default_factory=list)
     rooms: list[HotelRoom] = Field(default_factory=list)
     cheapest_room_type: str = ""
     cheapest_board: str = ""
@@ -586,6 +590,9 @@ class RestaurantOption(BaseModel):
     rating: float = 0.0
     description: str = ""
     image_url: str = ""
+    image_urls: list[str] = Field(default_factory=list)
+    latitude: float | None = None
+    longitude: float | None = None
 
     @property
     def price_display(self) -> str:

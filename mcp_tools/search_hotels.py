@@ -9,6 +9,7 @@ from langchain_core.tools import tool
 
 from booking_api import (
     call_hotel_availability,
+    call_hotel_property_info,
     call_hotel_static_data,
     discover_city_hotel_ids,
 )
@@ -58,30 +59,144 @@ def _hotel_ids_to_search(
     return out
 
 
-def _fetch_hotel_names(hotel_ids: list[int]) -> dict[str, str]:
-    """Real {hotel_id: HotelName} from GetHotelStaticDataOptimize, so discovered
-    hotels show their actual name (e.g. "Mövenpick Dubai Creek") instead of the
-    "Hotel <id>" fallback. Best-effort: returns {} on any failure (the parser
-    then keeps the "Hotel <id>" placeholder rather than erroring)."""
+def _resolve_hotel_by_name(name_query: str, city_id: int) -> int | None:
+    """Resolve a hotel name to its ID using the fast public autocomplete API.
+
+    Primary path: /api/core/v1/search/hotels — a single no-auth GET that returns
+    the matching hotel's location_id in ~200ms (vs the old approach that fetched
+    static data for 200 hotels just to fuzzy-match names).
+
+    Falls back to the slow static-data word-match only if autocomplete returns nothing.
+    """
+    if not name_query:
+        return None
+
+    # Fast path — public autocomplete (no auth, ~200ms).
+    # Always search "name + city name" so the autocomplete ranks local results
+    # first and avoids matching same-brand hotels in other countries
+    # (e.g. "Howard Johnson Bakersfield" instead of Dubai).
+    from booking_api import call_entity_search
+    from reference_data_loader import resolve_city as _rc
+    _city_name = ""
+    try:
+        for _name in ("Dubai", "Abu Dhabi", "Sharjah"):
+            _c = _rc(_name)
+            if _c and int(_c.get("city_id", 0)) == city_id:
+                _city_name = _name
+                break
+    except Exception:
+        pass
+    bare = name_query.strip()
+    queries = [f"{bare} {_city_name}".strip(), bare] if _city_name else [bare]
+    try:
+        for q in queries:
+            raw = call_entity_search(service="hotels", query=q, size=10)
+            items = raw.get("data") or []
+            hotel_items = [
+                i for i in items
+                if isinstance(i, dict)
+                and i.get("location_id", 0) > 0
+                and i.get("type", "").lower() not in ("city", "high_level_region", "neighborhood")
+            ]
+            city_match = [i for i in hotel_items if i.get("cityId") == city_id]
+            if city_match:
+                return int(city_match[0]["location_id"])
+    except Exception:
+        pass
+
+    # Slow fallback — fuzzy word-match via static data bulk fetch
+    q = name_query.lower().strip()
+    discovered = discover_city_hotel_ids(city_id)
+    from booking_api import call_hotel_static_data
+    from reference_data_loader import get_hotel_ids_for_city
+    curated = list(get_hotel_ids_for_city("dubai"))
+    top_discovered = [hid for hid, _ in (discovered or [])[:200]]
+    seen: set[int] = set()
+    candidate_ids: list[int] = []
+    for hid in [*curated, *top_discovered]:
+        if hid not in seen:
+            seen.add(hid)
+            candidate_ids.append(hid)
+    if not candidate_ids:
+        return None
+    try:
+        raw = call_hotel_static_data(hotel_ids=candidate_ids)
+    except Exception:
+        return None
+    from parsers import parse_hotel_static_data_response
+    hotels = parse_hotel_static_data_response(raw)
+    best_id: int | None = None
+    best_score = 0
+    for h in hotels:
+        hid = h.get("hotel_id")
+        hname = (h.get("hotel_name") or "").lower()
+        if not hid or not hname:
+            continue
+        words = [w for w in q.split() if len(w) > 2]
+        score = sum(1 for w in words if w in hname)
+        if score > best_score:
+            best_score = score
+            best_id = int(hid)
+    min_score = 1 if len(q.split()) <= 2 else 2
+    return best_id if best_score >= min_score else None
+
+
+def _fetch_hotel_static(hotel_ids: list[int]) -> dict[str, dict]:
+    """{hotel_id_str: static_record} from GetHotelStaticDataOptimize.
+    Used to populate names, lat/lng, address, images on search results.
+    Best-effort: returns {} on any failure."""
     if not hotel_ids:
         return {}
     try:
         raw = call_hotel_static_data(hotel_ids=hotel_ids)
     except Exception as e:
-        logger.warning("hotel name enrichment failed: %s", e)
+        logger.warning("hotel static enrichment failed: %s", e)
         return {}
-    info = raw.get("PropertyInfo") if isinstance(raw, dict) else None
-    if not isinstance(info, list):
+    from parsers import parse_hotel_static_data_response
+    hotels = parse_hotel_static_data_response(raw)
+    return {str(h["hotel_id"]): h for h in hotels if h.get("hotel_id")}
+
+
+def _fetch_hotel_names(hotel_ids: list[int]) -> dict[str, str]:
+    """Real {hotel_id: HotelName} — extracted from static data."""
+    static = _fetch_hotel_static(hotel_ids)
+    return {
+        hid: rec["hotel_name"]
+        for hid, rec in static.items()
+        if rec.get("hotel_name") and not rec["hotel_name"].startswith("Hotel ")
+    }
+
+
+def _fetch_hotel_coords(hotel_ids: list[int]) -> dict[str, dict]:
+    """{hotel_id_str: {lat, lng, address}} from the address endpoint.
+
+    Uses gethotelstaticdatalistsuboptimize_v1_Address which returns:
+        {hotelID, hotel_address, lat, long}
+    This is the definitive source of hotel coordinates for transfer searches.
+    """
+    if not hotel_ids:
         return {}
-    names: dict[str, str] = {}
-    for h in info:
-        if not isinstance(h, dict):
+    try:
+        raw = call_hotel_property_info(hotel_ids=hotel_ids)
+    except Exception as e:
+        logger.warning("hotel coords fetch failed: %s", e)
+        return {}
+    from parsers import parse_hotel_static_data_response
+    hotels = parse_hotel_static_data_response(raw)
+    out: dict[str, dict] = {}
+    for h in hotels:
+        hid = h.get("hotel_id")
+        if not hid:
             continue
-        hid = h.get("hotelID") or h.get("HotelId") or h.get("hotelId")
-        name = h.get("HotelName") or h.get("hotelName")
-        if hid is not None and name:
-            names[str(hid)] = str(name).strip()
-    return names
+        lat = h.get("latitude")
+        lng = h.get("longitude")
+        if lat is not None and lng is not None:
+            out[str(hid)] = {
+                "latitude": lat,
+                "longitude": lng,
+                "full_address": h.get("full_address") or "",
+            }
+    return out
 
 
 def _fetch_amenities_text(hotel_ids: list[int]) -> dict[str, str]:
@@ -105,7 +220,14 @@ def _fetch_amenities_text(hotel_ids: list[int]) -> dict[str, str]:
         except Exception as e:
             logger.warning("amenity enrichment failed for %s: %s", hid, e)
             continue
-        text = " ".join(str(s.get("description", "")) for s in sections).strip()
+        parts = []
+        for s in sections:
+            if s.get("description"):
+                parts.append(str(s["description"]))
+            for sec in s.get("sections") or []:
+                if sec.get("text"):
+                    parts.append(str(sec["text"]))
+        text = " ".join(parts).strip()
         if text:
             out[str(hid)] = text
     return out
@@ -124,8 +246,16 @@ def _impl(
     max_stars: float = 5,
     max_results: int = 5,
     amenities: list[str] | None = None,
+    hotel_name: str | None = None,
 ) -> dict[str, Any]:
     """Search hotels in the destination city. Returns options + per-night pricing.
+
+    `hotel_name`: when the customer asks for a SPECIFIC hotel by name (e.g.
+    "Howard Johnson", "Marriott", "Burj Al Arab"), pass the name here. The tool
+    will resolve it to the exact hotel ID and search ONLY that hotel — so the
+    customer gets a direct answer about availability and price for that property.
+    If the named hotel is unavailable, the response will say so clearly instead
+    of returning unrelated alternatives.
 
     `amenities`: optional list of must-have facility keywords the customer asked
     for, e.g. ["pool", "bar", "spa", "gym"]. When given, each returned hotel is
@@ -155,9 +285,24 @@ def _impl(
             }
         city_id = int(city["city_id"])
         city_key = city["name"].lower()
-        # Curated hotels + a batch of LIVE discovery IDs (real Dubai inventory),
-        # not just the two hardcoded reference hotels.
-        hotel_ids = _hotel_ids_to_search(city_id, city_key, min_stars, max_stars)
+
+        # Specific hotel requested by name — resolve to ID and search only that hotel
+        specific_hotel_id: int | None = None
+        if hotel_name and hotel_name.strip():
+            specific_hotel_id = _resolve_hotel_by_name(hotel_name.strip(), city_id)
+            if specific_hotel_id:
+                hotel_ids = [specific_hotel_id]
+            else:
+                return {
+                    "error": True,
+                    "message": f"Could not find a hotel matching '{hotel_name}' in {city['name']}. Try a different name or search without specifying a hotel.",
+                    "error_type": "HotelNotFound",
+                    "hotel_name_searched": hotel_name,
+                }
+        else:
+            # Curated hotels + a batch of LIVE discovery IDs (real Dubai inventory),
+            # not just the two hardcoded reference hotels.
+            hotel_ids = _hotel_ids_to_search(city_id, city_key, min_stars, max_stars)
         if not hotel_ids:
             return {
                 "error": True,
@@ -188,10 +333,13 @@ def _impl(
             str(hid): st for hid, st in discover_city_hotel_ids(city_id) if st > 0
         }
         star_map.update(get_hotel_stars(city_key))  # curated wins on overlap
-        # Names: real supplier names for the searched IDs (so discovered hotels
-        # show "Mövenpick Dubai Creek", not "Hotel 217"), with the curated file
-        # overriding for the hand-named hotels.
-        name_map: dict[str, str] = _fetch_hotel_names(hotel_ids)
+        # Static data: names, lat/lng, addresses, images for all searched IDs.
+        static_map = _fetch_hotel_static(hotel_ids)
+        name_map: dict[str, str] = {
+            hid: rec["hotel_name"]
+            for hid, rec in static_map.items()
+            if rec.get("hotel_name") and not rec["hotel_name"].startswith("Hotel ")
+        }
         name_map.update(get_hotel_names(city_key))
         options = parse_hotel_response(
             raw,
@@ -201,6 +349,18 @@ def _impl(
             hotel_stars=star_map,
             max_results=max_results * 2,
         )
+
+        # Specific hotel searched but not available — say so clearly
+        if specific_hotel_id and not options:
+            return {
+                "error": False,
+                "available": False,
+                "message": f"'{hotel_name}' (hotel ID {specific_hotel_id}) is not available for {check_in} to {check_out}. No rooms found for those dates. Suggest trying different dates.",
+                "hotel_name_searched": hotel_name,
+                "hotel_id": specific_hotel_id,
+                "options": [],
+                "total_results": 0,
+            }
         # Filter by stars, but NEVER drop a hotel whose rating is unknown (0):
         # the availability API omits stars, so an unknown rating must not be
         # treated as "below min" — that silently zeroed out all results before.
@@ -229,6 +389,19 @@ def _impl(
             options = filtered
 
         option_dicts = [o.model_dump() for o in options]
+
+        # Coordinate enrichment: fetch lat/lng/address from the address endpoint
+        # so the agent can pass hotel_lat/hotel_lng directly to search_airport_transfer_dubai
+        # without needing a separate lookup_entity call.
+        result_ids = [int(o["hotel_id"]) for o in option_dicts]
+        coords_map = _fetch_hotel_coords(result_ids)
+        for o in option_dicts:
+            coords = coords_map.get(str(o.get("hotel_id")))
+            if coords:
+                o["latitude"] = coords["latitude"]
+                o["longitude"] = coords["longitude"]
+                if not o.get("full_address") and coords.get("full_address"):
+                    o["full_address"] = coords["full_address"]
 
         # Amenity enrichment: if the customer asked for specific facilities
         # (pool/bar/spa/...), fetch the REAL supplier descriptions for these

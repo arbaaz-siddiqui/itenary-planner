@@ -44,6 +44,7 @@ from booking_api.headers import (
     flight_list_headers,
     flight_search_headers,
     hotel_static_headers,
+    transfer_headers,
 )
 from booking_api.http_client import get_b2c_client, get_client
 from core import (
@@ -94,6 +95,7 @@ HOTEL_STATIC_LIST_ADDRESS_PATH = "/api/xconnect/gethotelstaticdatalistsuboptimiz
 HOTEL_DESCRIPTIONS_PATH = "/api/xconnect/GetPropertyDescriptions"
 HOTEL_GUEST_REVIEW_PATH = "/api/xconnect/GetHotelGuestReview"
 CURRENCY_ROE_PATH_TPL = "/api/Currency/ROE/{code}"
+ENTITY_SEARCH_BASE = "https://stagingapi.gujjutours.com/api/core/v1/search"
 
 
 # =============================================================================
@@ -110,8 +112,14 @@ def call_flight_search(
     child_ages: list[int] | None = None,
     cabin: str = "Y",
     max_stops: int = 1,
+    airline_code: str = "",
 ) -> dict[str, Any]:
-    """Search flights. Payload mirrors client's FlightSearch sample exactly."""
+    """Search flights. Payload mirrors client's FlightSearch sample exactly.
+
+    Args:
+        airline_code: IATA code to filter by a single airline provider (e.g. "EK").
+                      Empty string = all providers (default).
+    """
     od_infos: list[dict[str, Any]] = [
         {
             "DepartureDateTime": to_dd_mm_yyyy(departure_date),
@@ -134,6 +142,8 @@ def call_flight_search(
     if children > 0:
         pax_quantities.append({"Code": "CHD", "Quantity": children})
 
+    from settings import get_booking_api_settings
+
     payload: dict[str, Any] = {
         "OriginDestinationInformations": od_infos,
         "TravelPreferences": {
@@ -145,14 +155,14 @@ def call_flight_search(
         "PassengerTypeQuantities": pax_quantities,
         "childAge": ",".join(str(a) for a in (child_ages or [])),
         "infantAge": "",
-        "Target": "test",
+        "Target": get_booking_api_settings().flight_target,
         "agentID": 0,
         "rateCategoryId": 0,
         "supplierTime": "6",
         "supplierId": 0,
         "suppliers": [],
         "isMobile": 0,
-        "AirlineName": "",
+        "AirlineName": airline_code.upper() if airline_code else "",
     }
     try:
         return get_client().post(FLIGHT_SEARCH_PATH, json=payload, headers=flight_search_headers())
@@ -169,16 +179,22 @@ def call_flight_details(
     fare_source_code: str,
     itinerary_source_code: str | None = None,
     conversation_id: str = "",
-    target: str = "test",
+    target: str | None = None,
     guest_user_id: int = 0,
 ) -> dict[str, Any]:
-    """Get full details for a specific flight option (from search result)."""
+    """Get full details for a specific flight option (from search result).
+
+    `target` defaults to the BOOKING_FLIGHT_TARGET setting (test/production);
+    must match the target used for the search that produced fare_source_code.
+    """
+    from settings import get_booking_api_settings
+
     payload: dict[str, Any] = {
         "serviceName": "flightdetails",
         "itinerarySourceCode": itinerary_source_code or fare_source_code,
         "fareSourceCode": fare_source_code,
         "conversationId": conversation_id,
-        "target": target,
+        "target": target or get_booking_api_settings().flight_target,
         "guestUserId": guest_user_id,
     }
     try:
@@ -508,10 +524,10 @@ def call_tour_option_details(
 # =============================================================================
 # Transfers (list + details)
 # =============================================================================
-# fromType / toType single-letter codes per client's Postman:
-#   A = Airport, O = Other (hotel/general location). Use these.
+# fromType / toType single-letter codes from Postman collection:
+#   A = Airport, H = Hotel/Property.
 TRANSFER_TYPE_AIRPORT = "A"
-TRANSFER_TYPE_OTHER = "O"
+TRANSFER_TYPE_OTHER = "P"  # "P" = Property/hotel destination (confirmed from client cURL)
 
 
 def _transfer_payload(
@@ -534,15 +550,13 @@ def _transfer_payload(
     adults: int = 1,
     unique_key: str | None = None,
 ) -> dict[str, Any]:
-    # Payload mirrors the N8N-Technoheven V1 collection's TransferList/Detail
-    # bodies EXACTLY: the supplier expects CAPITALIZED DepartureDate/ReturnDate/
-    # IsRoundTrip and the from/to location-name fields. The earlier lowercase
-    # keys (departureDate/returnDate) + agtMkp/agtMkpType were why transfer
-    # search failed; the new collection dropped agtMkp* and capitalized the dates.
-    #
-    # The API still rejects an empty ReturnDate even for one-way searches, so
-    # fall back to the departure date; IsRoundTrip=0 keeps it one-way.
-    effective_return_date = return_date or departure_date
+    # Payload matches the client's working cURL exactly:
+    # - DepartureDate is CAPITALIZED (the supplier reads this casing)
+    # - toType="P" (Property/hotel destination)
+    # - toPlaceId = real Google Place ID from lookup_entity/hotel search
+    # - fromLocationName/toLocationName + pickupLocation/dropoffLocation required
+    # - agtMkp/agtMkpType/agtMkpCurrId required (0, 0, 2)
+    # - one-way: NO returnDate/returnTime keys (only sent when round-trip)
     payload: dict[str, Any] = {
         "fromLongitude": from_lng,
         "fromLatitude": from_lat,
@@ -550,15 +564,19 @@ def _transfer_payload(
         "toLatitude": to_lat,
         "DepartureDate": departure_date,
         "departureTime": departure_time,
-        "ReturnDate": effective_return_date,
-        "returnTime": return_time,
         "isRoundTrip": 1 if is_round_trip else 0,
         "fromLocationName": from_location_name,
         "toLocationName": to_location_name,
-        "fromType": from_type,
-        "toType": to_type,
         "fromPlaceId": from_place_id,
         "toPlaceId": to_place_id,
+        "fromType": from_type,
+        "toType": to_type,
+        "pickupLocation": from_location_name,
+        "dropoffLocation": to_location_name,
+        "luggageCapacity": 0,
+        "agtMkp": 0,
+        "agtMkpType": 0,
+        "agtMkpCurrId": 2,
         "TransferRateTypes": [
             {
                 "TransferRateTypeId": 1,
@@ -567,6 +585,9 @@ def _transfer_payload(
             }
         ],
     }
+    if is_round_trip:
+        payload["returnDate"] = return_date or departure_date
+        payload["returnTime"] = return_time
     if unique_key is not None:
         payload["uniqueKey"] = unique_key
     return payload
@@ -613,7 +634,7 @@ def call_transfer_search(
                 to_location_name=to_location_name,
                 adults=adults,
             ),
-            headers=base_headers(),
+            headers=transfer_headers(),
         )
     except Exception as e:
         if isinstance(e, BookingApiError):
@@ -666,7 +687,7 @@ def call_transfer_details(
                 adults=adults,
                 unique_key=unique_key,
             ),
-            headers=base_headers(),
+            headers=transfer_headers(),
         )
     except Exception as e:
         if isinstance(e, BookingApiError):
@@ -988,25 +1009,31 @@ def call_hotel_static_by_city(
 def discover_city_hotel_ids(city_id: int) -> tuple[tuple[int, float], ...]:
     """Live (hotel_id, star_rating) list for a city, from GetStaticDataByCity.
 
-    The supplier exposes the full inventory here (thousands of hotels with star
-    ratings); search_hotels uses this to look beyond the small curated set.
-    Cached for the process lifetime — the list is large and effectively static
-    per city. Returns () on failure so the caller can fall back gracefully.
-    Sorted star-desc so a star-filtered batch favours rated properties.
+    The supplier exposes the full inventory here (thousands of properties);
+    search_hotels uses this to look beyond the small curated set. Cached for
+    the process lifetime — the list is large and effectively static per city.
+    Returns () on failure so the caller can fall back gracefully.
+
+    Real response (confirmed live): {"CountryId": ..., "Hotels": [{HotelId,
+    Category ("Hotel"|"Apartment"|"Villa"|...), StarRating (often 0.00),
+    IsRecommand, ...}]}. StarRating is 0 for most rows, so ordering by star
+    alone is meaningless and floats random apartments to the top. Instead we
+    rank: recommended first, then real "Hotel" category over Apartment/Villa,
+    then star-desc within each. This surfaces actual hotels, not serviced
+    apartments, in the priced batch.
     """
     try:
         raw = call_hotel_static_by_city(city_id=city_id, lookup_type="city")
     except Exception:
         return ()
-    # GetStaticDataByCity returns {"CountryId": ..., "Hotels": [{HotelId, StarRating,
-    # Category, ...}, ...]} — thousands of hotels. Older code looked for "raw"/
-    # a top-level list and silently got nothing (→ only the 2 curated hotels showed).
     items = None
     if isinstance(raw, dict):
         items = raw.get("Hotels") or raw.get("raw") or raw.get("result")
     if not isinstance(items, list):
         items = raw if isinstance(raw, list) else []
-    out: list[tuple[int, float]] = []
+    # Category rank: real hotels first, then aparthotels/resorts, then the rest.
+    _cat_rank = {"hotel": 0, "resort": 0, "aparthotel": 1, "apartment": 2, "villa": 3}
+    ranked: list[tuple[int, int, int, float]] = []  # (recommend, cat_rank, -star, hid)
     for h in items:
         if not isinstance(h, dict):
             continue
@@ -1014,11 +1041,17 @@ def discover_city_hotel_ids(city_id: int) -> tuple[tuple[int, float], ...]:
         if hid is None:
             continue
         try:
-            out.append((int(hid), float(h.get("StarRating") or 0)))
+            hid_int = int(hid)
+            star = float(h.get("StarRating") or 0)
         except (ValueError, TypeError):
             continue
-    out.sort(key=lambda t: t[1], reverse=True)
-    return tuple(out)
+        cat = str(h.get("Category") or "").strip().lower()
+        cat_rank = _cat_rank.get(cat, 5)
+        recommend = 0 if h.get("IsRecommand") else 1
+        ranked.append((recommend, cat_rank, hid_int, star))
+    # Sort: recommended → category (hotels first) → star-desc → id (stable)
+    ranked.sort(key=lambda t: (t[0], t[1], -t[3], t[2]))
+    return tuple((hid, star) for _, _, hid, star in ranked)
 
 
 def call_hotel_static_data(
@@ -1167,3 +1200,111 @@ def call_currency_roe(*, target_currency: str = "INR") -> dict[str, Any]:
         if isinstance(e, BookingApiError):
             raise
         raise CurrencyRoeFailed(f"Currency ROE call failed: {e}", endpoint=path) from e
+
+
+# =============================================================================
+# Public autocomplete search — no auth required
+# =============================================================================
+
+def call_entity_search(
+    *,
+    service: str,
+    query: str,
+    size: int = 10,
+) -> dict[str, Any]:
+    """Autocomplete/name-lookup for hotels, tours, restaurants, airlines, or cities.
+
+    Public endpoint — no auth token needed. Returns a list of matching entities
+    with their `location_id` (which is the same numeric ID used by all booking
+    endpoints: hotel_id, tour_id, restaurant_id).
+
+    Args:
+        service:  one of "hotels", "tours", "restaurants", "airlines"
+        query:    free-text search string, e.g. "Atlantis Dubai"
+        size:     max results to return (default 10)
+
+    Response shape (always):
+        {
+          "data": [
+            {
+              "location_id": 384,        # ← this IS the hotel/tour/restaurant ID
+              "name_text": "Howard Johnson by Wyndham Bur Dubai",
+              "type": "hotel",           # "hotel" | "city" | "Tour" | "Restaurant" | "Airline"
+              "cityId": 244520,
+              "countryId": 213,
+              "city": "Dubai",
+              "country": "United Arab Emirates",
+              "latitude": 25.27063,
+              "longitude": 55.30037,
+              "totalAvailableServices": 4,
+              "icon": "...",             # relative image path (hotels & restaurants)
+              "iataCode": "EK",          # airlines only
+              "localization": {...}      # multi-lang name + DisplaySuggestionType
+            },
+            ...
+          ],
+          "error": null
+        }
+
+    Notes:
+    - Filter by `type` to get only hotels (type=="hotel") vs city suggestions
+      (type=="city") — hotel searches return both.
+    - `location_id` 0 means the entry is a city/region, not a bookable entity.
+    - Airline entries carry `iataCode`; other services do not.
+    - Use this before any booking call when the user names a specific hotel/
+      tour/restaurant — the returned `location_id` is the ID to pass to
+      search_hotels(hotel_name=...), search_tours, search_restaurants, etc.
+    """
+    import urllib.parse
+    import urllib.request
+
+    svc = service.lower().rstrip("/")
+    url = f"{ENTITY_SEARCH_BASE}/{svc}?q={urllib.parse.quote(query)}&size={size}"
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            import json as _json
+            return _json.loads(resp.read().decode())
+    except Exception as e:
+        return {"data": [], "error": str(e)}
+
+
+# =============================================================================
+# Private visa countries list
+# =============================================================================
+
+def call_visa_countries() -> dict[str, Any]:
+    """List countries for which visa inventory exists — GET /api/visa/v1/countries.
+
+    Returns the 4 supported visa destinations (UAE, Oman, Egypt, Singapore) with
+    their countryId, countryCode, visaType, processingTime, and visaCategoryType.
+    Use this to resolve a free-text country/city name to the countryId needed by
+    call_visa_info() — e.g. "Dubai visa" → UAE → countryId=213.
+
+    Response shape:
+        {
+          "statusCode": 200,
+          "result": [
+            {
+              "visaId": 3,
+              "countryId": 213,
+              "countryName": "United Arab Emirates",
+              "countryCode": "AE",
+              "visaType": "Tourist Visa",
+              "visaCategoryType": "E-VISA",
+              "processingTime": "3-4 Working Days",
+              "flagIcon": "country-images/ae.svg?v1",
+              "holidays": []
+            },
+            ...   (Egypt countryId=109, Oman countryId=87, Singapore countryId=115)
+          ]
+        }
+    """
+    try:
+        return get_client().get("/api/visa/v1/countries", headers=base_headers())
+    except Exception as e:
+        if isinstance(e, BookingApiError):
+            raise
+        raise VisaInfoFailed(
+            f"Visa countries call failed: {e}", endpoint="/api/visa/v1/countries"
+        ) from e
