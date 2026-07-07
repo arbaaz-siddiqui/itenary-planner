@@ -30,6 +30,48 @@ from reference_data_loader import get_default_dubai_airport
 logger = logging.getLogger(__name__)
 
 
+def _nearest_hotel_name(lat: float, lng: float, city_id: int = 244520) -> str | None:
+    """Reverse-resolve the real hotel NAME nearest to (lat, lng).
+
+    The transfer supplier matches inventory on toLocationName, so when the LLM
+    passes coordinates without a usable name we look up the closest hotel in the
+    city's static data (address endpoint has lat/long per hotel_id; the optimize
+    endpoint has names) and return that hotel's real name. Best-effort → None on
+    any failure, so the caller falls back to whatever name it had.
+    """
+    try:
+        from booking_api import (
+            call_hotel_property_info,
+            call_hotel_static_data,
+            discover_city_hotel_ids,
+        )
+        from parsers import parse_hotel_static_data_response
+
+        ids = [hid for hid, _ in discover_city_hotel_ids(city_id)[:60]]
+        if not ids:
+            return None
+        addr = parse_hotel_static_data_response(call_hotel_property_info(hotel_ids=ids))
+        best_id, best_d2 = None, None
+        for h in addr:
+            hlat, hlng = h.get("latitude"), h.get("longitude")
+            if hlat is None or hlng is None:
+                continue
+            d2 = (float(hlat) - lat) ** 2 + (float(hlng) - lng) ** 2
+            if best_d2 is None or d2 < best_d2:
+                best_d2, best_id = d2, h.get("hotel_id")
+        # ~0.0009 deg² ≈ 3km; only trust a genuinely close match
+        if best_id is None or (best_d2 is not None and best_d2 > 0.0009):
+            return None
+        names = parse_hotel_static_data_response(call_hotel_static_data(hotel_ids=[best_id]))
+        for n in names:
+            if n.get("hotel_id") == best_id and n.get("hotel_name"):
+                nm = n["hotel_name"]
+                return nm if not nm.startswith("Hotel ") else None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("nearest-hotel resolve failed: %s", e)
+    return None
+
+
 def _impl(
     hotel_lat: float,
     hotel_lng: float,
@@ -83,32 +125,43 @@ def _impl(
                 "error_type": "MissingReferenceData",
             }
 
-        # ROBUSTNESS: the voice/chat LLM often passes guessed or generic Dubai
-        # coordinates (e.g. 25.2581, 55.3047 = city centre) that don't match any
-        # transfer inventory. When we have a hotel_name, resolve the REAL coords
-        # from the autocomplete API and use those — never trust hallucinated
-        # lat/lng. This makes the transfer search work off the hotel identity,
-        # not off whatever numbers the model invented.
-        if hotel_name and hotel_name.strip():
-            try:
-                from booking_api import call_entity_search
+        # CRITICAL: the supplier matches transfer inventory on the DESTINATION
+        # NAME, not just coordinates. Empirically, toLocationName="Hotel" (the
+        # default when the LLM omits hotel_name) returns ~2 rows; the REAL hotel
+        # name returns 60+. So a usable, specific hotel_name is mandatory.
+        #
+        # The LLM is unreliable here — it often passes correct coords but NO name
+        # (or a generic "Hotel"). So we resolve a real name ourselves:
+        #   (a) if a specific name was given, use entity search to canonicalise it
+        #       and get authoritative coords;
+        #   (b) if the name is missing/generic, reverse-resolve the nearest hotel
+        #       from the coordinates via the city address data.
+        _generic = (not hotel_name) or hotel_name.strip().lower() in ("", "hotel", "the hotel")
+        try:
+            from booking_api import call_entity_search
+            if not _generic:
                 res = call_entity_search(service="hotels", query=hotel_name.strip(), size=5)
-                hotels = [
+                hits = [
                     h for h in (res.get("data") or [])
-                    if isinstance(h, dict)
-                    and h.get("type", "").lower() == "hotel"
+                    if isinstance(h, dict) and h.get("type", "").lower() == "hotel"
                     and h.get("latitude") and h.get("longitude")
                 ]
-                if hotels:
-                    hotel_lat = float(hotels[0]["latitude"])
-                    hotel_lng = float(hotels[0]["longitude"])
-                    hotel_name = hotels[0].get("name_text") or hotel_name
-                    logger.info(
-                        "transfer_resolved_hotel_coords name=%s lat=%s lng=%s",
-                        hotel_name, hotel_lat, hotel_lng,
-                    )
-            except Exception as _e:
-                logger.warning("transfer hotel-coord resolve failed: %s", _e)
+                if hits:
+                    hotel_lat = float(hits[0]["latitude"])
+                    hotel_lng = float(hits[0]["longitude"])
+                    hotel_name = hits[0].get("name_text") or hotel_name
+                    logger.info("transfer_resolved_by_name name=%s lat=%s lng=%s",
+                                hotel_name, hotel_lat, hotel_lng)
+            else:
+                # No usable name — find the nearest hotel to the given coords so we
+                # can send a real toLocationName the supplier will match on.
+                resolved = _nearest_hotel_name(hotel_lat, hotel_lng)
+                if resolved:
+                    hotel_name = resolved
+                    logger.info("transfer_resolved_by_coords name=%s lat=%s lng=%s",
+                                hotel_name, hotel_lat, hotel_lng)
+        except Exception as _e:
+            logger.warning("transfer hotel resolve failed: %s", _e)
 
         raw = call_transfer_search(
             from_lat=float(airport["lat"]),
