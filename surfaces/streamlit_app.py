@@ -994,8 +994,30 @@ def _process_message(user_message: str) -> None:
                         status.update(label=_labels.get(name, f"🔧 {name}…"))
                 yield token
 
-        assistant_text = st.write_stream(_streamed)
-        status.update(label="Done", state="complete")
+        try:
+            assistant_text = st.write_stream(_streamed)
+        except Exception as _e:  # noqa: BLE001
+            # The LLM provider can rate-limit (429) or error mid-stream. Don't
+            # crash the whole app with a red traceback — show a friendly message
+            # and let the user retry. Common case: OpenRouter throttling the free
+            # model upstream (mistral/qwen); switching OPENROUTER_MODEL or adding a
+            # BYOK key on OpenRouter resolves persistent 429s.
+            emsg = str(_e)
+            if "429" in emsg or "rate-limit" in emsg.lower() or "RateLimit" in emsg:
+                assistant_text = (
+                    "I'm getting rate-limited by the model provider right now — "
+                    "please send that again in a few seconds. (If this keeps "
+                    "happening, the model needs a dedicated API key or a switch to "
+                    "a less busy model.)"
+                )
+            else:
+                assistant_text = (
+                    "Sorry, I hit a temporary error on my side. Please try that again."
+                )
+            status.update(label="Rate-limited — retry", state="error")
+            st.warning(assistant_text)
+        else:
+            status.update(label="Done", state="complete")
         if not isinstance(assistant_text, str):
             assistant_text = result.text or ""
 
