@@ -30,45 +30,43 @@ from reference_data_loader import get_default_dubai_airport
 logger = logging.getLogger(__name__)
 
 
-def _nearest_hotel_name(lat: float, lng: float, city_id: int = 244520) -> str | None:
-    """Reverse-resolve the real hotel NAME nearest to (lat, lng).
+def _hotel_name_from_coords(lat: float, lng: float) -> str | None:
+    """Reverse-resolve the EXACT hotel name at (lat, lng) via the public
+    autocomplete API, which covers ALL hotels (not just the ~60 discovered ones).
 
     The transfer supplier matches inventory on toLocationName, so when the LLM
-    passes coordinates without a usable name we look up the closest hotel in the
-    city's static data (address endpoint has lat/long per hotel_id; the optimize
-    endpoint has names) and return that hotel's real name. Best-effort → None on
-    any failure, so the caller falls back to whatever name it had.
+    passes coordinates without a name we must recover the RIGHT hotel — not just
+    some nearby one. The autocomplete index returns lat/lng per hotel; we query a
+    broad set and pick the closest coordinate match within a tight radius. Only
+    returns a name when the match is essentially exact (same building), else None
+    so we don't send a wrong hotel's name.
     """
     try:
-        from booking_api import (
-            call_hotel_property_info,
-            call_hotel_static_data,
-            discover_city_hotel_ids,
-        )
-        from parsers import parse_hotel_static_data_response
+        from booking_api import call_entity_search
 
-        ids = [hid for hid, _ in discover_city_hotel_ids(city_id)[:60]]
-        if not ids:
-            return None
-        addr = parse_hotel_static_data_response(call_hotel_property_info(hotel_ids=ids))
-        best_id, best_d2 = None, None
-        for h in addr:
-            hlat, hlng = h.get("latitude"), h.get("longitude")
-            if hlat is None or hlng is None:
-                continue
-            d2 = (float(hlat) - lat) ** 2 + (float(hlng) - lng) ** 2
+        # A broad, generic query returns many Dubai hotels with their coords.
+        # We then pick the one whose coordinates match the target almost exactly.
+        candidates: list[dict] = []
+        for q in ("hotel dubai", "dubai"):
+            res = call_entity_search(service="hotels", query=q, size=40)
+            for h in res.get("data") or []:
+                if (
+                    isinstance(h, dict)
+                    and h.get("type", "").lower() == "hotel"
+                    and h.get("latitude") and h.get("longitude")
+                ):
+                    candidates.append(h)
+        best, best_d2 = None, None
+        for h in candidates:
+            d2 = (float(h["latitude"]) - lat) ** 2 + (float(h["longitude"]) - lng) ** 2
             if best_d2 is None or d2 < best_d2:
-                best_d2, best_id = d2, h.get("hotel_id")
-        # ~0.0009 deg² ≈ 3km; only trust a genuinely close match
-        if best_id is None or (best_d2 is not None and best_d2 > 0.0009):
-            return None
-        names = parse_hotel_static_data_response(call_hotel_static_data(hotel_ids=[best_id]))
-        for n in names:
-            if n.get("hotel_id") == best_id and n.get("hotel_name"):
-                nm = n["hotel_name"]
-                return nm if not nm.startswith("Hotel ") else None
+                best_d2, best = d2, h
+        # 0.000001 deg² ≈ ~1m at Dubai's latitude — require a near-exact match so
+        # we never substitute a different hotel.
+        if best is not None and best_d2 is not None and best_d2 < 1e-6:
+            return best.get("name_text") or None
     except Exception as e:  # noqa: BLE001
-        logger.warning("nearest-hotel resolve failed: %s", e)
+        logger.warning("coord->hotel-name resolve failed: %s", e)
     return None
 
 
@@ -155,7 +153,7 @@ def _impl(
             else:
                 # No usable name — find the nearest hotel to the given coords so we
                 # can send a real toLocationName the supplier will match on.
-                resolved = _nearest_hotel_name(hotel_lat, hotel_lng)
+                resolved = _hotel_name_from_coords(hotel_lat, hotel_lng)
                 if resolved:
                     hotel_name = resolved
                     logger.info("transfer_resolved_by_coords name=%s lat=%s lng=%s",
