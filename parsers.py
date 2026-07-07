@@ -606,26 +606,26 @@ def _parse_transfer(t: Any, rates: dict[str, float], image_base_url: str) -> Tra
     transfer_type = str(t.get("transferType") or "")
     vehicle_type = str(t.get("vehicleType") or "")
     vehicle_name = str(t.get("vehicleName") or "")
-    # Shared vs Private: the supplier signals "Shared" in transferType, but PRIVATE
-    # is only spelled out in the vehicle NAME ("... Private Van/Bus"). Detect both
-    # so the agent can offer the traveller a shared OR private option.
+    # Real supplier transferType values (confirmed from B2C): "Standard", "Private Transfer", "Large"
+    # None of the B2C results are shared — all are private vehicles.
+    # Shared detection kept in case supplier ever returns shared options.
     name_lc = vehicle_name.lower()
-    is_shared = "shared" in transfer_type.lower() or "sharing" in transfer_type.lower() or "shared" in name_lc
-    is_private = "private" in name_lc or "private" in transfer_type.lower()
+    transfer_type_lc = transfer_type.lower()
+    is_shared = "shared" in transfer_type_lc or "sharing" in transfer_type_lc or "shared" in name_lc
+    # "Standard", "Private Transfer", "Large" all map to Private
+    is_private = not is_shared
     badges: list[str] = []
     if is_shared:
         badges.append("Shared")
-    if is_private:
+    else:
         badges.append("Private")
     if vehicle_type:
         badges.append(vehicle_type)
-    # Normalize transfer_type so downstream/agent sees a clear shared|private label.
+    # Normalize to clear Shared|Private label
     if is_shared:
         transfer_type = "Shared"
-    elif is_private:
+    else:
         transfer_type = "Private"
-    elif not transfer_type:
-        transfer_type = "Private"  # supplier default when unmarked
     return TransferOption(
         transfer_id=str(t.get("transferID") or t.get("uniqueKey") or t.get("vehicleId") or ""),
         unique_key=str(t.get("uniqueKey") or ""),
@@ -659,7 +659,11 @@ def parse_restaurant_response(
     if not isinstance(raw, dict):
         raise RestaurantNormalizationError("Expected dict response", missing_field="root")
     result = raw.get("result") or {}
-    items = result.get("list") if isinstance(result, dict) else None
+    # List endpoint: result.list; Detail endpoint: result.detail (single-item array)
+    if isinstance(result, dict):
+        items = result.get("list") or result.get("detail")
+    else:
+        items = None
     if not isinstance(items, list):
         return []
     rates = live_rate_map()
@@ -689,6 +693,24 @@ def _parse_restaurant(
     address = r.get("address") or {}
     review = r.get("review") or {}
     hours = r.get("operatingHours") or {}
+    # Coordinates — nested under "coordinates" object in the real response
+    coords = r.get("coordinates") or {}
+    latitude = _try_float(coords.get("latitude")) if isinstance(coords, dict) else None
+    longitude = _try_float(coords.get("longitude")) if isinstance(coords, dict) else None
+    # Rating: top-level field is the primary; review sub-object is a fallback
+    rating = _try_float(r.get("rating")) or _try_float(review.get("rating")) or 0.0
+    # Images: imageInfoList has full list; restaurantImagePath is primary thumbnail
+    primary_img = _resolve_image_url(r.get("restaurantImagePath"), image_base_url)
+    image_urls: list[str] = []
+    for img in r.get("imageInfoList") or []:
+        if isinstance(img, dict):
+            url = _resolve_image_url(img.get("url"), image_base_url)
+        else:
+            url = _resolve_image_url(img, image_base_url)
+        if url and url not in image_urls:
+            image_urls.append(url)
+    if primary_img and primary_img not in image_urls:
+        image_urls.insert(0, primary_img)
     return RestaurantOption(
         restaurant_id=restaurant_id,
         name=str(r.get("restaurantName") or "").strip(),
@@ -702,9 +724,12 @@ def _parse_restaurant(
         opening_time=str(hours.get("openingTime") or ""),
         closing_time=str(hours.get("closingTime") or ""),
         seating_capacity=int(r.get("seatingCapacity") or 0),
-        rating=float(review.get("rating") or 0),
+        rating=rating,
         description=_strip_html(r.get("description")),
-        image_url=_resolve_image_url(r.get("restaurantImagePath"), image_base_url),
+        image_url=primary_img,
+        image_urls=image_urls,
+        latitude=latitude,
+        longitude=longitude,
     )
 
 
@@ -1087,6 +1112,14 @@ def parse_hotel_cities_response(
                 "state_name": str(_first_present(c, "StateName", "stateName") or "").strip(),
             }
         )
+    # Rank so the agent picks the right entry: a bookable "city" beats a neighborhood,
+    # which beats airports/POIs/stations. GetCitiesWithHotel returns ~100 mixed rows
+    # (city, neighborhood, point_of_interest, airport, metro_station, ...) — the
+    # numeric `Id` of the type=="city" row is the CityID hotel search needs, while
+    # neighborhood rows' location_id feed GetStaticDataByCity(Type="location") for
+    # area-scoped hotels (e.g. "hotels in Downtown Dubai").
+    _rank = {"city": 0, "multi_city_vicinity": 1, "neighborhood": 2, "province_state": 3}
+    out.sort(key=lambda c: _rank.get(c["type"].lower(), 9))
     return out[:max_results] if max_results else out
 
 
@@ -1230,29 +1263,31 @@ def parse_hotel_descriptions_response(
             items = [payload]
         else:
             items = []
-    out: list[dict[str, Any]] = []
+    # Real GetPropertyDescriptions shape (confirmed live): PropertyDescriptions is a
+    # FLAT list of sections, each {ID, Name, Description} — where Name is the section
+    # title ("Amenities", "Dining", "Location", ...) and Description is the body text.
+    # It is NOT one record-per-hotel with nested Sections. So we fold the flat
+    # sections into a single hotel record.
+    sections: list[dict[str, str]] = []
+    hotel_id: int | None = None
     for d in items:
         if not isinstance(d, dict):
             continue
-        hotel_id = _safe_int(_first_present(d, "HotelId", "HotelID", "hotelId", "id"))
-        sections: list[dict[str, str]] = []
-        raw_sections = _first_present(d, "Sections", "Descriptions", "sections") or []
-        if isinstance(raw_sections, list):
-            for s in raw_sections:
-                if isinstance(s, dict):
-                    title = str(_first_present(s, "Title", "Type", "title", "type") or "").strip()
-                    text = _strip_html(_first_present(s, "Text", "Description", "text", "value"))
-                    if text:
-                        sections.append({"title": title, "text": text})
-        out.append(
-            {
-                "hotel_id": hotel_id,
-                "description": _strip_html(
-                    _first_present(d, "Description", "description", "PropertyDescription", "Text")
-                ),
-                "sections": sections,
-            }
+        if hotel_id is None:
+            hotel_id = _safe_int(_first_present(d, "HotelId", "HotelID", "hotelId"))
+        title = str(_first_present(d, "Name", "Title", "Type", "name", "title") or "").strip()
+        text = _strip_html(
+            _first_present(d, "Description", "description", "Text", "text", "value")
         )
+        if text:
+            sections.append({"title": title, "text": text})
+    combined = " ".join(s["text"] for s in sections).strip()
+    record = {
+        "hotel_id": hotel_id,
+        "description": combined,
+        "sections": sections,
+    }
+    out = [record] if sections else []
     return out[:max_results] if max_results else out
 
 
@@ -1261,9 +1296,16 @@ def parse_hotel_guest_review_response(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise HotelStaticNormalizationError("Expected dict response", missing_field="root")
     payload = _unwrap_result(raw)
-    if not isinstance(payload, dict):
-        payload = {}
-    reviews_raw = _first_present(payload, "Reviews", "GuestReviews", "reviews", "list") or []
+    # Real GetHotelGuestReview shape (confirmed live): the review array comes back
+    # as a top-level JSON list, which our http_client wraps as {"raw": [...]}.
+    # Each item: {ReviewerName, Rating (str), ReviewText, StayDate, TravelCompanion,
+    # TripReason, ReviewSubmitDate, ManagementResponses[], VerificationSource}.
+    if isinstance(payload, list):
+        reviews_raw = payload
+    else:
+        reviews_raw = (
+            _first_present(payload, "Reviews", "GuestReviews", "reviews", "list", "raw") or []
+        )
     reviews: list[dict[str, Any]] = []
     if isinstance(reviews_raw, list):
         for r in reviews_raw:
@@ -1271,27 +1313,41 @@ def parse_hotel_guest_review_response(raw: dict[str, Any]) -> dict[str, Any]:
                 continue
             reviews.append(
                 {
-                    "rating": float(_first_present(r, "Rating", "rating", "Score") or 0),
+                    "rating": _try_float(
+                        _first_present(r, "Rating", "rating", "Score")
+                    ) or 0.0,
                     "title": str(_first_present(r, "Title", "title") or "").strip(),
                     "comment": _strip_html(
-                        _first_present(r, "Comment", "Review", "comment", "Text")
+                        _first_present(r, "ReviewText", "Comment", "Review", "comment", "Text")
                     ),
                     "reviewer": str(
                         _first_present(r, "ReviewerName", "GuestName", "reviewer", "Name") or ""
                     ).strip(),
-                    "date": str(_first_present(r, "ReviewDate", "Date", "date") or ""),
+                    "date": str(
+                        _first_present(r, "StayDate", "ReviewDate", "ReviewSubmitDate", "Date", "date")
+                        or ""
+                    ),
+                    "travel_companion": str(_first_present(r, "TravelCompanion") or "").strip(),
+                    "source": str(_first_present(r, "VerificationSource") or "").strip(),
                 }
             )
+    # Compute average from the review ratings when there's no summary field
+    ratings = [rv["rating"] for rv in reviews if rv["rating"] > 0]
+    avg_from_reviews = round(sum(ratings) / len(ratings), 1) if ratings else 0.0
+    summary_avg = _try_float(
+        _first_present(payload, "AverageRating", "OverallRating", "averageRating")
+        if isinstance(payload, dict) else None
+    )
     return {
-        "hotel_id": _safe_int(_first_present(payload, "HotelId", "HotelID", "hotelId")),
-        "average_rating": float(
-            _first_present(payload, "AverageRating", "OverallRating", "Rating", "averageRating")
-            or 0
+        "hotel_id": _safe_int(
+            _first_present(payload, "HotelId", "HotelID", "hotelId")
+            if isinstance(payload, dict) else None
         ),
-        "total_reviews": int(
-            _first_present(payload, "TotalReviews", "ReviewCount", "totalReviews", "Count")
-            or len(reviews)
-        ),
+        "average_rating": summary_avg or avg_from_reviews,
+        "total_reviews": (
+            int(_first_present(payload, "TotalReviews", "ReviewCount", "totalReviews", "Count") or 0)
+            if isinstance(payload, dict) else 0
+        ) or len(reviews),
         "reviews": reviews,
     }
 

@@ -99,10 +99,11 @@ def load_system_prompt(*, surface: str = "streamlit") -> str:
     today = datetime.now().strftime("%A, %d %B %Y")
 
     if surface == "voice":
-        # Voice uses its own lean prompt — the base prompt's pre-search intake
-        # rules (party split, budget, rooms required before searching) break
-        # phone calls. system_prompt_voice.md is built for the phone flow.
+        # Voice = base prompt + voice addendum (system_prompt_voice.md).
+        # The addendum hard-overrides formatting, sentence limits, and bans.
         parts = [
+            _load_prompt(f"system_prompt_{SYSTEM_PROMPT_VERSION}.md").rstrip(),
+            "",
             _load_prompt("system_prompt_voice.md").rstrip(),
             "",
             "## Current context",
@@ -563,36 +564,59 @@ def stream_and_log(
         config["recursion_limit"] = 25
     start = time.perf_counter()
 
-    for mode, chunk in agent.stream(
-        {"messages": [{"role": "user", "content": user_message}]},
-        config,
-        stream_mode=["messages", "updates"],
-    ):
+    def _process_chunk(mode: str, chunk: Any) -> list[str]:
+        """Process one stream chunk, return any text tokens to yield."""
+        tokens: list[str] = []
         if mode == "messages":
             msg_chunk, metadata = chunk
-            # Only stream tokens from the agent node's text output — skip tool
-            # results and any non-text content blocks.
             node = (metadata or {}).get("langgraph_node")
             if node and node != "agent":
-                continue
-            # Skip text that rides along with a tool-call chunk. Some models
-            # (e.g. Mistral) emit tool-invocation scaffolding as plain text —
-            # "search_hotels{...} // Retry with broader search",
-            # "enumerate_package_details{}" — which must NOT leak into the
-            # customer-facing reply. The real answer streams in the FINAL agent
-            # message, which has no tool_calls.
+                return tokens
             if _safe_attr(msg_chunk, "tool_calls") or _safe_attr(msg_chunk, "tool_call_chunks"):
-                continue
+                return tokens
             token = _token_text(msg_chunk)
             if token and not _looks_like_tool_scaffolding(token):
                 holder.text += token
-                yield token
+                tokens.append(token)
         elif mode == "updates":
             for node_name, state in (chunk or {}).items():
                 msgs = (state or {}).get("messages") if isinstance(state, dict) else None
                 for m in msgs or []:
                     holder.messages.append(m)
                     _record_tool_events(m, node_name, holder)
+        return tokens
+
+    def _clear_thread() -> None:
+        try:
+            cp = agent.checkpointer
+            if hasattr(cp, "storage"):
+                cp.storage.pop(thread_id, None)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+    # First attempt
+    _attempted_recovery = False
+    try:
+        for mode, chunk in agent.stream(
+            {"messages": [{"role": "user", "content": user_message}]},
+            config,
+            stream_mode=["messages", "updates"],
+        ):
+            yield from _process_chunk(mode, chunk)
+    except ValueError as _ve:
+        if "tool_calls" in str(_ve) and "ToolMessage" in str(_ve):
+            # Corrupted checkpoint — clear thread and retry once from scratch
+            _clear_thread()
+            holder.text = ""
+            holder.messages = []
+            for mode, chunk in agent.stream(
+                {"messages": [{"role": "user", "content": user_message}]},
+                config,
+                stream_mode=["messages", "updates"],
+            ):
+                yield from _process_chunk(mode, chunk)
+        else:
+            raise
 
     holder.latency_seconds = time.perf_counter() - start
     log_turn(

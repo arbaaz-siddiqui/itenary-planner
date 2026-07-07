@@ -60,15 +60,15 @@ class TestTokenWiring:
         s = BookingApiSettings(_env_file=None, BOOKING_TOKEN=tok)
         assert s.main_token_missing_services() == []
 
-    def test_activities_only_token_flags_missing(self) -> None:
-        """An Activities-only token (the GT-018 mis-config) must be flagged —
-        it silently returns null for hotels otherwise."""
+    def test_activities_only_token_not_flagged(self) -> None:
+        """The serviceType JWT claim is NOT enforced by the supplier: the live
+        GT-018 (Manoj) token lists only ["Activities"] yet works for flights,
+        hotels, transfers, restaurants, and visa. So an Activities-only token
+        must NOT be flagged — the old check was a false alarm."""
         from settings import BookingApiSettings
 
         s = BookingApiSettings(_env_file=None, BOOKING_TOKEN=self._jwt(["Activities"]))
-        missing = s.main_token_missing_services()
-        assert "Hotels" in missing
-        assert "Flight" in missing
+        assert s.main_token_missing_services() == []
 
     def test_undecodable_token_does_not_false_alarm(self) -> None:
         from settings import BookingApiSettings

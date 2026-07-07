@@ -31,6 +31,8 @@ def _impl(
     return_time: str = "07:00:00",
     is_round_trip: bool = False,
     adults: int = 1,
+    from_location_name: str = "",
+    to_location_name: str = "",
 ) -> dict[str, Any]:
     """Get details for a specific transfer (uniqueKey comes from search_transfers result)."""
     try:
@@ -46,6 +48,8 @@ def _impl(
             return_date=return_date,
             return_time=return_time,
             is_round_trip=is_round_trip,
+            from_location_name=from_location_name,
+            to_location_name=to_location_name,
             adults=adults,
             unique_key=unique_key,
         )

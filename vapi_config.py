@@ -139,66 +139,11 @@ def _model_config() -> dict:
 
 
 # =============================================================================
-# Voice-optimised system prompt
-# (stripped of all Streamlit card signals, PDF, calendar, WhatsApp sections)
+# Voice-optimised system prompt — loaded from prompts/ (single source of truth)
 # =============================================================================
 def _voice_system_prompt() -> str:
-    return """You are Nikki — an experienced female travel consultant at Gujju Tours. You are on a phone call helping a customer plan a Dubai trip.
-
-## SCRIPT — ROMAN ONLY, NEVER DEVANAGARI
-ALWAYS write in Roman script (English letters). NEVER use Devanagari (Hindi script like हां, बिल्कुल, शानदार).
-Even when customer speaks in Hindi, YOUR reply must be in Roman Hinglish — never Devanagari.
-WRONG: "बिल्कुल! Dubai एक शानदार destination है।"
-RIGHT: "Bilkul! Dubai bahut accha choice hai."
-
-## GENDER — YOU ARE A WOMAN, ALWAYS FEMININE VERBS
-WRONG (masculine — never use): karunga, karega, hoga, padega, sakta hoon, samajh gaya, batata hoon, nikal sakta hoon
-RIGHT (feminine — always use): karungi, karegi, hogi, padegi, sakti hoon, samajh gayi, bata sakti hoon, nikal sakti hoon
-When in doubt, use feminine. No exceptions.
-
-## BREVITY — THE MOST IMPORTANT RULE FOR VOICE
-THIS IS A PHONE CALL. Keep every reply to MAX 2 short sentences. That's it.
-
-WRONG (too long — never do this):
-"Sharing mein Desert Safari — chhah logon ke liye total around paanch hazaar sixty rupees. Private option ke liye — yeh tour Private Transfers option deta hai. Iska matlab hai ki tour toh shared hoga lekin pickup aur drop aapki apni private vehicle mein hogi. Private transfer ke exact price ke liye mujhe detailed rate check karni padegi."
-
-RIGHT (short and clear):
-"Sharing mein six logon ka total around five thousand rupees padega. Private ke liye ek second — check kar rahi hoon."
-
-When presenting two options, give ONE number first, then ask if they want the other:
-"Sharing mein six logon ka around five thousand rupees. Private ka price bhi bataaoon?"
-
-## WAITING PHRASES — use one every time a tool runs, vary them
-- "Ek moment, dekh rahi hoon..."
-- "Please wait, check kar rahi hoon..."
-- "Thodi si wait karein, results aa rahe hain..."
-- "Haan sir, abhi dekhti hoon..."
-- "Just a moment, system se data aa raha hai..."
-
-## LANGUAGE — NATURAL HINGLISH
-Hindi connectors + English travel words. Like an educated Indian travel agent on the phone.
-SAHI: "Sir kahan se travel karenge?" / "Dates kya soch rahi hain aap?" / "Budget roughly kitna?" / "Four-star chahiye ya five-star?"
-GALAT: Pure Hindi (literary/formal) / Pure English (call-center) / Devanagari script
-
-## DATE ACCURACY
-Jo dates customer ne is call mein boli hain wohi use karo. Pichli search ki dates forget karo.
-Pehle confirm: "Toh [exact dates] — sahi samjhi?" Phir search karo.
-
-## ONE QUESTION AT A TIME
-Ek sawaal, ruko, answer suno, phir agla sawaal. Kabhi 2-3 sawaal ek saath nahi.
-
-## FLOW
-City → Dates → Kitne log → Budget → Search → 1-2 options briefly → Handoff
-
-## NEVER
-- Bullet points, numbered lists, asterisks, markdown
-- INR (say "rupees"), long codes, URLs
-- Invent prices or hotel names — only from tool results
-- Go silent while searching — always say a waiting phrase first
-
-## HANDOFF
-"Bahut badhiya sir! Main booking team ko details forward kar rahi hoon — woh fifteen-twenty minutes mein call karenge aapko."
-"""
+    from agent import load_system_prompt
+    return load_system_prompt(surface="voice")
 
 
 # =============================================================================
@@ -214,30 +159,53 @@ def build_assistant_config() -> dict:
         # ── Ears (STT) ──────────────────────────────────────────────────────
         "transcriber": _stt_config(),
 
-        # ── Voice (TTS) ─────────────────────────────────────────────────────
-        "voice": _tts_config(),
+        # ── Voice (TTS) + chunk plan — flush SSE chunks to TTS immediately ───
+        # chunkPlan.minCharacters=1: Vapi flushes to TTS the instant ANY chunk
+        # lands, not after buffering to the default ~30 chars. This is what makes
+        # filler phrases play immediately instead of all at the end.
+        "voice": {
+            **_tts_config(),
+            "chunkPlan": {
+                "enabled": True,
+                "minCharacters": 1,
+                "punctuationBoundaries": [".", "!", "?", ","],
+                "formatPlan": {
+                    "enabled": False,
+                },
+            },
+        },
 
         # ── Conversation behaviour ──────────────────────────────────────────
-        # How long Vapi waits after the LLM starts responding before speaking.
-        # 0 = speak filler sentence the instant the first SSE chunk arrives.
         "responseDelaySeconds": 0,
-
-        # How long after STT finishes before we send to LLM.
-        # 0.1s gives the caller a chance to finish their sentence.
         "llmRequestDelaySeconds": 0.1,
-
-        # Caller can interrupt the agent mid-sentence — natural conversation.
         "interruptionsEnabled": True,
-
-        # Allow interrupting even the first message (no forced intro monologue).
-        "firstMessageInterruptionsEnabled": True,
-
-        # Background noise removal (call centre / road noise).
+        # DON'T let the caller's first word cut off Nikki's greeting. Callers
+        # often say "haan"/"hello" while she's still introducing herself, and
+        # with first-message interruptions on that killed the greeting and made
+        # the call feel like it dropped. Let her finish the opener.
+        "firstMessageInterruptionsEnabled": False,
         "backgroundDenoisingEnabled": True,
-
-        # Natural backchannels — Vapi inserts "mm-hmm", "I see", "got it" etc.
-        # while the caller is speaking, making it feel like a real human is listening.
         "backchannelingEnabled": True,
+
+        # ── Interruption plan — require real speech, not a stray sound ───────
+        # numWords>0 means Vapi waits until the caller has said a couple of real
+        # words before interrupting the assistant, so a cough or a backchannel
+        # ("haan", "hmm") doesn't cut Nikki mid-sentence.
+        "stopSpeakingPlan": {
+            "numWords": 2,
+            "voiceSeconds": 0.2,
+            "backoffSeconds": 1.0,
+        },
+
+        # ── Start speaking plan — wait until the caller actually finishes ───
+        # smartEndpointing lets Vapi use a model to detect end-of-turn instead of
+        # firing on the first micro-pause. waitSeconds gives a small buffer so a
+        # natural mid-sentence pause isn't treated as "done talking".
+        "startSpeakingPlan": {
+            "waitSeconds": 0.4,
+            "smartEndpointingEnabled": True,
+        },
+
 
         # ── Call lifecycle ──────────────────────────────────────────────────
         "firstMessage": (
@@ -250,8 +218,10 @@ def build_assistant_config() -> dict:
             "Lovely speaking with you! "
         ),
 
-        # Silence for 30s → end call gracefully
-        "silenceTimeoutSeconds": 30,
+        # Silence for 60s → end call gracefully.
+        # 30s was too short — if the agent is speaking a heartbeat and the caller
+        # is quiet, Vapi was counting that silence and cutting the call early.
+        "silenceTimeoutSeconds": 60,
         "maxDurationSeconds": 2700,   # 45 min hard cap
 
         # What to say if the call hits the time limit
@@ -269,9 +239,14 @@ def build_assistant_config() -> dict:
         "hipaaEnabled": False,
 
         # ── Voicemail detection ─────────────────────────────────────────────
+        # DISABLED: Twilio answering-machine detection was misclassifying LIVE
+        # callers as voicemail when they spoke right after the greeting, then
+        # playing voicemailMessage and hanging up ~1-2s in. Only re-enable for a
+        # real outbound dialer that must skip actual voicemails — never for a
+        # human-answered inbound/test call.
         "voicemailDetection": {
             "provider": "twilio",
-            "enabled": True,
+            "enabled": False,
             "voicemailDetectionTypes": ["machine_end_beep", "machine_end_silence"],
         },
         "voicemailMessage": (
@@ -311,7 +286,7 @@ def create_assistant() -> dict:
     """Create a new Vapi assistant. Prints the new assistant ID."""
     config = build_assistant_config()
     result = _vapi_request("POST", "/assistant", config)
-    print(f"✅ Assistant created: {result['id']}")
+    print(f"[OK] Assistant created: {result['id']}")
     print(f"   Add to .env:  VAPI_ASSISTANT_ID={result['id']}")
     return result
 
@@ -323,7 +298,7 @@ def update_assistant(assistant_id: str | None = None) -> dict:
         raise ValueError("No VAPI_ASSISTANT_ID set — run create_assistant() first.")
     config = build_assistant_config()
     result = _vapi_request("PATCH", f"/assistant/{aid}", config)
-    print(f"✅ Assistant updated: {aid}")
+    print(f"[OK] Assistant updated: {aid}")
     return result
 
 

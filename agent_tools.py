@@ -578,6 +578,7 @@ def _build_all_tools() -> list[BaseTool]:
     # Import MCP tools here (they have decorator side effects)
     from mcp_tools.get_exchange_rate import get_exchange_rate_tool
     from mcp_tools.get_flight_details import get_flight_details_tool
+    from mcp_tools.lookup_entity import lookup_entity_tool
     from mcp_tools.get_hotel_description import get_hotel_description_tool
     from mcp_tools.get_hotel_info import get_hotel_info_tool
     from mcp_tools.get_hotel_reviews import get_hotel_reviews_tool
@@ -588,6 +589,7 @@ def _build_all_tools() -> list[BaseTool]:
     from mcp_tools.get_tour_options import get_tour_options_tool
     from mcp_tools.get_transfer_details import get_transfer_details_tool
     from mcp_tools.get_visa_info import get_visa_info_tool
+    from mcp_tools.list_visa_countries import list_visa_countries_tool
     from mcp_tools.list_city_hotels import list_city_hotels_tool
     from mcp_tools.list_packages import list_packages_tool
     from mcp_tools.lookup_hotel_city import lookup_hotel_city_tool
@@ -598,6 +600,8 @@ def _build_all_tools() -> list[BaseTool]:
     from mcp_tools.search_transfers import search_transfers_tool
 
     return [
+        # Autocomplete / name-to-ID lookup (MCP-exposed, no auth)
+        lookup_entity_tool,
         # Search/list tools (MCP-exposed)
         search_flights_tool,
         search_hotels_tool,
@@ -605,6 +609,7 @@ def _build_all_tools() -> list[BaseTool]:
         search_transfers_tool,
         search_restaurants_tool,
         get_visa_info_tool,
+        list_visa_countries_tool,
         list_packages_tool,
         get_exchange_rate_tool,
         # Detail tools (MCP-exposed)
