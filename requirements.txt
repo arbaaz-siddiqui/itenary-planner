@@ -12,7 +12,11 @@ langgraph-checkpoint-sqlite>=2.0
 anthropic>=0.34
 mcp>=1.0
 fastmcp>=0.4
-streamlit>=1.38
+# Pinned: the nav-pill CSS in surfaces/ui_theme.py targets Streamlit's tab DOM
+# (div[data-baseweb="tab-list"]). Newer Streamlit changes that structure, so the
+# floating navbar silently stops rendering. Pin to the version we build the UI
+# against. Bump deliberately + re-verify the navbar when upgrading.
+streamlit==1.58.0
 fastapi>=0.115
 uvicorn[standard]>=0.30
 twilio>=9.3
