@@ -13,19 +13,20 @@ the brain, driven in a background thread.
 
 Architecture:
   Phone call (SIP) → LiveKit Cloud room → this Worker
-    ├─ STT: Deepgram nova-3 (streaming, Hinglish)
+    ├─ STT: Sarvam saarika:v2.5 (Indian-language / Hinglish)
     ├─ VAD: Silero (turn detection)
-    ├─ TTS: 11Labs turbo v2.5
+    ├─ TTS: Sarvam bulbul:v3
     └─ Brain: run_planner_turn() (LangGraph) in a background thread
+
+  (Sarvam is the same STT/TTS provider the Vapi agent uses — one API key.)
 
 Run locally (needs a LiveKit dev key + a connected room):
   python voice_livekit.py dev
 
 Env vars (see .env):
   LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET   — LiveKit Cloud project
-  DEEPGRAM_API_KEY                                    — STT
-  ELEVEN_API_KEY (or ELEVENLABS_API_KEY)              — TTS
-  VAPI_11LABS_VOICE_ID                                — voice id (reused from Vapi)
+  SARWAM_AI_API_KEY (or SARVAM_API_KEY)              — Sarvam STT + TTS
+  SARVAM_SPEAKER                                      — voice (default "anushka")
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ load_dotenv()
 from livekit import agents
 from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli
 from livekit.agents.llm import ChatContext, ChatMessage, StopResponse
-from livekit.plugins import deepgram, elevenlabs, silero
+from livekit.plugins import sarvam, silero
 
 # Shared planner helpers — identical brain as the Vapi path, so every chat fix
 # (fast-first flights, loop prevention, date guard, diversify) applies here too.
@@ -164,25 +165,21 @@ async def entrypoint(ctx: JobContext) -> None:
 
     await ctx.connect()
 
-    stt = deepgram.STT(
-        model="nova-3",
-        language="multi",   # Hinglish — Hindi + English code-switching
-        smart_format=True,
-        endpointing_ms=150,
+    # Sarvam for STT + TTS — same provider the Vapi agent uses. Indian-language
+    # tuned (Hinglish), single API key. en-IN handles Hindi+English code-switching.
+    sarvam_key = os.getenv("SARWAM_AI_API_KEY") or os.getenv("SARVAM_API_KEY")
+
+    stt = sarvam.STT(
+        language="en-IN",
+        model="saarika:v2.5",
+        api_key=sarvam_key,
     )
 
-    voice_id = os.getenv("VAPI_11LABS_VOICE_ID", "tA6LGZpsqStKtSaGiXND")
-    tts = elevenlabs.TTS(
-        model="eleven_turbo_v2_5",
-        voice_id=voice_id,
-        api_key=os.getenv("ELEVEN_API_KEY") or os.getenv("ELEVENLABS_API_KEY"),
-        voice_settings=elevenlabs.VoiceSettings(
-            stability=0.45,
-            similarity_boost=0.80,
-            style=0.20,
-            use_speaker_boost=True,
-        ),
-        streaming_latency=4,
+    tts = sarvam.TTS(
+        target_language_code="en-IN",
+        model="bulbul:v3",
+        speaker=os.getenv("SARVAM_SPEAKER", "anushka"),
+        api_key=sarvam_key,
     )
 
     session = AgentSession(

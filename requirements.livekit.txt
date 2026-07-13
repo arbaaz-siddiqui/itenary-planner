@@ -9,6 +9,5 @@
 # on_user_turn_completed) differs materially from 0.x.
 -r requirements.txt
 livekit-agents==1.6.5
-livekit-plugins-deepgram==1.6.5
-livekit-plugins-elevenlabs==1.6.5
-livekit-plugins-silero==1.6.5
+livekit-plugins-sarvam==1.6.5    # STT (saarika) + TTS (bulbul) — Indian languages
+livekit-plugins-silero==1.6.5    # VAD (turn detection)
