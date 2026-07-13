@@ -1,0 +1,27 @@
+# Railway config for the LiveKit VOICE WORKER (voice_livekit.py).
+#
+# Unlike the other services this is NOT a web server — it's a LiveKit agent
+# worker that connects out to LiveKit Cloud over WebSocket and waits for
+# dispatched calls. So:
+#   - startCommand runs `voice_livekit.py start` (the worker), not uvicorn.
+#   - NO healthcheckPath: the worker serves no HTTP; a health check would fail
+#     and cause a restart loop (the mistake that hit the chat service).
+#   - Build installs requirements.livekit.txt (base deps + livekit-agents stack).
+#
+# Point a Railway service's "Config as code" path at this file, set its Source
+# branch to the voice-livekit branch, and add the LIVEKIT_/DEEPGRAM_/ELEVEN_ env
+# vars (see .env). Silero VAD downloads its model at first boot.
+
+[build]
+builder = "NIXPACKS"
+
+[build.nixpacksPlan.phases.install]
+cmds = [
+  "python -m venv --copies /opt/venv",
+  ". /opt/venv/bin/activate && pip install --upgrade pip && pip install -r requirements.livekit.txt",
+]
+
+[deploy]
+startCommand = "PYTHONPATH=/app python voice_livekit.py start"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

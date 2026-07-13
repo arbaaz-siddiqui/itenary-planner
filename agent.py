@@ -96,7 +96,19 @@ def _load_prompt(name: str) -> str:
 
 
 def load_system_prompt(*, surface: str = "streamlit") -> str:
-    today = datetime.now().strftime("%A, %d %B %Y")
+    from datetime import timezone, timedelta
+    _ist = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=5, minutes=30)))
+    today = _ist.strftime("%A, %d %B %Y")
+    _year = _ist.year
+    # Explicit, emphatic date rule — small models (e.g. llama-3.1-8b) otherwise
+    # default bare dates like "3 aug" to a training-era year (2023), producing a
+    # PAST date → the flight/hotel API returns 0 results ("no flights available").
+    _date_rule = (
+        f"- CURRENT YEAR IS {_year}. When the user gives a date without a year "
+        f'(e.g. "3 aug", "next Friday"), ALWAYS resolve it to {_year} (or the next '
+        f"occurrence if that date already passed this year). NEVER use a past year. "
+        f"All search dates you pass to tools must be in {_year} or later, ISO yyyy-mm-dd."
+    )
 
     if surface == "voice":
         # Voice = base prompt + voice addendum (system_prompt_voice.md).
@@ -108,6 +120,7 @@ def load_system_prompt(*, surface: str = "streamlit") -> str:
             "",
             "## Current context",
             f"- Today's date: {today}",
+            _date_rule,
             f"- Surface: {surface}",
         ]
         return "\n".join(parts)
@@ -118,6 +131,7 @@ def load_system_prompt(*, surface: str = "streamlit") -> str:
         "",
         "## Current context",
         f"- Today's date: {today}",
+        _date_rule,
         f"- Surface: {surface}",
     ]
     if surface == "whatsapp":
@@ -562,6 +576,12 @@ def stream_and_log(
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
     if surface == "voice":
         config["recursion_limit"] = 25
+    else:
+        # Backstop against tool-loops (some models re-call the same search 5-7×,
+        # hanging the turn for 90s). ~12 steps = the model + up to ~5 tool cycles,
+        # plenty for a legit multi-tool turn, but caps a runaway loop. Generous
+        # enough not to cut mid-tool-call (which would corrupt the thread).
+        config["recursion_limit"] = 12
     start = time.perf_counter()
 
     def _process_chunk(mode: str, chunk: Any) -> list[str]:

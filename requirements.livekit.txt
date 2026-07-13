@@ -1,0 +1,14 @@
+# LiveKit voice worker dependencies — installed ONLY for the voice-livekit
+# service (railway.livekit.toml), on top of the base requirements.txt. Keeps the
+# heavy LiveKit/onnx/av stack out of the chat + whatsapp services that don't use it.
+#
+# Install:  pip install -r requirements.txt -r requirements.livekit.txt
+#
+# Pinned to the exact versions developed/verified against. Bump deliberately —
+# the livekit-agents 1.x API (Agent, AgentSession, session.say, StopResponse,
+# on_user_turn_completed) differs materially from 0.x.
+-r requirements.txt
+livekit-agents==1.6.5
+livekit-plugins-deepgram==1.6.5
+livekit-plugins-elevenlabs==1.6.5
+livekit-plugins-silero==1.6.5

@@ -47,6 +47,14 @@ def build_openrouter_llm(*, temperature: float = 0.3, max_tokens: int = 4096) ->
             "OPENROUTER_API_KEY is required when LLM_PROVIDER=openrouter",
             provider="openrouter",
         )
+    # OpenRouter routes a model across several upstream providers, and a flaky
+    # one intermittently returns an EMPTY response (seen on longer turns) →
+    # "Provider returned an empty response" → the turn errors out with "temporary
+    # error". Two mitigations:
+    #   - max_retries: retry the transient failure automatically (usually a
+    #     different provider serves the retry successfully).
+    #   - provider.allow_fallbacks: let OpenRouter fail over to another provider
+    #     for the same model instead of erroring.
     return ChatOpenAI(
         model=s.openrouter_model,
         api_key=s.openrouter_api_key,
@@ -54,6 +62,8 @@ def build_openrouter_llm(*, temperature: float = 0.3, max_tokens: int = 4096) ->
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=120,
+        max_retries=3,
+        extra_body={"provider": {"allow_fallbacks": True}},
     )
 
 

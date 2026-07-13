@@ -194,8 +194,15 @@ def _render_timestamp(ts: str | None) -> None:
 
 
 def _now_stamp() -> str:
-    """Human-friendly timestamp for chat messages, e.g. '7 Aug, 12:27 PM'."""
-    return datetime.now().strftime("%-d %b, %-I:%M %p") if _supports_dash() else datetime.now().strftime("%d %b, %I:%M %p")
+    """Human-friendly IST timestamp for chat messages, e.g. '13 Jul, 12:27 PM'.
+
+    Uses Asia/Kolkata explicitly — the deployed server runs in UTC, so a plain
+    datetime.now() showed times ~5.5h behind for Indian users.
+    """
+    from datetime import timezone, timedelta
+    ist = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=5, minutes=30)))
+    fmt = "%-d %b, %-I:%M %p" if _supports_dash() else "%d %b, %I:%M %p"
+    return ist.strftime(fmt)
 
 
 def _supports_dash() -> bool:
@@ -958,14 +965,18 @@ def _process_message(user_message: str) -> None:
     result = StreamResult()
 
     with st.chat_message("assistant"):
-        assistant_ts = _now_stamp()
-        _render_timestamp(assistant_ts)
+        # Stamp the timestamp when the AI actually STARTS RESPONDING (first token),
+        # not at turn-start — otherwise it shows the time before the 2-10s of tool
+        # work, which reads as "wrong". A placeholder is filled on the first token.
+        ts_slot = st.empty()
+        assistant_ts = None
         # Show a live "thinking / searching" status during the silent gap while
         # the agent reasons + calls booking APIs (before any text streams). As
         # tools fire, reflect which one in the status so the wait feels alive.
         status = st.status("✨ Planning your trip…", expanded=False)
 
         def _streamed():
+            nonlocal assistant_ts
             seen_tools: set[str] = set()
             _labels = {
                 "search_flights": "✈️ Searching flights…",
@@ -992,6 +1003,11 @@ def _process_message(user_message: str) -> None:
                     if ev.get("event") == "call" and name and name not in seen_tools:
                         seen_tools.add(name)
                         status.update(label=_labels.get(name, f"🔧 {name}…"))
+                # Stamp the moment the first visible token arrives.
+                if assistant_ts is None and token:
+                    assistant_ts = _now_stamp()
+                    with ts_slot:
+                        _render_timestamp(assistant_ts)
                 yield token
 
         try:
@@ -1020,6 +1036,12 @@ def _process_message(user_message: str) -> None:
             status.update(label="Done", state="complete")
         if not isinstance(assistant_text, str):
             assistant_text = result.text or ""
+        # Fallback: nothing streamed (tool-only turn / error) → stamp now so the
+        # message still carries a timestamp.
+        if assistant_ts is None:
+            assistant_ts = _now_stamp()
+            with ts_slot:
+                _render_timestamp(assistant_ts)
 
         # Real HTTP requests made during this turn (method + full URL + status).
         http_for_turn = http_requests_since(http_cursor)
