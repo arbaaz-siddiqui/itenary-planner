@@ -46,6 +46,7 @@ AGENT_NAME = "nikki-trip-planner"
 TRUNK_NAME = "gujjutours-inbound"
 RULE_NAME = "gujjutours-dispatch"
 ROOM_PREFIX = "call-"
+OUTBOUND_TRUNK_NAME = "gujjutours-outbound"
 
 
 def _require_env() -> None:
@@ -97,7 +98,7 @@ async def _setup() -> None:
         if number:
             req.inbound_numbers.append(number)
         created_rule = await lk.sip.create_sip_dispatch_rule(req)
-        print(f"[OK] Dispatch rule: {created_rule.sip_dispatch_rule_id}  → agent '{AGENT_NAME}'")
+        print(f"[OK] Dispatch rule: {created_rule.sip_dispatch_rule_id}  -> agent '{AGENT_NAME}'")
         print("\nInbound calls will now spawn a room and dispatch the Nikki agent.")
         print("Point your SIP provider's trunk at the LiveKit SIP URI (LiveKit dashboard → SIP).")
     finally:
@@ -144,6 +145,85 @@ async def _delete() -> None:
         await lk.aclose()
 
 
+async def _setup_outbound() -> None:
+    """Create the OUTBOUND SIP trunk so LiveKit can dial user phones via Twilio.
+
+    This powers the Streamlit "Get a call" button: LiveKit places a call OUT
+    through Twilio's termination domain, with our DID as caller ID.
+    """
+    domain = os.getenv("TWILIO_TERMINATION_DOMAIN", "").strip()
+    user = os.getenv("TWILIO_TERMINATION_USER", "").strip()
+    pw = os.getenv("TWILIO_TERMINATION_PASS", "").strip()
+    caller_id = os.getenv("LIVEKIT_SIP_NUMBER", "").strip()
+    missing = [
+        k for k, v in {
+            "TWILIO_TERMINATION_DOMAIN": domain,
+            "TWILIO_TERMINATION_USER": user,
+            "TWILIO_TERMINATION_PASS": pw,
+            "LIVEKIT_SIP_NUMBER": caller_id,
+        }.items() if not v
+    ]
+    if missing:
+        print(f"[X] Missing env for outbound trunk: {', '.join(missing)}")
+        sys.exit(1)
+
+    lk = _client()
+    try:
+        trunk = api.SIPOutboundTrunkInfo(
+            name=OUTBOUND_TRUNK_NAME,
+            address=domain,
+            transport=api.SIPTransport.SIP_TRANSPORT_TCP,
+            numbers=[caller_id],          # caller ID shown to the person we dial
+            auth_username=user,
+            auth_password=pw,
+        )
+        created = await lk.sip.create_sip_outbound_trunk(
+            api.CreateSIPOutboundTrunkRequest(trunk=trunk)
+        )
+        print(f"[OK] Outbound trunk: {created.sip_trunk_id}  (via {domain}, caller-id {caller_id})")
+        print(f"\nAdd this to .env:\n  LIVEKIT_OUTBOUND_TRUNK_ID={created.sip_trunk_id}")
+    finally:
+        await lk.aclose()
+
+
+async def place_call(number: str, *, room_name: str | None = None) -> dict:
+    """Dial `number` and dispatch Nikki into the room. Returns {room, participant}.
+
+    Used by the Streamlit voice tab (via voice_service.place_call_livekit).
+    """
+    trunk_id = os.getenv("LIVEKIT_OUTBOUND_TRUNK_ID", "").strip()
+    if not trunk_id:
+        return {"error": "LIVEKIT_OUTBOUND_TRUNK_ID not set (run: python livekit_config.py setup-outbound)"}
+    if not number:
+        return {"error": "no phone number"}
+
+    # A unique room per call. No Date/random here — the caller passes one, else
+    # we derive from the number (fine for one-at-a-time manual testing).
+    room = room_name or f"{ROOM_PREFIX}{number.lstrip('+')}"
+
+    lk = _client()
+    try:
+        # 1. Dispatch the agent into the room FIRST so Nikki is present when the
+        #    callee answers (explicit dispatch — matches agent_name).
+        await lk.agent_dispatch.create_dispatch(
+            api.CreateAgentDispatchRequest(agent_name=AGENT_NAME, room=room)
+        )
+        # 2. Dial the user; SIP participant joins the same room.
+        participant = await lk.sip.create_sip_participant(
+            api.CreateSIPParticipantRequest(
+                sip_trunk_id=trunk_id,
+                sip_call_to=number,
+                room_name=room,
+                participant_identity=f"caller-{number.lstrip('+')}",
+                participant_name="caller",
+                play_dialtone=True,
+            )
+        )
+        return {"room": room, "participant": participant.participant_identity, "number": number}
+    finally:
+        await lk.aclose()
+
+
 def _print() -> None:
     number = os.getenv("LIVEKIT_SIP_NUMBER", "").strip() or "(any — no LIVEKIT_SIP_NUMBER set)"
     print("Would create:")
@@ -156,12 +236,21 @@ if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "print"
     if cmd == "print":
         _print()
+    elif cmd == "setup-outbound":
+        _require_env()
+        asyncio.run(_setup_outbound())
+    elif cmd == "call":
+        _require_env()
+        num = sys.argv[2] if len(sys.argv) > 2 else ""
+        print(asyncio.run(place_call(num)))
     elif cmd in ("setup", "list", "delete"):
         _require_env()
         asyncio.run({"setup": _setup, "list": _list, "delete": _delete}[cmd]())
     else:
-        print("Usage: python livekit_config.py [setup|list|delete|print]")
-        print("  setup  — create inbound SIP trunk + agent dispatch rule")
-        print("  list   — show current trunks + dispatch rules")
-        print("  delete — remove the trunk + rule created by setup")
-        print("  print  — dry-run (no API calls)")
+        print("Usage: python livekit_config.py [setup|setup-outbound|call <number>|list|delete|print]")
+        print("  setup          — create inbound SIP trunk + agent dispatch rule")
+        print("  setup-outbound — create outbound SIP trunk (for click-to-call)")
+        print("  call <number>  — dial a number now + dispatch Nikki (test)")
+        print("  list           — show current trunks + dispatch rules")
+        print("  delete         — remove the trunk + rule created by setup")
+        print("  print          — dry-run (no API calls)")

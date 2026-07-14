@@ -679,9 +679,50 @@ def _render_itinerary_section() -> None:
         st.caption("Plan a trip first, then generate the PDF here.")
 
 
+# Top models from the conversation stress test (tool accuracy + no-hallucination
+# + speed). Label shows the score so you can pick knowingly. Switching rebuilds
+# the agent live — no .env edit or restart needed.
+_SWITCHABLE_MODELS = {
+    "gemma-4-26b": "google/gemma-4-26b-a4b-it",
+    "gemma-4-31b": "google/gemma-4-31b-it",
+    "deepseek-v3": "deepseek/deepseek-chat-v3-0324",
+    "kimi-k2.5": "moonshotai/kimi-k2.5",
+}
+
+
+def _render_model_switcher() -> None:
+    """Sidebar dropdown to switch the chat model live (rebuilds the agent)."""
+    from llm import get_active_model_id
+
+    current = st.session_state.get("model_override") or get_active_model_id()
+    labels = list(_SWITCHABLE_MODELS.keys())
+    # Preselect the label matching the current model, else first.
+    idx = next((i for i, l in enumerate(labels) if _SWITCHABLE_MODELS[l] == current), 0)
+
+    st.markdown("**🧠 Model** (live switch)")
+    choice = st.selectbox(
+        "Model", labels, index=idx, label_visibility="collapsed", key="model_choice_label",
+    )
+    chosen = _SWITCHABLE_MODELS[choice]
+    if chosen != st.session_state.get("model_override"):
+        st.session_state.model_override = chosen
+        # Rebuild the agent with the new model, fresh thread so context doesn't
+        # carry a half-turn from the previous model.
+        st.session_state.agent = build_react_agent(
+            surface="streamlit",
+            checkpoint_store=build_in_memory_checkpoint(),
+            model_override=chosen,
+        )
+        st.session_state.thread_id = f"web_{uuid.uuid4().hex[:12]}"
+        st.toast(f"Switched to {chosen}")
+    st.caption(f"Active: `{chosen}`")
+
+
 def _render_sidebar() -> None:
     with st.sidebar:
         st.header("🌴 Trip Planner")
+        _render_model_switcher()
+        st.divider()
         _render_itinerary_section()
 
 
@@ -691,9 +732,9 @@ def _render_sidebar() -> None:
 def _render_voice_tab() -> None:
     st.subheader("📞 Voice agent")
     st.caption(
-        "Enter a phone number and place a call. The voice agent (Vapi + Indian "
-        "voice) talks to the caller using THIS planner as its brain. Below you can "
-        "see exactly what was said and which booking APIs were called."
+        "Enter a phone number and place a call. The voice agent talks to the "
+        "caller using THIS planner as its brain. Below you can see exactly what "
+        "was said and which booking APIs were called."
     )
 
     try:
@@ -708,12 +749,19 @@ def _render_voice_tab() -> None:
         st.error(f"voice_service unavailable: {e}")
         return
 
-    if not voice_service.VAPI_API_KEY:
-        st.warning(
-            "VAPI not configured. Set VAPI_API_KEY / VAPI_ASSISTANT_ID / "
-            "VAPI_PHONE_NUMBER_ID in .env. The voice service must also be running "
-            "and reachable by Vapi via ngrok."
+    provider = getattr(voice_service, "VOICE_CALL_PROVIDER", "livekit")
+    if provider == "livekit":
+        st.caption(
+            "🟢 Provider: **LiveKit** (Sarvam voice, real-time heartbeats). "
+            "The LiveKit worker (voice_livekit.py) must be running."
         )
+    else:
+        st.caption("🔵 Provider: **Vapi**")
+        if not voice_service.VAPI_API_KEY:
+            st.warning(
+                "VAPI not configured. Set VAPI_API_KEY / VAPI_ASSISTANT_ID / "
+                "VAPI_PHONE_NUMBER_ID in .env, or switch VOICE_CALL_PROVIDER=livekit."
+            )
 
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -733,7 +781,7 @@ def _render_voice_tab() -> None:
     svc_url = _os.getenv("VOICE_SERVICE_URL", "http://127.0.0.1:8100")
 
     if get_call:
-        res = voice_service.place_call(number)
+        res = voice_service.place_call_auto(number)
         if res.get("error"):
             st.error(f"Call failed: {res['error']}")
         else:
@@ -744,21 +792,30 @@ def _render_voice_tab() -> None:
 
     st.divider()
     st.markdown("##### 🔎 Call trace (live)")
-    st.caption(f"Reading trace from the voice service at {svc_url}")
+    if provider == "livekit":
+        st.caption("Reading trace from the LiveKit worker (shared file).")
+    else:
+        st.caption(f"Reading trace from the voice service at {svc_url}")
 
     if "voice_traces" not in st.session_state:
         st.session_state.voice_traces = {}
 
+    # Manual refresh only — no auto st.rerun() loop (that reloads the whole page
+    # every couple seconds and makes the UI flicker/blur). Click to pull latest.
     if st.button("🔄 Refresh trace"):
-        try:
-            import urllib.request as _u
-            with _u.urlopen(f"{svc_url}/trace", timeout=4) as r:
-                st.session_state.voice_traces = json.loads(r.read().decode())
-        except Exception as e:  # noqa: BLE001
-            st.warning(
-                f"Couldn't reach the voice service /trace at {svc_url} ({e}). "
-                "Is it running?"
-            )
+        if provider == "livekit":
+            # LiveKit worker is a separate process — it mirrors turns to a file.
+            st.session_state.voice_traces = voice_service.read_trace_file()
+        else:
+            try:
+                import urllib.request as _u
+                with _u.urlopen(f"{svc_url}/trace", timeout=4) as r:
+                    st.session_state.voice_traces = json.loads(r.read().decode())
+            except Exception as e:  # noqa: BLE001
+                st.warning(
+                    f"Couldn't reach the voice service /trace at {svc_url} ({e}). "
+                    "Is it running?"
+                )
 
     traces: dict[str, Any] = st.session_state.voice_traces
     if not traces:
@@ -1013,25 +1070,35 @@ def _process_message(user_message: str) -> None:
         try:
             assistant_text = st.write_stream(_streamed)
         except Exception as _e:  # noqa: BLE001
-            # The LLM provider can rate-limit (429) or error mid-stream. Don't
-            # crash the whole app with a red traceback — show a friendly message
-            # and let the user retry. Common case: OpenRouter throttling the free
-            # model upstream (mistral/qwen); switching OPENROUTER_MODEL or adding a
-            # BYOK key on OpenRouter resolves persistent 429s.
+            # The LLM provider can rate-limit (429) or DROP THE STREAM mid-generation
+            # (common on flaky OpenRouter upstreams, esp. gemma/qwen free tiers — the
+            # tool call succeeded and text was streaming, then the connection died).
+            # Log the REAL error so we can tell a provider drop from a code bug.
+            import logging as _lg
+            _lg.getLogger("streamlit.turn").warning(
+                "stream failed: %s: %s (partial_len=%d)",
+                type(_e).__name__, str(_e)[:200], len(result.text or "")
+            )
             emsg = str(_e)
-            if "429" in emsg or "rate-limit" in emsg.lower() or "RateLimit" in emsg:
+            # If text already streamed before the drop, KEEP it — a partial real
+            # answer beats wiping it out with a generic error.
+            partial = (result.text or "").strip()
+            if partial and len(partial.split()) >= 8:
+                assistant_text = partial
+                status.update(label="Stream cut short — kept partial reply", state="error")
+            elif "429" in emsg or "rate-limit" in emsg.lower() or "RateLimit" in emsg:
                 assistant_text = (
                     "I'm getting rate-limited by the model provider right now — "
-                    "please send that again in a few seconds. (If this keeps "
-                    "happening, the model needs a dedicated API key or a switch to "
-                    "a less busy model.)"
+                    "please send that again in a few seconds."
                 )
+                status.update(label="Rate-limited — retry", state="error")
+                st.warning(assistant_text)
             else:
                 assistant_text = (
-                    "Sorry, I hit a temporary error on my side. Please try that again."
+                    "Sorry, the model connection dropped mid-reply. Please try that again."
                 )
-            status.update(label="Rate-limited — retry", state="error")
-            st.warning(assistant_text)
+                status.update(label="Provider stream error — retry", state="error")
+                st.warning(assistant_text)
         else:
             status.update(label="Done", state="complete")
         if not isinstance(assistant_text, str):

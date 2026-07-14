@@ -26,7 +26,7 @@ Run locally (needs a LiveKit dev key + a connected room):
 Env vars (see .env):
   LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET   — LiveKit Cloud project
   SARWAM_AI_API_KEY (or SARVAM_API_KEY)              — Sarvam STT + TTS
-  SARVAM_SPEAKER                                      — voice (default "anushka")
+  SARVAM_SPEAKER                                      — voice (default "pooja")
 """
 
 from __future__ import annotations
@@ -59,13 +59,45 @@ from agent import configure_logging, get_logger
 configure_logging(prod=False)
 log = get_logger("livekit")
 
-# Heartbeat phrases — spoken every ~4s while the planner searches tools.
-_HEARTBEATS = [
-    "Thoda waqt dijiye, results check ho rahe hain...",
-    "Haan, almost aa gaye...",
-    "Bas ek second aur...",
-    "Results aa rahe hain, please hold...",
+# Quiet LiveKit's chatty INFO noise that clutters the console during calls:
+#  - "ignoring byte/text stream with topic 'lk.agent.session'/'lk.transcription'"
+#    (data streams we don't subscribe to — harmless)
+#  - OpenTelemetry 429 QuotaStatusExceeded (LiveKit Cloud's free-tier tracing —
+#    unrelated to call quality)
+import logging as _logging
+
+_logging.getLogger("root").setLevel(_logging.WARNING)
+for _n in (
+    "opentelemetry.exporter.otlp.proto.http._log_exporter",
+    "opentelemetry.exporter.otlp.proto.http.trace_exporter",
+):
+    _logging.getLogger(_n).setLevel(_logging.CRITICAL)
+
+# Heartbeat phrases — spoken while the planner searches tools. Kept SHORT and
+# varied so the caller hears a live, attentive person, not a stuck recording.
+# Grouped by "position" so early ones sound fresh and later ones reassure.
+_HEARTBEATS_EARLY = [
+    "Haan, dekh rahi hoon...",
+    "Ek second...",
+    "Check kar rahi hoon...",
+    "Haan haan, mil raha hai...",
 ]
+_HEARTBEATS_LATE = [
+    "Bas aa hi gaya...",
+    "Almost ho gaya...",
+    "Thoda sa aur...",
+    "Haan, bas ek pal...",
+]
+
+# Cadence: first nudge quickly (feels responsive), then relax so we don't
+# chatter over the caller. seconds to wait before heartbeat #1, #2, #3, ...
+_HEARTBEAT_GAPS = [2.5, 3.5, 4.0, 4.0, 5.0]
+
+
+def _heartbeat_phrase(idx: int) -> str:
+    """Pick a short, varied heartbeat. Early idx = 'still on it', later = 'almost'."""
+    pool = _HEARTBEATS_EARLY if idx < 2 else _HEARTBEATS_LATE
+    return pool[idx % len(pool)]
 
 _GREETING = (
     "Haan ji, Gujju Tours mein aapka swagat hai! Main Nikki hoon. "
@@ -118,14 +150,16 @@ class NikkiAgent(Agent):
         augmented = transcript + _length_instruction(intent)
         future = loop.run_in_executor(None, run_planner_turn, augmented, session_id)
 
-        # 3. Heartbeats every 4s — each its own say() → real-time playback.
+        # 3. Heartbeats — each its own say() → real-time playback. Cadence starts
+        #    quick then relaxes (see _HEARTBEAT_GAPS) so it feels attentive, not chatty.
         heartbeat_idx = 0
         heartbeat_log: list[dict] = []
         while not future.done():
+            gap = _HEARTBEAT_GAPS[min(heartbeat_idx, len(_HEARTBEAT_GAPS) - 1)]
             try:
-                await asyncio.wait_for(asyncio.shield(future), timeout=4.0)
+                await asyncio.wait_for(asyncio.shield(future), timeout=gap)
             except asyncio.TimeoutError:
-                phrase = _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]
+                phrase = _heartbeat_phrase(heartbeat_idx)
                 t_hb = round(time.perf_counter() - t0, 3)
                 log.info("livekit_heartbeat", session=session_id[:8], t_s=t_hb, text=phrase)
                 heartbeat_log.append({"text": phrase, "t_s": t_hb})
@@ -141,7 +175,9 @@ class NikkiAgent(Agent):
 
         t_results = round(time.perf_counter() - t0, 3)
         log.info("livekit_results", session=session_id[:8], t_s=t_results, heartbeats=heartbeat_idx)
-        prefix = "Results aa gaye. " if heartbeat_idx > 0 else ""
+        # No "results aa gaye" preamble — the answer itself lands faster and
+        # crisper. Just a tiny lead-in if we made them wait, else straight to it.
+        prefix = "Haan, " if heartbeat_idx >= 2 else ""
         await self.session.say(prefix + final_reply)
 
         _patch_last_turn(session_id, {
@@ -178,7 +214,7 @@ async def entrypoint(ctx: JobContext) -> None:
     tts = sarvam.TTS(
         target_language_code="en-IN",
         model="bulbul:v3",
-        speaker=os.getenv("SARVAM_SPEAKER", "anushka"),
+        speaker=os.getenv("SARVAM_SPEAKER", "pooja"),  # valid bulbul:v3 female voice
         api_key=sarvam_key,
     )
 
