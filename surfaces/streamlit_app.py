@@ -1214,7 +1214,11 @@ _init_session()
 _render_sidebar()
 
 st.title("🏖️ Dubai Trip Planner")
-st.caption(f"Powered by {describe_current_provider()} · streaming on")
+# Show the ACTUAL active model (the live switcher's choice), not the env default —
+# otherwise the header shows a stale model name that disagrees with the sidebar.
+_active_model = st.session_state.get("model_override")
+_provider_line = f"OpenRouter — {_active_model}" if _active_model else describe_current_provider()
+st.caption(f"Powered by {_provider_line} · streaming on")
 
 chat_tab, voice_tab, leads_tab, debug_tab = st.tabs(["💬 Chat", "📞 Voice", "🎯 Leads", "🔧 Debug"])
 
