@@ -247,6 +247,7 @@ def _impl(
     max_results: int = 5,
     amenities: list[str] | None = None,
     hotel_name: str | None = None,
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
     """Search hotels in the destination city. Returns options + per-night pricing.
 
@@ -450,6 +451,8 @@ def _impl(
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
-search_hotels_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+
+search_hotels_tool = tool(cache_impl("search_hotels")(_impl))
 search_hotels_tool.name = "search_hotels"
 mcp.tool(name="search_hotels")(_impl)

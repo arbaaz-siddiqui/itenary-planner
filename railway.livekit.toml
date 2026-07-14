@@ -1,0 +1,48 @@
+# Railway config for the LiveKit VOICE WORKER (voice_livekit.py).
+#
+# This is NOT a web server — it's a LiveKit agent worker that connects OUT to
+# LiveKit Cloud over WebSocket and waits for dispatched calls (inbound SIP AND
+# the Streamlit "Get a call" outbound flow). Because of that:
+#   - startCommand runs `voice_livekit.py start` (the worker), not uvicorn.
+#   - NO healthcheckPath: the worker serves no HTTP; a health check would fail
+#     and put it in a restart loop (the mistake that hit the chat service).
+#   - Build installs requirements.livekit.txt (base deps + livekit-agents +
+#     Sarvam STT/TTS + Silero VAD). Silero downloads its model on first boot.
+#
+# ── DEPLOY ─────────────────────────────────────────────────────────────────
+# 1. New Railway service → Source = this repo, branch = feat/voice-livekit-heartbeat
+#    (or your voice/development branch once merged).
+# 2. Settings → "Config as code" path = railway.livekit.toml
+# 3. Add these ENV VARS (from .env — never commit them):
+#      LIVEKIT_URL              wss://<project>.livekit.cloud
+#      LIVEKIT_API_KEY          project API key   (Settings → Keys)
+#      LIVEKIT_API_SECRET       project API secret
+#      SARWAM_AI_API_KEY        Sarvam STT + TTS  (one key, both)
+#      SARVAM_SPEAKER           (optional) bulbul voice, default "pooja"
+#      OPENROUTER_API_KEY       planner LLM
+#      OPENROUTER_MODEL         e.g. google/gemma-4-26b-a4b-it
+#      BOOKING_TOKEN, BOOKING_HOTEL_STATIC_TOKEN, BOOKING_TENANT_ID, …  (booking APIs)
+#      # For the outbound "Get a call" flow:
+#      LIVEKIT_OUTBOUND_TRUNK_ID, LIVEKIT_SIP_NUMBER,
+#      TWILIO_TERMINATION_DOMAIN, TWILIO_TERMINATION_USER, TWILIO_TERMINATION_PASS
+# 4. After first deploy, run once (locally or a Railway one-off) to wire SIP:
+#      python livekit_config.py setup           # inbound trunk + agent dispatch
+#      python livekit_config.py setup-outbound   # outbound trunk (click-to-call)
+#
+# SCALE: one worker handles ~5-10 concurrent calls. For more, raise replicas —
+# LiveKit Cloud load-balances dispatch across every registered worker.
+
+[build]
+builder = "NIXPACKS"
+
+[build.nixpacksPlan.phases.install]
+cmds = [
+  "python -m venv --copies /opt/venv",
+  ". /opt/venv/bin/activate && pip install --upgrade pip && pip install -r requirements.livekit.txt",
+]
+
+[deploy]
+startCommand = "PYTHONPATH=/app python voice_livekit.py start"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+numReplicas = 1

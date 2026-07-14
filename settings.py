@@ -149,6 +149,12 @@ class LlmSettings(BaseSettings):
     openrouter_base_url: str = Field(
         default="https://openrouter.ai/api/v1", validation_alias="OPENROUTER_BASE_URL"
     )
+    # Comma-separated OpenRouter upstream host names to prefer, in order (e.g.
+    # "SiliconFlow,AtlasCloud"). Empty = OpenRouter default routing (what the
+    # earlier fast branches used). Set to pin away from slow/flaky hosts.
+    openrouter_providers: str = Field(
+        default="", validation_alias="OPENROUTER_PROVIDERS"
+    )
     selfhosted_base_url: str = Field(
         default="http://localhost:8000/v1", validation_alias="SELFHOSTED_BASE_URL"
     )

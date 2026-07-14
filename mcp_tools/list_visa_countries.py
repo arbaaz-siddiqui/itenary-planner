@@ -62,6 +62,7 @@ def _impl() -> dict[str, Any]:
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
-list_visa_countries_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+list_visa_countries_tool = tool(cache_impl("list_visa_countries")(_impl))
 list_visa_countries_tool.name = "list_visa_countries"
 mcp.tool(name="list_visa_countries")(_impl)

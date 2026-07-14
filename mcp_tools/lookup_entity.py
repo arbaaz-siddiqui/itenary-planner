@@ -128,6 +128,7 @@ def _impl(
     }
 
 
-lookup_entity_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+lookup_entity_tool = tool(cache_impl("lookup_entity")(_impl))
 lookup_entity_tool.name = "lookup_entity"
 mcp.tool(name="lookup_entity")(_impl)

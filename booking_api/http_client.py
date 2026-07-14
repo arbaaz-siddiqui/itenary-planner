@@ -20,6 +20,27 @@ def _now() -> str:
     """Wall-clock timestamp HH:MM:SS.mmm for API call tracing."""
     return datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
+
+# ANSI colors for readable API traces in the terminal. Auto-disabled when output
+# isn't a TTY (e.g. piped to a file / Railway logs) so we don't emit escape junk.
+import os as _os
+import sys as _sys
+
+_COLOR = _sys.stderr.isatty() and _os.environ.get("NO_COLOR") is None
+
+
+def _c(text: str, code: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if _COLOR else text
+
+
+def _color_status(sc: int, elapsed_ms: float) -> str:
+    """Colored 'status [ms]' — green ok, red error, yellow if slow (>5s)."""
+    ms = int(elapsed_ms)
+    ms_txt = _c(f"{ms} ms", "33") if ms > 5000 else f"{ms} ms"   # slow = yellow
+    if 200 <= sc < 300:
+        return f"{_c(str(sc), '32')} [{ms_txt}]"                  # 2xx = green
+    return f"{_c(str(sc), '31')} [{ms_txt}]"                      # else = red
+
 import requests
 from requests.exceptions import RequestException, Timeout
 
@@ -151,7 +172,9 @@ class BookingApiClient:
             try:
                 # Plainly visible in the terminal so you can TRACE exactly which
                 # booking API the agent hit on each turn (no assumptions).
-                logger.info("[BOOKING-API] [%s] --> %s %s (attempt %d)", _now(), method, path, attempt)
+                logger.info("%s [%s] %s %s %s (attempt %d)",
+                            _c("[BOOKING-API]", "36"), _now(), _c("-->", "36"),
+                            method, path, attempt)
                 response = self.session.request(
                     method=method,
                     url=url,
@@ -208,7 +231,9 @@ class BookingApiClient:
                 response_body=_resp_body,
             )
             # Trace the result so you can confirm the call really happened + succeeded.
-            logger.info("[BOOKING-API] [%s] <-- %s %s [%d ms]", _now(), sc, path, int(elapsed_ms))
+            logger.info("%s [%s] %s %s %s",
+                        _c("[BOOKING-API]", "36"), _now(), _c("<--", "36"),
+                        _color_status(sc, elapsed_ms), path)
             if sc == 401:
                 raise BookingApiUnauthorized(
                     f"401 Unauthorized for {path}",

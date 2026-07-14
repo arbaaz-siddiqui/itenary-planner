@@ -43,6 +43,19 @@ ROE_CACHE_TTL_SECS = 600.0
 
 _LOCK = threading.Lock()
 _cache: dict[str, tuple[float, float]] = {}  # currency -> (rate_inr, fetched_at)
+# Per-currency fetch locks so concurrent callers (e.g. parallel flight providers
+# all parsing at once) COALESCE into a single network ROE call instead of each
+# firing their own. Without this the /api/Currency/ROE/INR call fires N times.
+_fetch_locks: dict[str, threading.Lock] = {}
+_fetch_locks_guard = threading.Lock()
+
+
+def _fetch_lock_for(code: str) -> threading.Lock:
+    with _fetch_locks_guard:
+        lk = _fetch_locks.get(code)
+        if lk is None:
+            lk = _fetch_locks[code] = threading.Lock()
+        return lk
 
 
 def _selling_roe_from(raw: Any) -> float | None:
@@ -94,18 +107,26 @@ def live_rate_to_inr(currency: str, *, _now: float | None = None) -> tuple[float
     # trust; others keep their configured rate.
     live: float | None = None
     if not _live_disabled() and code == (settings.roe_base_currency or "AED").strip().upper():
-        try:
-            from booking_api import call_currency_roe
+        # Serialize concurrent fetches for this currency. The FIRST caller does the
+        # network call; the rest block here, then find the fresh value in the cache
+        # on the re-check below — so ROE is fetched ONCE per TTL, not once per caller.
+        with _fetch_lock_for(code):
+            recheck_now = time.monotonic() if _now is None else _now
+            with _LOCK:
+                cached = _cache.get(code)
+                if cached and (recheck_now - cached[1]) < ROE_CACHE_TTL_SECS:
+                    return cached[0], "live_api"
+            try:
+                from booking_api import call_currency_roe
 
-            raw = call_currency_roe(target_currency="INR")
-            live = _selling_roe_from(raw)
-        except Exception as e:  # never let FX lookup break a parse
-            logger.warning("live ROE fetch failed for %s, using manual rate: %s", code, e)
-
-    if live and live > 0:
-        with _LOCK:
-            _cache[code] = (live, now)
-        return live, "live_api"
+                raw = call_currency_roe(target_currency="INR")
+                live = _selling_roe_from(raw)
+            except Exception as e:  # never let FX lookup break a parse
+                logger.warning("live ROE fetch failed for %s, using manual rate: %s", code, e)
+            if live and live > 0:
+                with _LOCK:
+                    _cache[code] = (live, recheck_now)
+                return live, "live_api"
 
     if manual and manual > 0:
         return manual, "manual_fallback"

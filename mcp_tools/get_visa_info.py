@@ -72,6 +72,7 @@ def _impl(
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
-get_visa_info_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+get_visa_info_tool = tool(cache_impl("get_visa_info")(_impl))
 get_visa_info_tool.name = "get_visa_info"
 mcp.tool(name="get_visa_info")(_impl)

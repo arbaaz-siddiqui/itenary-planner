@@ -96,7 +96,19 @@ def _load_prompt(name: str) -> str:
 
 
 def load_system_prompt(*, surface: str = "streamlit") -> str:
-    today = datetime.now().strftime("%A, %d %B %Y")
+    from datetime import timezone, timedelta
+    _ist = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=5, minutes=30)))
+    today = _ist.strftime("%A, %d %B %Y")
+    _year = _ist.year
+    # Explicit, emphatic date rule — small models (e.g. llama-3.1-8b) otherwise
+    # default bare dates like "3 aug" to a training-era year (2023), producing a
+    # PAST date → the flight/hotel API returns 0 results ("no flights available").
+    _date_rule = (
+        f"- CURRENT YEAR IS {_year}. When the user gives a date without a year "
+        f'(e.g. "3 aug", "next Friday"), ALWAYS resolve it to {_year} (or the next '
+        f"occurrence if that date already passed this year). NEVER use a past year. "
+        f"All search dates you pass to tools must be in {_year} or later, ISO yyyy-mm-dd."
+    )
 
     if surface == "voice":
         # Voice = base prompt + voice addendum (system_prompt_voice.md).
@@ -108,6 +120,7 @@ def load_system_prompt(*, surface: str = "streamlit") -> str:
             "",
             "## Current context",
             f"- Today's date: {today}",
+            _date_rule,
             f"- Surface: {surface}",
         ]
         return "\n".join(parts)
@@ -118,6 +131,7 @@ def load_system_prompt(*, surface: str = "streamlit") -> str:
         "",
         "## Current context",
         f"- Today's date: {today}",
+        _date_rule,
         f"- Surface: {surface}",
     ]
     if surface == "whatsapp":
@@ -200,9 +214,19 @@ def build_react_agent(
     surface: str = "streamlit",
     checkpoint_store: BaseCheckpointSaver | None = None,
     temperature: float = 0.3,
-    max_tokens: int = 4096,
+    max_tokens: int | None = None,
+    model_override: str | None = None,
 ) -> Any:
-    llm = build_llm(temperature=temperature, max_tokens=max_tokens)
+    # Reply LENGTH is the #1 latency driver: the tool returns in ~5s but the model
+    # spends 30-50s WRITING a 250-word wall of text. Cap output hard so replies
+    # stay crisp AND fast. Voice is tightest; chat/whatsapp get a bit more room for
+    # the option cards but still far below the old 4096 ceiling.
+    if max_tokens is None:
+        # Voice stays tight (spoken). Chat/whatsapp get enough room for a longer
+        # option list when the customer asks "show me 10" — 1500 fits ~10-12
+        # one-line options without letting the model write essays.
+        max_tokens = 300 if surface == "voice" else 1500
+    llm = build_llm(temperature=temperature, max_tokens=max_tokens, model_override=model_override)
     checkpointer = checkpoint_store or build_in_memory_checkpoint()
 
     # Loud warning for the most common mis-config: a BOOKING_TOKEN that lacks the
@@ -476,6 +500,80 @@ def log_turn(
         log.warning("benchmark_log_failed", error=str(e), error_type=type(e).__name__)
 
 
+import os as _os
+import sys as _sys
+
+_TL_COLOR = _sys.stderr.isatty() and _os.environ.get("NO_COLOR") is None
+
+
+def _tc(text: str, code: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if _TL_COLOR else text
+
+
+def print_turn_timeline(
+    *, surface: str, user_message: str, agent_response: dict[str, Any],
+    latency_seconds: float,
+) -> None:
+    """Compact, colored per-turn timeline: what the user said, which tools fired
+    + whether each returned data, total time, reply length. Prints to stderr so
+    it sits alongside the [BOOKING-API] lines but reads at a glance."""
+    try:
+        tool_calls = extract_tool_calls(agent_response)
+        reply = extract_assistant_text(agent_response) or ""
+        served = _serving_model(agent_response)   # ACTUAL model OpenRouter used
+        secs = latency_seconds
+        secs_txt = _tc(f"{secs:.1f}s", "33" if secs > 15 else "32")  # slow = yellow
+        head = _tc("┌─ TURN", "36;1")
+        model_txt = _tc(f"model={served}", "34") if served else ""
+        print(f"\n{head}  [{surface}]  {secs_txt}  ·  reply {len(reply.split())}w  ·  {model_txt}", file=_sys.stderr)
+        print(f"{_tc('│', '36')} 🧑 {user_message[:90]}", file=_sys.stderr)
+        if not tool_calls:
+            print(f"{_tc('│', '36')} {_tc('⚠ no tools called', '33')} (answered from context / asked a question)", file=_sys.stderr)
+        for tc in tool_calls:
+            name = tc.get("tool_name", "?")
+            out = tc.get("output")
+            kind = _summarize_result(out)
+            got = "✓" if kind not in ("empty", "error", "none", "") and kind else "✗"
+            got_c = _tc(got, "32" if got == "✓" else "31")
+            # Did this result come from the cache? (from_cache flag in the output)
+            cache_tag = ""
+            if _is_from_cache(out):
+                cache_tag = " " + _tc("[CACHED]", "33;1")
+            inp = tc.get("input") or {}
+            inp_s = ", ".join(f"{k}={v}" for k, v in list(inp.items())[:3])
+            print(f"{_tc('│', '36')} 🔧 {_tc(name, '35')}({inp_s[:60]}) {got_c} {kind}{cache_tag}", file=_sys.stderr)
+        print(f"{_tc('└─', '36')} 🤖 {reply[:110].replace(chr(10),' ')}", file=_sys.stderr)
+    except Exception:  # never let logging break a turn
+        pass
+
+
+def _serving_model(agent_response: dict[str, Any]) -> str | None:
+    """The model OpenRouter ACTUALLY used this turn (from response_metadata) —
+    ground truth for confirming a UI model-switch really took effect."""
+    try:
+        for m in reversed(agent_response.get("messages", [])):
+            md = getattr(m, "response_metadata", None) or {}
+            name = md.get("model_name") or md.get("model")
+            if name:
+                return str(name)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _is_from_cache(output: Any) -> bool:
+    """True if a tool result was served from the result cache (from_cache flag)."""
+    import json as _json
+    if isinstance(output, dict):
+        return bool(output.get("from_cache"))
+    if isinstance(output, str):
+        try:
+            return bool(_json.loads(output).get("from_cache"))
+        except Exception:  # noqa: BLE001
+            return '"from_cache": true' in output.lower()
+    return False
+
+
 def invoke_and_log(
     agent: Any,
     *,
@@ -496,6 +594,11 @@ def invoke_and_log(
     start = time.perf_counter()
     response = agent.invoke({"messages": [{"role": "user", "content": user_message}]}, config)
     latency = time.perf_counter() - start
+    # Colored per-turn timeline to the console: serving model, tools, [CACHED] tags.
+    print_turn_timeline(
+        surface=surface, user_message=user_message,
+        agent_response=response, latency_seconds=latency,
+    )
     log_turn(
         model=get_active_model_id(),
         surface=surface,
@@ -562,6 +665,12 @@ def stream_and_log(
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
     if surface == "voice":
         config["recursion_limit"] = 25
+    else:
+        # Backstop against tool-loops (some models re-call the same search 5-7×,
+        # hanging the turn for 90s). ~12 steps = the model + up to ~5 tool cycles,
+        # plenty for a legit multi-tool turn, but caps a runaway loop. Generous
+        # enough not to cut mid-tool-call (which would corrupt the thread).
+        config["recursion_limit"] = 12
     start = time.perf_counter()
 
     def _process_chunk(mode: str, chunk: Any) -> list[str]:

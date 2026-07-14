@@ -131,6 +131,43 @@ def place_call(number: str, *, schedule_unix: int | None = None) -> dict[str, An
         return {"error": str(e), "number": number}
 
 
+# Which provider the "Get a call" button uses: "livekit" (self-hosted, Sarvam,
+# real-time heartbeats) or "vapi" (legacy). Default livekit.
+VOICE_CALL_PROVIDER = os.getenv("VOICE_CALL_PROVIDER", "livekit").strip().lower()
+
+
+def place_call_livekit(number: str) -> dict[str, Any]:
+    """Outbound call via LiveKit (dials through Twilio, Nikki dispatched into the
+    room). The LiveKit worker (voice_livekit.py) must be running. Returns a dict
+    shaped like place_call() so the Streamlit UI can treat both the same."""
+    number = _normalize_phone(number)
+    if not number:
+        return {"error": "no phone number"}
+    try:
+        import livekit_config
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"livekit_config unavailable: {e}", "number": number}
+    try:
+        # livekit_config.place_call is async; run it in a fresh loop (Streamlit
+        # calls this from a sync context).
+        res = asyncio.run(livekit_config.place_call(number))
+    except Exception as e:  # noqa: BLE001
+        log.error("livekit_call_failed", number=number, error=str(e))
+        return {"error": str(e), "number": number}
+    if res.get("error"):
+        log.error("livekit_call_failed", number=number, error=res["error"])
+        return {"error": res["error"], "number": number}
+    log.info("livekit_call_placed", number=number, room=res.get("room"))
+    return {"status": "ringing", "number": number, "room": res.get("room")}
+
+
+def place_call_auto(number: str) -> dict[str, Any]:
+    """Dispatch to the configured provider (VOICE_CALL_PROVIDER)."""
+    if VOICE_CALL_PROVIDER == "vapi":
+        return place_call(number)
+    return place_call_livekit(number)
+
+
 # =============================================================================
 # Per-call TRACE (for the Streamlit Voice tab)
 # =============================================================================
@@ -141,6 +178,36 @@ _TRACES: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=50)
 _KNOWN_SESSIONS: set[str] = set()
 
 
+# The LiveKit worker runs in a SEPARATE process from the Streamlit UI, so the
+# in-memory _TRACES here aren't visible to the UI. Mirror every turn to a shared
+# JSON file that the UI reads directly (same machine). Best-effort — never let a
+# trace write break a live call.
+_TRACE_FILE = os.getenv(
+    "VOICE_TRACE_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".voice_trace.json"),
+)
+
+
+def _flush_trace_file() -> None:
+    try:
+        snapshot = {sid: list(turns) for sid, turns in _TRACES.items()}
+        tmp = _TRACE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, default=str)
+        os.replace(tmp, _TRACE_FILE)  # atomic
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def read_trace_file() -> dict[str, list[dict[str, Any]]]:
+    """Read the cross-process trace file (used by the Streamlit UI)."""
+    try:
+        with open(_TRACE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _record_turn(session_id: str, turn: dict[str, Any]) -> None:
     with _TRACE_LOCK:
         # New call detected — wipe all previous sessions so only current call is visible
@@ -149,6 +216,7 @@ def _record_turn(session_id: str, turn: dict[str, Any]) -> None:
             _KNOWN_SESSIONS.clear()
             _KNOWN_SESSIONS.add(session_id)
         _TRACES[session_id].append(turn)
+        _flush_trace_file()
 
 
 def _patch_last_turn(session_id: str, extra: dict[str, Any]) -> None:
@@ -157,6 +225,7 @@ def _patch_last_turn(session_id: str, extra: dict[str, Any]) -> None:
         turns = _TRACES.get(session_id)
         if turns:
             turns[-1].update(extra)
+            _flush_trace_file()
 
 
 def get_trace(session_id: str | None = None) -> dict[str, list[dict[str, Any]]]:
@@ -332,6 +401,15 @@ def format_for_voice(text: str) -> str:
     sentences = re.split(r"(?<=[.!?])\s+", text)
     if len(sentences) > 2:
         text = " ".join(sentences[:2])
+
+    # Word backstop: even 2 sentences can be a wall of numbers. Keep it crisp —
+    # nobody wants long answers on a call. Trim to ~35 words at a sentence break.
+    words = text.split()
+    if len(words) > 35:
+        clipped = " ".join(words[:35])
+        # Cut back to the last sentence end so we don't stop mid-phrase.
+        m = re.search(r"^(.*[.!?])", clipped)
+        text = (m.group(1) if m else clipped).strip()
 
     return text
 

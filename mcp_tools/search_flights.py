@@ -31,25 +31,21 @@ from reference_data_loader import resolve_iata
 
 logger = logging.getLogger(__name__)
 
-# All airline IATA codes to fan out across (from client-provided list)
-AIRLINE_PROVIDERS: list[str] = [
-    "AI", "IX", "6E", "SG", "QP", "9I", "S5",   # Indian carriers
-    "EK", "EY", "FZ", "QR",                        # Gulf carriers
-    "TK", "SQ", "TR", "MH", "OD", "TG", "FD",    # Asian/ME carriers
-    "UL", "CX", "JL", "NH", "KE", "OZ",           # Asia-Pacific
-    "LH", "LX", "OS", "AF", "KL", "BA", "VS",    # European
-    "AY", "SU",                                     # European cont.
-    "DL", "UA", "AA", "AS", "WN", "B6",           # US carriers
-    "AC", "WS",                                     # Canadian
-    "QF", "VA", "NZ",                              # Oceania
-]
+# FAST-FIRST strategy (measured per-code latency, HYD↔DXB India-Gulf routes):
+#   - The "" all-airlines pass is COMPLETE (~135 flights) but SLOW (~15s).
+#   - A handful of carrier codes are fast AND carry the real inventory Indian
+#     travellers want: AI (~2.5s, 27 flights), 6E, EK, FZ, QR, UL, SQ.
+#   - The other ~35 codes return 0 for these routes and some are slow → skip.
+# So: fire the FAST high-yield codes first → return as soon as ~2 respond (first
+# paint in ~2-3s), THEN run the "" all-airlines pass in the background to backfill
+# the COMPLETE set into the cache for "show more"/filters.
+FAST_PROVIDERS: list[str] = ["AI", "6E", "EK", "FZ", "QR", "UL", "SQ"]
+BACKFILL_PROVIDERS: list[str] = [""]  # complete all-airlines pass (slow, background)
 
-# Workers for the thread pool — enough to fan out all providers
-_MAX_WORKERS = 20
+_MAX_WORKERS = 7  # fire all fast codes at once
 
-# How many providers to wait for before returning first results
-# (wait for at least this many to respond, then return immediately)
-_MIN_PROVIDERS_BEFORE_RETURN = 3
+# Return to the user as soon as this many fast providers respond WITH results.
+_MIN_PROVIDERS_BEFORE_RETURN = 2
 
 
 def _search_one_provider(
@@ -88,6 +84,32 @@ def _search_one_provider(
     except Exception as e:
         logger.debug("Provider %s failed: %s", airline_code, e)
         return airline_code, []
+
+
+def _forward_date(date_str: str) -> str:
+    """If an ISO date is in the past, roll its YEAR forward to the next future
+    occurrence. Guards against models passing a stale year (e.g. 2023) for a bare
+    date like '3 aug', which would make the flight API return zero results.
+    Non-ISO / unparseable input is returned unchanged."""
+    from datetime import date, datetime as _dt
+    try:
+        d = _dt.strptime(date_str, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return date_str
+    today = date.today()
+    if d >= today:
+        return date_str
+    # Past date — advance the year until it's today or later.
+    y = today.year
+    while True:
+        try:
+            candidate = d.replace(year=y)
+        except ValueError:  # e.g. Feb 29 on a non-leap year
+            y += 1
+            continue
+        if candidate >= today:
+            return candidate.isoformat()
+        y += 1
 
 
 def _per_adult(o: Any, searched_pax: int) -> float:
@@ -130,7 +152,13 @@ def _impl(
         child_ages:      Age of each child (length must equal children).
         cabin:           'Y' economy / 'S' premium economy / 'C' business / 'F' first.
         max_stops:       Max layovers (default 2).
-        max_results:     Options to return to agent (default 5). Cache holds all.
+        max_results:     Options to return (default 5). When the customer asks to
+                         "see more" / "show 10 options", CALL THIS TOOL AGAIN with a
+                         higher max_results (e.g. 10 or 15) — the cache already holds
+                         hundreds of options across all airlines, so a second call is
+                         instant and returns MORE variety (different airlines/prices),
+                         NOT the same 5. Never tell the customer "that's all" without
+                         re-calling with a higher max_results first.
         airline_filter:  IATA code to filter results from cache (e.g. "EK" for Emirates).
                          Only filters display — does not re-search.
 
@@ -144,6 +172,14 @@ def _impl(
         Round-trip: pass both departure_date AND return_date
     """
     try:
+        # Defense-in-depth: small models sometimes pass a PAST year (e.g. llama
+        # defaulting "3 aug" to 2023) → the supplier returns 0 flights. If a date
+        # is in the past, bump its year forward to today/next occurrence so the
+        # search actually returns results instead of a confusing "no flights".
+        departure_date = _forward_date(departure_date)
+        if return_date:
+            return_date = _forward_date(return_date)
+
         origin_iata = resolve_iata(origin_city)
         dest_iata = resolve_iata(destination_city)
         if not origin_iata:
@@ -161,11 +197,11 @@ def _impl(
             if airline_filter:
                 code = airline_filter.upper()
                 all_opts = [o for o in all_opts if _matches_airline(o, code)]
-            display = all_opts[:max_results]
+            display = _diversify(all_opts, max_results)
             return {
                 "options": display,
-                "cheapest_price_inr": all_opts[0]["price_inr"] if all_opts else None,
-                "cheapest_price_per_adult_inr": all_opts[0].get("price_per_adult_inr") if all_opts else None,
+                "cheapest_price_inr": display[0]["price_inr"] if display else None,
+                "cheapest_price_per_adult_inr": display[0].get("price_per_adult_inr") if display else None,
                 "total_results": len(display),
                 "cached_total": len(all_opts),
                 "providers_done": cached.providers_done,
@@ -173,120 +209,113 @@ def _impl(
                 "from_cache": True,
                 "trip_type": trip_type,
                 "pricing_note": "price_total_inr is full party; price_per_adult_inr is per adult.",
+                # STOP signal — these results are ready. The model must present
+                # them now and NOT call search_flights again this turn.
+                "agent_instructions": (
+                    "These flight results are READY. Present them to the customer "
+                    "now in your reply. DO NOT call search_flights again — you "
+                    "already have the results."
+                ),
                 "search_params": cached.search_params,
             }
 
-        # --- Multi-provider fan-out ---
-        providers = AIRLINE_PROVIDERS
-        search_params = {
-            "origin": origin_city,
-            "origin_iata": origin_iata,
-            "destination": destination_city,
-            "destination_iata": dest_iata,
-            "departure_date": departure_date,
-            "return_date": return_date,
-            "adults": adults,
-            "children": children,
-            "pax_count": searched_pax,
-            "trip_type": trip_type,
-        }
-
+        # --- FAST-FIRST + background backfill ---
+        # Fire the fast high-yield airline codes concurrently, return as soon as
+        # MIN_PROVIDERS respond (first paint ~2-3s), then run the complete ""
+        # all-airlines pass in the background to fill the cache.
         import threading
 
-        all_options: list[dict[str, Any]] = []
-        providers_done: list[str] = []
-        providers_pending: list[str] = list(providers)
-        lock = threading.Lock()
-        early_result: dict[str, Any] = {}
+        search_params = {
+            "origin": origin_city, "origin_iata": origin_iata,
+            "destination": destination_city, "destination_iata": dest_iata,
+            "departure_date": departure_date, "return_date": return_date,
+            "adults": adults, "children": children,
+            "pax_count": searched_pax, "trip_type": trip_type,
+        }
 
-        # Pre-seed the cache entry so background thread can update it
-        entry = set_entry(
+        all_options: list[dict[str, Any]] = []
+        seen_fares: set = set()
+        done: list[str] = []
+        lock = threading.Lock()
+        ready = threading.Event()
+
+        set_entry(
             origin_iata, dest_iata, departure_date, return_date, adults, children,
-            options=[],
-            providers_done=[],
-            providers_pending=list(providers),
+            options=[], providers_done=[], providers_pending=list(FAST_PROVIDERS),
             search_params=search_params,
         )
 
-        def _run_all_providers():
-            """Background fan-out — fires all providers, updates cache as each returns."""
-            with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
-                futures = {
-                    executor.submit(
-                        _search_one_provider,
-                        code,
-                        origin_iata, dest_iata,
-                        departure_date, return_date,
-                        adults, children, child_ages,
-                        cabin, max_stops,
-                    ): code
-                    for code in providers
-                }
-                for future in as_completed(futures):
-                    airline_code, options = future.result()
-                    with lock:
-                        providers_done.append(airline_code)
-                        if airline_code in providers_pending:
-                            providers_pending.remove(airline_code)
-                        if options:
-                            dicts = [_to_dict(o, searched_pax) for o in options]
-                            seen = {o.get("fare_source_code") for o in all_options}
-                            for d in dicts:
-                                if d.get("fare_source_code") not in seen:
-                                    all_options.append(d)
-                                    seen.add(d.get("fare_source_code"))
-                        # Update cache incrementally so callers see progressive results
-                        sorted_now = sorted(all_options, key=lambda o: o.get("price_inr", float("inf")))
-                        update_entry(
-                            origin_iata, dest_iata, departure_date, return_date, adults, children,
-                            new_options=sorted_now,
-                            providers_done=list(providers_done),
-                            providers_pending=list(providers_pending),
-                        )
-                        # Unblock the main thread once MIN_PROVIDERS responded with results
-                        if (
-                            not early_result
-                            and len(providers_done) >= _MIN_PROVIDERS_BEFORE_RETURN
-                            and all_options
-                        ):
-                            early_result["ready"] = True
-                            ready_event.set()
+        def _merge(code: str, opts: list[Any]) -> None:
+            with lock:
+                done.append(code)
+                for o in opts:
+                    d = _to_dict(o, searched_pax)
+                    fsc = d.get("fare_source_code")
+                    if fsc not in seen_fares:
+                        seen_fares.add(fsc)
+                        all_options.append(d)
+                all_options.sort(key=lambda o: o.get("price_inr", float("inf")))
+                update_entry(
+                    origin_iata, dest_iata, departure_date, return_date, adults, children,
+                    new_options=list(all_options), providers_done=list(done), providers_pending=[],
+                )
+                if not ready.is_set() and all_options and len(done) >= _MIN_PROVIDERS_BEFORE_RETURN:
+                    ready.set()
 
-            # Final update — all done
-            ready_event.set()
+        def _worker(codes: list[str]) -> None:
+            try:
+                with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
+                    futs = {ex.submit(_search_one_provider, c, origin_iata, dest_iata,
+                            departure_date, return_date, adults, children, child_ages,
+                            cabin, max_stops): c for c in codes}
+                    for f in as_completed(futs):
+                        code, opts = f.result()
+                        _merge(code, opts)
+                # Background backfill: the complete "" all-airlines pass.
+                for c in BACKFILL_PROVIDERS:
+                    _, opts = _search_one_provider(c, origin_iata, dest_iata,
+                        departure_date, return_date, adults, children, child_ages, cabin, max_stops)
+                    _merge(c, opts)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("flight fan-out error (non-fatal): %s", e)
+            finally:
+                ready.set()
 
-        ready_event = threading.Event()
-        bg_thread = threading.Thread(target=_run_all_providers, daemon=True)
-        bg_thread.start()
-
-        # Wait until MIN_PROVIDERS responded or all done (max 25s safety cap)
-        ready_event.wait(timeout=25)
+        threading.Thread(target=_worker, args=(list(FAST_PROVIDERS),), daemon=True).start()
+        ready.wait(timeout=25)  # first paint once MIN_PROVIDERS respond
 
         with lock:
-            snapshot_options = sorted(all_options, key=lambda o: o.get("price_inr", float("inf")))
-            snapshot_done = list(providers_done)
-            snapshot_pending = list(providers_pending)
+            snapshot = list(all_options)
 
-        # Apply airline filter if requested
-        display_pool = snapshot_options
+        display_pool = snapshot
         if airline_filter:
             code = airline_filter.upper()
             display_pool = [o for o in display_pool if _matches_airline(o, code)]
 
-        display = display_pool[:max_results]
-        cheapest = display_pool[0] if display_pool else None
+        # Diversify: collapse identical (airline, price) fares + cap per airline so
+        # the customer sees variety (IndiGo, Emirates, Air India…), not one airline.
+        display = _diversify(display_pool, max_results)
+        cheapest = display[0] if display else None
 
         return {
             "options": display,
             "cheapest_price_inr": cheapest["price_inr"] if cheapest else None,
             "cheapest_price_per_adult_inr": cheapest.get("price_per_adult_inr") if cheapest else None,
             "total_results": len(display),
-            "cached_total": len(snapshot_options),
-            "providers_done": snapshot_done,
-            "providers_still_loading": snapshot_pending,
+            "cached_total": len(snapshot),
+            "providers_done": list(done),
+            "providers_still_loading": [],
             "from_cache": False,
             "trip_type": trip_type,
             "pricing_note": "price_total_inr is full party; price_per_adult_inr is per adult.",
+            # STOP signal — same as the cached path. Without this the model often
+            # re-calls search_flights, and that extra LLM round truncates the
+            # streamed reply mid-sentence (seen as "Quick question: How" cut off).
+            "agent_instructions": (
+                "These flight results are READY. Present them to the customer "
+                "now in your reply. DO NOT call search_flights again — you "
+                "already have the results."
+            ),
             "search_params": search_params,
         }
 
@@ -296,6 +325,51 @@ def _impl(
     except Exception as e:
         logger.exception("search_flights unexpected error")
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
+
+
+def _diversify(options: list[dict[str, Any]], limit: int, per_airline: int | None = None) -> list[dict[str, Any]]:
+    """Pick up to `limit` options showing airline VARIETY (price-sorted input).
+
+    Two passes:
+      1. Drop exact (airline, rounded price) duplicates — the supplier returns
+         many identical-fare rows that differ only by flight number.
+      2. Cap each airline to `per_airline` in the shown set so one cheap airline
+         can't monopolise all slots; backfill remaining slots if we run short.
+
+    per_airline scales with the request: a small list (5) caps at 2/airline for
+    variety; a "show me 10" list allows more per airline so we can actually fill
+    the slots instead of running short.
+    """
+    if per_airline is None:
+        per_airline = 2 if limit <= 6 else max(3, limit // 3)
+    def key(o: dict[str, Any]) -> tuple:
+        return (o.get("airline", ""), round(float(o.get("price_inr") or 0)))
+
+    seen_fare: set[tuple] = set()
+    deduped: list[dict[str, Any]] = []
+    for o in options:  # already price-sorted
+        k = key(o)
+        if k in seen_fare:
+            continue
+        seen_fare.add(k)
+        deduped.append(o)
+
+    picked: list[dict[str, Any]] = []
+    counts: dict[str, int] = {}
+    overflow: list[dict[str, Any]] = []
+    for o in deduped:
+        a = o.get("airline", "")
+        if counts.get(a, 0) < per_airline:
+            picked.append(o)
+            counts[a] = counts.get(a, 0) + 1
+        else:
+            overflow.append(o)
+        if len(picked) >= limit:
+            break
+    # If diversity capping left us short of `limit`, backfill from overflow.
+    if len(picked) < limit:
+        picked.extend(overflow[: limit - len(picked)])
+    return picked[:limit]
 
 
 def _matches_airline(option: dict[str, Any], iata_code: str) -> bool:

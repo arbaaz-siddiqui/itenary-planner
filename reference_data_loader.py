@@ -26,11 +26,31 @@ def _load_dubai_hotels() -> dict[str, Any]:
         return json.load(f)  # type: ignore[no-any-return]
 
 
+@lru_cache(maxsize=1)
+def _iata_index() -> dict[str, dict[str, Any]]:
+    """Reverse map: IATA code (upper) -> city record. Lets us accept a raw code
+    like "HYD" as input — LLMs frequently pass the airport code instead of the
+    city name, which would otherwise fail to resolve."""
+    idx: dict[str, dict[str, Any]] = {}
+    for rec in (_load_cities().get("cities") or {}).values():
+        code = (rec or {}).get("iata")
+        if code:
+            idx[str(code).upper()] = rec
+    return idx
+
+
 def resolve_city(name: str) -> dict[str, Any] | None:
     if not name:
         return None
     key = name.strip().lower().split(",")[0].strip()
-    return (_load_cities().get("cities") or {}).get(key)
+    hit = (_load_cities().get("cities") or {}).get(key)
+    if hit:
+        return hit
+    # Fall back: the input may be a 3-letter IATA code (e.g. "HYD", "DXB").
+    token = name.strip().upper()
+    if len(token) == 3 and token.isalpha():
+        return _iata_index().get(token)
+    return None
 
 
 def resolve_iata(name: str) -> str | None:
