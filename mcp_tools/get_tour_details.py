@@ -30,6 +30,7 @@ def _impl(tour_id: int) -> dict[str, Any]:
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
-get_tour_details_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+get_tour_details_tool = tool(cache_impl("get_tour_details")(_impl))
 get_tour_details_tool.name = "get_tour_details"
 mcp.tool(name="get_tour_details")(_impl)

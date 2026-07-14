@@ -152,7 +152,13 @@ def _impl(
         child_ages:      Age of each child (length must equal children).
         cabin:           'Y' economy / 'S' premium economy / 'C' business / 'F' first.
         max_stops:       Max layovers (default 2).
-        max_results:     Options to return to agent (default 5). Cache holds all.
+        max_results:     Options to return (default 5). When the customer asks to
+                         "see more" / "show 10 options", CALL THIS TOOL AGAIN with a
+                         higher max_results (e.g. 10 or 15) — the cache already holds
+                         hundreds of options across all airlines, so a second call is
+                         instant and returns MORE variety (different airlines/prices),
+                         NOT the same 5. Never tell the customer "that's all" without
+                         re-calling with a higher max_results first.
         airline_filter:  IATA code to filter results from cache (e.g. "EK" for Emirates).
                          Only filters display — does not re-search.
 
@@ -302,6 +308,14 @@ def _impl(
             "from_cache": False,
             "trip_type": trip_type,
             "pricing_note": "price_total_inr is full party; price_per_adult_inr is per adult.",
+            # STOP signal — same as the cached path. Without this the model often
+            # re-calls search_flights, and that extra LLM round truncates the
+            # streamed reply mid-sentence (seen as "Quick question: How" cut off).
+            "agent_instructions": (
+                "These flight results are READY. Present them to the customer "
+                "now in your reply. DO NOT call search_flights again — you "
+                "already have the results."
+            ),
             "search_params": search_params,
         }
 
@@ -313,7 +327,7 @@ def _impl(
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
-def _diversify(options: list[dict[str, Any]], limit: int, per_airline: int = 2) -> list[dict[str, Any]]:
+def _diversify(options: list[dict[str, Any]], limit: int, per_airline: int | None = None) -> list[dict[str, Any]]:
     """Pick up to `limit` options showing airline VARIETY (price-sorted input).
 
     Two passes:
@@ -321,7 +335,13 @@ def _diversify(options: list[dict[str, Any]], limit: int, per_airline: int = 2) 
          many identical-fare rows that differ only by flight number.
       2. Cap each airline to `per_airline` in the shown set so one cheap airline
          can't monopolise all slots; backfill remaining slots if we run short.
+
+    per_airline scales with the request: a small list (5) caps at 2/airline for
+    variety; a "show me 10" list allows more per airline so we can actually fill
+    the slots instead of running short.
     """
+    if per_airline is None:
+        per_airline = 2 if limit <= 6 else max(3, limit // 3)
     def key(o: dict[str, Any]) -> tuple:
         return (o.get("airline", ""), round(float(o.get("price_inr") or 0)))
 
