@@ -25,3 +25,7 @@ pandas==3.0.3
 openpyxl==3.1.5
 filelock==3.29.0
 fpdf2==2.8.7
+# LiveKit SERVER SDK only (lightweight: protocol + aiohttp, NO agents/onnx/av).
+# The chat service needs this so the "Get a call" button can dispatch an outbound
+# call via livekit_config.place_call() without the heavy voice-worker stack.
+livekit-api==1.2.0

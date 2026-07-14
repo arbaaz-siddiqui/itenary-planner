@@ -42,7 +42,14 @@ cmds = [
 ]
 
 [deploy]
-startCommand = "PYTHONPATH=/app python voice_livekit.py start"
+# NOTE: the repo also has a standalone `nixpacks.toml` that Nixpacks reads
+# DIRECTLY and which installs ONLY requirements.txt (no livekit). That overrode
+# this file's build.nixpacksPlan, so the container booted without livekit-agents
+# and crashed ("No module named 'livekit'"). Fix: install the livekit stack in
+# the start command (idempotent, runs in the same venv Nixpacks built) so it's
+# guaranteed regardless of which build config wins. First boot pays a ~1-2 min
+# pip cost; subsequent restarts are fast (pip finds everything satisfied).
+startCommand = "/opt/venv/bin/pip install -r requirements.livekit.txt && PYTHONPATH=/app /opt/venv/bin/python voice_livekit.py start"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 numReplicas = 1
