@@ -17,7 +17,7 @@ from core import InvalidSettingError, MissingApiKey
 from settings import get_llm_settings
 
 
-def build_anthropic_llm(*, temperature: float = 0.3, max_tokens: int = 4096) -> BaseChatModel:
+def build_anthropic_llm(*, temperature: float = 0.3, max_tokens: int = 1500) -> BaseChatModel:
     try:
         from langchain_anthropic import ChatAnthropic
     except ImportError as e:
@@ -40,34 +40,39 @@ def build_anthropic_llm(*, temperature: float = 0.3, max_tokens: int = 4096) -> 
     )
 
 
-def build_openrouter_llm(*, temperature: float = 0.3, max_tokens: int = 4096) -> ChatOpenAI:
+def build_openrouter_llm(
+    *, temperature: float = 0.3, max_tokens: int = 1500, model_override: str | None = None
+) -> ChatOpenAI:
     s = get_llm_settings()
     if not s.openrouter_api_key:
         raise MissingApiKey(
             "OPENROUTER_API_KEY is required when LLM_PROVIDER=openrouter",
             provider="openrouter",
         )
-    # OpenRouter routes a model across several upstream providers, and a flaky
-    # one intermittently returns an EMPTY response (seen on longer turns) →
-    # "Provider returned an empty response" → the turn errors out with "temporary
-    # error". Two mitigations:
-    #   - max_retries: retry the transient failure automatically (usually a
-    #     different provider serves the retry successfully).
-    #   - provider.allow_fallbacks: let OpenRouter fail over to another provider
-    #     for the same model instead of erroring.
+    # OpenRouter routes a model across several upstream providers. `allow_fallbacks`
+    # + retries were tried to dodge occasional empty responses, but that let
+    # OpenRouter route kimi to SLOW hosts (Novita 26s, etc.) and retry-churn added
+    # latency — turns ballooned to ~50s. Pinning to a fast, reliable shortlist and
+    # dropping retries restores the speed the earlier branches had while still
+    # avoiding the flaky empty-response hosts.
+    #   order            — try these fast hosts first, in order
+    #   allow_fallbacks  — if all shortlisted hosts are down, still fall through
+    fast_hosts = [h.strip() for h in (s.openrouter_providers or "").split(",") if h.strip()]
+    extra_body = None
+    if fast_hosts:
+        extra_body = {"provider": {"order": fast_hosts, "allow_fallbacks": True}}
     return ChatOpenAI(
-        model=s.openrouter_model,
+        model=model_override or s.openrouter_model,
         api_key=s.openrouter_api_key,
         base_url=s.openrouter_base_url,
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=120,
-        max_retries=3,
-        extra_body={"provider": {"allow_fallbacks": True}},
+        **({"extra_body": extra_body} if extra_body else {}),
     )
 
 
-def build_selfhosted_llm(*, temperature: float = 0.3, max_tokens: int = 4096) -> ChatOpenAI:
+def build_selfhosted_llm(*, temperature: float = 0.3, max_tokens: int = 1500) -> ChatOpenAI:
     """Self-hosted Qwen via vLLM (OpenAI-compatible endpoint).
 
     Spin up vLLM like:
@@ -88,13 +93,18 @@ def build_selfhosted_llm(*, temperature: float = 0.3, max_tokens: int = 4096) ->
     )
 
 
-def build_llm(*, temperature: float = 0.3, max_tokens: int = 4096) -> BaseChatModel:
-    """Factory — reads LLM_PROVIDER, returns the right LLM."""
+def build_llm(
+    *, temperature: float = 0.3, max_tokens: int = 1500, model_override: str | None = None
+) -> BaseChatModel:
+    """Factory — reads LLM_PROVIDER, returns the right LLM. `model_override` lets
+    the UI switch the OpenRouter model live without editing .env."""
     s = get_llm_settings()
     if s.provider == "anthropic":
         return build_anthropic_llm(temperature=temperature, max_tokens=max_tokens)
     if s.provider == "openrouter":
-        return build_openrouter_llm(temperature=temperature, max_tokens=max_tokens)
+        return build_openrouter_llm(
+            temperature=temperature, max_tokens=max_tokens, model_override=model_override
+        )
     if s.provider == "selfhosted":
         return build_selfhosted_llm(temperature=temperature, max_tokens=max_tokens)
     raise InvalidSettingError(
