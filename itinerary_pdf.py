@@ -31,6 +31,36 @@ _ASSETS = Path(__file__).resolve().parent / "assets"
 HEADER_IMG = _ASSETS / "letterhead_header.jpg"
 FOOTER_IMG = _ASSETS / "letterhead_footer.jpg"
 
+def _coerce_amount(value: Any) -> float | None:
+    """Best-effort money -> float. Returns None only for a genuinely absent amount.
+
+    The caller is usually an LLM tool call, so amounts arrive in whatever shape
+    the model emitted: 217366, "217366", "1,24,500", "Rs 45,000.00". Treating a
+    numeric STRING as "no price" is what made every PDF row read "On Request",
+    so parse those instead of dropping them.
+
+    `bool` is rejected explicitly: it subclasses int, so True would otherwise
+    render as a real price of Rs 1.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        # Strip currency symbols/codes, thousands separators and whitespace.
+        cleaned = value.strip()
+        for token in ("₹", "INR", "Rs.", "Rs", "rs"):
+            cleaned = cleaned.replace(token, "")
+        cleaned = cleaned.replace(",", "").replace(" ", "").strip()
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
 BRAND_RED = (238, 74, 52)  # Gujju Tours accent (from the footer banner)
 INK = (33, 37, 41)
 MUTED = (110, 116, 124)
@@ -120,35 +150,41 @@ def itinerary_doc_from_dict(data: dict[str, Any]) -> ItineraryDoc:
     components = []
     for c in data.get("components") or []:
         if isinstance(c, dict):
-            amt = c.get("amount_inr")
             components.append(
                 LineItem(
                     label=str(c.get("label") or ""),
                     detail=str(c.get("detail") or ""),
-                    amount_inr=float(amt) if isinstance(amt, (int, float)) else None,
+                    amount_inr=_coerce_amount(c.get("amount_inr")),
                 )
             )
 
     schedule = []
     for s in data.get("payment_schedule") or []:
-        if isinstance(s, dict) and isinstance(s.get("amount_inr"), (int, float)):
-            schedule.append(
-                PaymentInstallment(
-                    label=str(s.get("label") or ""),
-                    amount_inr=float(s["amount_inr"]),
-                    due_date_iso=str(s.get("due_date_iso") or ""),
-                )
+        if not isinstance(s, dict):
+            continue
+        # A string amount used to fail the isinstance check and silently DROP
+        # the whole installment row from the payment plan. Coerce, and skip only
+        # when there is genuinely no parseable amount.
+        amount = _coerce_amount(s.get("amount_inr"))
+        if amount is None:
+            continue
+        schedule.append(
+            PaymentInstallment(
+                label=str(s.get("label") or ""),
+                amount_inr=amount,
+                due_date_iso=str(s.get("due_date_iso") or ""),
             )
+        )
 
-    total = data.get("total_inr")
-    nights = data.get("nights")
+    total = _coerce_amount(data.get("total_inr"))
+    nights_raw = _coerce_amount(data.get("nights"))
     return ItineraryDoc(
         customer_name=str(data.get("customer_name") or ""),
         destination=str(data.get("destination") or "Dubai"),
         origin_city=str(data.get("origin_city") or ""),
         start_date=str(data.get("start_date") or ""),
         end_date=str(data.get("end_date") or ""),
-        nights=int(nights) if isinstance(nights, (int, float)) else None,
+        nights=int(nights_raw) if nights_raw is not None else None,
         party_summary=str(data.get("party_summary") or ""),
         reference=str(data.get("reference") or ""),
         overview=str(data.get("overview") or ""),
@@ -156,7 +192,7 @@ def itinerary_doc_from_dict(data: dict[str, Any]) -> ItineraryDoc:
         components=components,
         inclusions=_items("inclusions"),
         exclusions=_items("exclusions"),
-        total_inr=float(total) if isinstance(total, (int, float)) else None,
+        total_inr=total,
         payment_schedule=schedule,
         notes=_items("notes"),
     )

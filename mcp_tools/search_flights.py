@@ -119,11 +119,80 @@ def _per_adult(o: Any, searched_pax: int) -> float:
     return round(o.price_inr / pax, 2) if pax else o.price_inr
 
 
+def _fmt_hm(minutes: Any) -> str:
+    """184 -> '3h 04m'. Empty string when unknown."""
+    try:
+        m = int(minutes)
+    except (TypeError, ValueError):
+        return ""
+    if m <= 0:
+        return ""
+    return f"{m // 60}h {m % 60:02d}m"
+
+
+def _clock(ts: Any) -> str:
+    """'2026-09-15 22:25:00' -> '22:25'. Empty string when unparseable."""
+    text = str(ts or "").strip()
+    if " " in text:
+        time_part = text.split(" ", 1)[1]
+        if len(time_part) >= 5:
+            return time_part[:5]
+    return ""
+
+
+def _leg_summary(segments: Any) -> dict[str, Any]:
+    """Flatten a leg's segments into the few facts a customer actually compares.
+
+    The supplier returns departure/arrival times, terminals, aircraft, seats
+    remaining and operating-vs-marketing airline per segment, but the reply only
+    ever quoted airline + price. Surfacing these as flat fields means the agent
+    can state them without walking the nested structure (and without inventing
+    them).
+    """
+    if not isinstance(segments, list) or not segments:
+        return {}
+    first, last = segments[0], segments[-1]
+    if not isinstance(first, dict) or not isinstance(last, dict):
+        return {}
+
+    # A codeshare — sold by one airline, flown by another — matters to customers.
+    codeshare = ""
+    marketing = str(first.get("marketing_airline") or "").strip()
+    operating = str(first.get("operating_airline") or "").strip()
+    if marketing and operating and marketing.lower() != operating.lower():
+        codeshare = f"{marketing} (operated by {operating})"
+
+    layovers = [
+        f"{s.get('from_airport', '')} {_fmt_hm(s.get('layover_min'))}".strip()
+        for s in segments[1:]
+        if isinstance(s, dict) and s.get("layover_min")
+    ]
+
+    return {
+        "departure_time": _clock(first.get("departure")),
+        "arrival_time": _clock(last.get("arrival")),
+        "departure_terminal": str(first.get("departure_terminal") or ""),
+        "arrival_terminal": str(last.get("arrival_terminal") or ""),
+        "flight_numbers": [
+            str(s.get("flight_number")) for s in segments
+            if isinstance(s, dict) and s.get("flight_number")
+        ],
+        "aircraft": str(first.get("aircraft") or ""),
+        "seats_remaining": first.get("seats_remaining"),
+        "codeshare": codeshare,
+        "layovers": layovers,
+    }
+
+
 def _to_dict(o: Any, searched_pax: int) -> dict[str, Any]:
     d = o.model_dump()
     d["price_total_inr"] = o.price_inr
     d["price_per_adult_inr"] = _per_adult(o, searched_pax)
     d["pax_count"] = o.pax_count or searched_pax
+    d["duration_display"] = _fmt_hm(d.get("duration_min"))
+    d["outbound"] = _leg_summary(d.get("segments_outbound"))
+    if d.get("segments_return"):
+        d["inbound"] = _leg_summary(d.get("segments_return"))
     return d
 
 

@@ -38,6 +38,7 @@ from core import (
     TourOption,
     TransferNormalizationError,
     TransferOption,
+    VisaDocument,
     VisaNormalizationError,
     VisaOption,
     to_inr,
@@ -820,15 +821,46 @@ def _parse_visa_option(
         if pricing_available:
             break
 
-    # requiredDocuments[*] now carries name + description + isRequired
+    # requiredDocuments[*] carries name + description + isRequired. Keep the
+    # flat name list for back-compat AND the structured form, so callers can
+    # show mandatory-vs-optional and the per-document guidance text.
     documents: list[str] = []
+    documents_detailed: list[VisaDocument] = []
     for d in opt.get("requiredDocuments") or []:
         if isinstance(d, dict):
             name = d.get("applicantType") or d.get("documentName") or d.get("name")
             if name:
-                documents.append(str(name).strip())
+                clean_name = str(name).strip()
+                documents.append(clean_name)
+                documents_detailed.append(
+                    VisaDocument(
+                        name=clean_name,
+                        description=_strip_html(d.get("description")),
+                        is_required=bool(d.get("isRequired", True)),
+                    )
+                )
         elif isinstance(d, str):
             documents.append(d)
+            documents_detailed.append(VisaDocument(name=d))
+
+    # Processing tiers: the supplier exposes Normal / Express as separate rate
+    # rows. Surfacing the choice matters even when the fares are empty.
+    process_types: list[str] = []
+    for rate in opt.get("visaRates") or []:
+        if isinstance(rate, dict):
+            pt = str(rate.get("processType") or "").strip()
+            if pt and pt not in process_types:
+                process_types.append(pt)
+
+    # processingTime is free text ("3-4 Working Days") and is frequently "".
+    processing_text = str(opt.get("processingTime") or "").strip()
+    if not processing_text:
+        for rate in opt.get("visaRates") or []:
+            if isinstance(rate, dict):
+                candidate = str(rate.get("processingTime") or "").strip()
+                if candidate:
+                    processing_text = candidate
+                    break
 
     option_name = opt.get("visaOptionName") or parent_name
     return VisaOption(
@@ -839,8 +871,9 @@ def _parse_visa_option(
         stay_duration=str(opt.get("stayPeriod") or opt.get("stayDuration") or ""),
         # processingTime is now a free-text string like "3-4 Working Days"; older API gave int days
         processing_days=_extract_processing_days(
-            opt.get("processingTime") or opt.get("processingDays")
+            processing_text or opt.get("processingDays")
         ),
+        processing_time_text=processing_text,
         entry_type=str(opt.get("entryType") or "Single"),
         is_evisa=bool(opt.get("isEvisa", True)),
         price_per_person_inr=price_inr,
@@ -848,6 +881,8 @@ def _parse_visa_option(
         currency_original=currency_original,
         pricing_available=pricing_available,
         document_requirements=documents,
+        documents=documents_detailed,
+        process_types=process_types,
     )
 
 
@@ -1268,20 +1303,46 @@ def parse_hotel_descriptions_response(
     # title ("Amenities", "Dining", "Location", ...) and Description is the body text.
     # It is NOT one record-per-hotel with nested Sections. So we fold the flat
     # sections into a single hotel record.
+    # Some responses instead carry a NESTED `Sections` array per hotel record.
+    # Handle both: nested sections win for that record, else the record itself
+    # is treated as one flat section.
     sections: list[dict[str, str]] = []
     hotel_id: int | None = None
+    # Only set when a record carries its own top-level Description alongside
+    # nested Sections; that text is the hotel blurb, not a section body.
+    lead_description = ""
     for d in items:
         if not isinstance(d, dict):
             continue
         if hotel_id is None:
             hotel_id = _safe_int(_first_present(d, "HotelId", "HotelID", "hotelId"))
+
+        nested = _first_present(d, "Sections", "sections")
+        if isinstance(nested, list) and nested:
+            if not lead_description:
+                lead_description = _strip_html(
+                    _first_present(d, "Description", "description", "Text", "text")
+                )
+            for s in nested:
+                if not isinstance(s, dict):
+                    continue
+                s_title = str(
+                    _first_present(s, "Title", "Name", "Type", "title", "name") or ""
+                ).strip()
+                s_text = _strip_html(
+                    _first_present(s, "Text", "Description", "description", "text", "value")
+                )
+                if s_text:
+                    sections.append({"title": s_title, "text": s_text})
+            continue
+
         title = str(_first_present(d, "Name", "Title", "Type", "name", "title") or "").strip()
         text = _strip_html(
             _first_present(d, "Description", "description", "Text", "text", "value")
         )
         if text:
             sections.append({"title": title, "text": text})
-    combined = " ".join(s["text"] for s in sections).strip()
+    combined = lead_description or " ".join(s["text"] for s in sections).strip()
     record = {
         "hotel_id": hotel_id,
         "description": combined,
