@@ -239,15 +239,25 @@ def run_journey(j: Journey, run: int, model: str | None) -> JourneyResult:
         # Re-asking settled facts is the loudest UX failure.
         if i > 1:
             problems += _hits(reply, RE_ASK_PATTERNS)
-        problems += _hits(reply, DEFERRAL_PATTERNS)
+        # "Should I look for X?" is only a FAILURE when no work was done this
+        # turn. After a real search it is an upsell ("want a Desert Safari
+        # too?"), which is good selling, not a stall. Grading those as failures
+        # would push the agent away from offering anything.
+        if not tools:
+            problems += _hits(reply, DEFERRAL_PATTERNS)
         for pat in NOT_FOUND_PATTERNS:
             if re.search(pat, reply.lower()):
                 problems.append("claimed nothing found")
                 break
         if re.search(PHANTOM_SHARED, reply.lower()) and "shared" not in "".join(tools):
             problems.append("offered shared transfer (supplier has none)")
+        # Only a failure if the data was never fetched at ALL. Answering from a
+        # previous turn's results is correct behaviour (and is what the "ONE
+        # search per request" rule asks for) — re-calling would just be slower.
         if turn.require_any_tool and not tools:
-            problems.append("no tool called on a turn that needed data")
+            already = {t for tl in logs for t in tl.tools}
+            if not already:
+                problems.append("no tool called on a turn that needed data")
         for want in turn.expect_tools:
             if want not in tools:
                 problems.append(f"missing {want}")
