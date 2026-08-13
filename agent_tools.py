@@ -520,7 +520,13 @@ def generate_itinerary_pdf_tool(
         destination/origin_city/start_date/end_date/nights/party_summary: trip facts.
         customer_name, reference: optional personalization (quote/booking ref).
         overview: 1-2 sentence intro to the trip.
-        day_plans: [{"title": "Day 1 - Arrival", "items": ["Pickup", "Check-in"]}].
+        day_plans: [{"title": "Day 1 - Arrival", "items": [...]}] where each item
+            is EITHER a plain string ("Check-in") or, preferred, a dict rendered
+            as a Time/Activity table:
+              {"title": "Arrival at DXB", "start": "12:25",
+               "detail": "Private transfer to hotel", "kind": "transfer"}
+            `start` may be "" for untimed entries (the time column is then
+            omitted). `kind` is transfer/tour/flight/hotel/meal.
         components: priced services
             [{"label": "Flights (Air India)", "detail": "BOM->DXB return, 2 adults",
               "amount_inr": 217366}]. amount_inr null => "On Request".

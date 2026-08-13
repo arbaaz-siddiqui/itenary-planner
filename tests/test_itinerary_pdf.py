@@ -136,6 +136,96 @@ class TestAmountCoercion:
         assert doc.total_inr == 261994.0
         assert doc.nights == 3
 
+
+# =============================================================================
+# Day plans — regression for raw dicts printed into the PDF
+# =============================================================================
+class TestDayItems:
+    """The agent sends day entries as dicts. They were flattened with str(x),
+    so the PDF printed a literal Python dict:
+        {'detail': 'Private transfer to hotel', 'kind': 'transfer', ...}
+    """
+
+    def test_dict_items_are_parsed_into_fields(self) -> None:
+        doc = itinerary_doc_from_dict(
+            {
+                "day_plans": [
+                    {
+                        "title": "Day 1 - Arrival",
+                        "items": [
+                            {
+                                "title": "Arrival at DXB",
+                                "start": "12:25",
+                                "detail": "Private transfer to hotel",
+                                "kind": "transfer",
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+        item = doc.day_plans[0].items[0]
+        assert item.title == "Arrival at DXB"
+        assert item.start == "12:25"
+        assert item.detail == "Private transfer to hotel"
+        assert item.kind == "transfer"
+
+    def test_plain_strings_still_supported(self) -> None:
+        doc = itinerary_doc_from_dict(
+            {"day_plans": [{"title": "Day 1", "items": ["Pickup", "Check-in"]}]}
+        )
+        assert [i.title for i in doc.day_plans[0].items] == ["Pickup", "Check-in"]
+        assert all(i.start == "" for i in doc.day_plans[0].items)
+
+    def test_alias_keys_are_accepted(self) -> None:
+        doc = itinerary_doc_from_dict(
+            {
+                "day_plans": [
+                    {
+                        "title": "Day 2",
+                        "items": [{"name": "Museum", "time": "10:00",
+                                   "description": "Culture", "type": "tour"}],
+                    }
+                ]
+            }
+        )
+        item = doc.day_plans[0].items[0]
+        assert (item.title, item.start, item.detail, item.kind) == (
+            "Museum", "10:00", "Culture", "tour",
+        )
+
+    def test_unknown_dict_shape_degrades_to_text_not_repr(self) -> None:
+        """Never print a Python dict; fall back to its values as text."""
+        doc = itinerary_doc_from_dict(
+            {"day_plans": [{"title": "Day 3", "items": [{"weird": "Sunset cruise"}]}]}
+        )
+        rendered = doc.day_plans[0].items[0].title
+        assert "Sunset cruise" in rendered
+        assert "{" not in rendered and "weird" not in rendered
+
+    @pytest.mark.parametrize("bad", [None, "", [], {}, 0])
+    def test_empty_items_are_dropped(self, bad: Any) -> None:
+        doc = itinerary_doc_from_dict({"day_plans": [{"title": "D", "items": [bad]}]})
+        assert doc.day_plans[0].items == []
+
+    def test_renders_without_dict_repr_in_pdf(self) -> None:
+        """End-to-end: the rendered bytes must not contain a dict repr."""
+        doc = itinerary_doc_from_dict(
+            {
+                "day_plans": [
+                    {
+                        "title": "Day 1 - Arrival",
+                        "items": [{"title": "Arrival at DXB", "start": "12:25",
+                                   "detail": "Private transfer", "kind": "transfer"}],
+                    }
+                ]
+            }
+        )
+        pdf = build_itinerary_pdf(doc)
+        assert pdf[:5] == b"%PDF-"
+        assert b"'kind':" not in pdf
+        assert b"'detail':" not in pdf
+
     def test_unicode_does_not_crash_core_fonts(self) -> None:
         """Rupee sign, en-dashes, curly quotes must fold to latin-1 safely."""
         doc = itinerary_doc_from_dict(
