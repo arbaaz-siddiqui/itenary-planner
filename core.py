@@ -602,6 +602,22 @@ class RestaurantOption(BaseModel):
 # =============================================================================
 # === MODELS — visa
 # =============================================================================
+class VisaDocument(BaseModel):
+    """One document the applicant must supply, with the supplier's guidance text.
+
+    NOTE on `is_required`: the supplier currently returns isRequired=false for
+    EVERY document, including the passport copy — the field is unpopulated, not
+    a real mandatory/optional signal. We keep it for when the data improves, but
+    callers must NOT present these as optional. Use `checklist_documents` on
+    VisaOption, which treats the whole list as required.
+    """
+
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+    name: str
+    description: str = ""
+    is_required: bool = True
+
+
 class VisaOption(BaseModel):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
     visa_id: int | str
@@ -609,6 +625,7 @@ class VisaOption(BaseModel):
     validity: str = ""
     stay_duration: str = ""
     processing_days: int = 0
+    processing_time_text: str = ""
     entry_type: str = ""
     is_evisa: bool = True
     price_per_person_inr: float = 0.0
@@ -616,12 +633,35 @@ class VisaOption(BaseModel):
     currency_original: str = "INR"
     pricing_available: bool = False
     document_requirements: list[str] = Field(default_factory=list)
+    # Richer detail the supplier returns that the flat list above drops.
+    documents: list[VisaDocument] = Field(default_factory=list)
+    process_types: list[str] = Field(default_factory=list)  # e.g. ["Normal", "Express"]
 
     @property
     def price_display(self) -> str:
         if not self.pricing_available or self.price_per_person_inr == 0:
             return "On Request"
         return format_inr(self.price_per_person_inr)
+
+    @property
+    def processing_display(self) -> str:
+        """Never claim '0 days'. The supplier often returns an empty string."""
+        if self.processing_time_text:
+            return self.processing_time_text
+        if self.processing_days > 0:
+            return f"{self.processing_days} working days"
+        return "Confirm with supplier"
+
+    @property
+    def checklist_documents(self) -> list[VisaDocument]:
+        """Every document, treated as required.
+
+        Deliberately does NOT split on `is_required`: the supplier returns false
+        for all of them (passport copy included), so a mandatory/optional split
+        would tell customers their passport is optional. Revisit if the supplier
+        starts populating the flag.
+        """
+        return list(self.documents)
 
 
 # =============================================================================
