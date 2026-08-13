@@ -71,25 +71,28 @@ def _hotel_name_from_coords(lat: float, lng: float) -> str | None:
 
 
 def _impl(
-    hotel_lat: float,
-    hotel_lng: float,
     arrival_date: str,
+    hotel_name: str = "",
+    hotel_lat: float | None = None,
+    hotel_lng: float | None = None,
     arrival_time: str = "12:00",
     return_date: str | None = None,
     return_time: str = "12:00",
     adults: int = 2,
     transfer_type: str = "",
     hotel_place_id: str = "",
-    hotel_name: str = "",
     max_results: int = 20,
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
     """Search Dubai airport ↔ hotel transfers with shared/private pricing logic.
 
     Args:
-        hotel_lat:      Hotel latitude — use the `latitude` field from the hotel in search_hotels result.
-                        Each hotel in search_hotels now includes latitude/longitude directly.
-        hotel_lng:      Hotel longitude — use the `longitude` field from the hotel in search_hotels result.
-        arrival_date:   Arrival date ISO (yyyy-mm-dd)
+        arrival_date:   Arrival date ISO (yyyy-mm-dd) — REQUIRED.
+        hotel_name:     The hotel the customer picked (from search_hotels). STRONGLY
+                        preferred — with a good name the tool resolves coords itself.
+        hotel_lat:      Hotel latitude (optional) — the `latitude` from search_hotels.
+        hotel_lng:      Hotel longitude (optional) — the `longitude` from search_hotels.
+                        Pass hotel_name OR coords; name alone is enough.
         arrival_time:   Arrival time HH:MM (default "12:00")
         return_date:    Departure date for return leg ISO (yyyy-mm-dd), or None for one-way
         return_time:    Return pickup time HH:MM (default "12:00")
@@ -98,7 +101,6 @@ def _impl(
                         Ask the customer BEFORE calling: "Private gaadi chahiye ya sharing?"
         hotel_place_id: Google Place ID of the hotel. Optional — leave empty string if unknown.
                         The transfer API can match on lat/lng coordinates alone.
-        hotel_name:     Hotel name for display purposes.
         max_results:    Max options to return (default 5)
 
     PRICING RULES (always explain these to the customer):
@@ -138,6 +140,8 @@ def _impl(
         try:
             from booking_api import call_entity_search
             if not _generic:
+                # Name given → entity search canonicalises it AND gives authoritative
+                # coords. This is why coords are OPTIONAL: a good name is enough.
                 res = call_entity_search(service="hotels", query=hotel_name.strip(), size=5)
                 hits = [
                     h for h in (res.get("data") or [])
@@ -150,9 +154,9 @@ def _impl(
                     hotel_name = hits[0].get("name_text") or hotel_name
                     logger.info("transfer_resolved_by_name name=%s lat=%s lng=%s",
                                 hotel_name, hotel_lat, hotel_lng)
-            else:
-                # No usable name — find the nearest hotel to the given coords so we
-                # can send a real toLocationName the supplier will match on.
+            elif hotel_lat is not None and hotel_lng is not None:
+                # No usable name but we have coords — reverse-resolve the nearest
+                # hotel so we can send a real toLocationName the supplier matches on.
                 resolved = _hotel_name_from_coords(hotel_lat, hotel_lng)
                 if resolved:
                     hotel_name = resolved
@@ -160,6 +164,22 @@ def _impl(
                                 hotel_name, hotel_lat, hotel_lng)
         except Exception as _e:
             logger.warning("transfer hotel resolve failed: %s", _e)
+
+        # Neither a usable name NOR coordinates → we can't search. Ask the agent to
+        # get the hotel first (graceful — no crash, no fake "unavailable").
+        if hotel_lat is None or hotel_lng is None:
+            return {
+                "options": [],
+                "total_results": 0,
+                "available": False,
+                "message": "Need the customer's hotel first to search airport transfers.",
+                "agent_instructions": (
+                    "You called transfers without a hotel. First confirm which hotel "
+                    "the customer picked (from search_hotels), then call this tool "
+                    "again with that hotel_name. Do NOT tell the customer transfers "
+                    "are unavailable — you simply need the hotel."
+                ),
+            }
 
         raw = call_transfer_search(
             from_lat=float(airport["lat"]),
@@ -258,6 +278,8 @@ def _impl(
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
-search_transfers_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+
+search_transfers_tool = tool(cache_impl("search_airport_transfer_dubai")(_impl))
 search_transfers_tool.name = "search_airport_transfer_dubai"
 mcp.tool(name="search_airport_transfer_dubai")(_impl)

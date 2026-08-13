@@ -43,6 +43,7 @@ def _impl(hotel_ids: list[int], city_id: int = 0, max_results: int = 20) -> dict
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
-get_hotel_description_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+get_hotel_description_tool = tool(cache_impl("get_hotel_description")(_impl))
 get_hotel_description_tool.name = "get_hotel_description"
 mcp.tool(name="get_hotel_description")(_impl)

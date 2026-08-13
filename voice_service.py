@@ -131,6 +131,43 @@ def place_call(number: str, *, schedule_unix: int | None = None) -> dict[str, An
         return {"error": str(e), "number": number}
 
 
+# Which provider the "Get a call" button uses: "livekit" (self-hosted, Sarvam,
+# real-time heartbeats) or "vapi" (legacy). Default livekit.
+VOICE_CALL_PROVIDER = os.getenv("VOICE_CALL_PROVIDER", "livekit").strip().lower()
+
+
+def place_call_livekit(number: str) -> dict[str, Any]:
+    """Outbound call via LiveKit (dials through Twilio, Nikki dispatched into the
+    room). The LiveKit worker (voice_livekit.py) must be running. Returns a dict
+    shaped like place_call() so the Streamlit UI can treat both the same."""
+    number = _normalize_phone(number)
+    if not number:
+        return {"error": "no phone number"}
+    try:
+        import livekit_config
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"livekit_config unavailable: {e}", "number": number}
+    try:
+        # livekit_config.place_call is async; run it in a fresh loop (Streamlit
+        # calls this from a sync context).
+        res = asyncio.run(livekit_config.place_call(number))
+    except Exception as e:  # noqa: BLE001
+        log.error("livekit_call_failed", number=number, error=str(e))
+        return {"error": str(e), "number": number}
+    if res.get("error"):
+        log.error("livekit_call_failed", number=number, error=res["error"])
+        return {"error": res["error"], "number": number}
+    log.info("livekit_call_placed", number=number, room=res.get("room"))
+    return {"status": "ringing", "number": number, "room": res.get("room")}
+
+
+def place_call_auto(number: str) -> dict[str, Any]:
+    """Dispatch to the configured provider (VOICE_CALL_PROVIDER)."""
+    if VOICE_CALL_PROVIDER == "vapi":
+        return place_call(number)
+    return place_call_livekit(number)
+
+
 # =============================================================================
 # Per-call TRACE (for the Streamlit Voice tab)
 # =============================================================================
@@ -141,6 +178,36 @@ _TRACES: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=50)
 _KNOWN_SESSIONS: set[str] = set()
 
 
+# The LiveKit worker runs in a SEPARATE process from the Streamlit UI, so the
+# in-memory _TRACES here aren't visible to the UI. Mirror every turn to a shared
+# JSON file that the UI reads directly (same machine). Best-effort — never let a
+# trace write break a live call.
+_TRACE_FILE = os.getenv(
+    "VOICE_TRACE_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".voice_trace.json"),
+)
+
+
+def _flush_trace_file() -> None:
+    try:
+        snapshot = {sid: list(turns) for sid, turns in _TRACES.items()}
+        tmp = _TRACE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, default=str)
+        os.replace(tmp, _TRACE_FILE)  # atomic
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def read_trace_file() -> dict[str, list[dict[str, Any]]]:
+    """Read the cross-process trace file (used by the Streamlit UI)."""
+    try:
+        with open(_TRACE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _record_turn(session_id: str, turn: dict[str, Any]) -> None:
     with _TRACE_LOCK:
         # New call detected — wipe all previous sessions so only current call is visible
@@ -149,6 +216,7 @@ def _record_turn(session_id: str, turn: dict[str, Any]) -> None:
             _KNOWN_SESSIONS.clear()
             _KNOWN_SESSIONS.add(session_id)
         _TRACES[session_id].append(turn)
+        _flush_trace_file()
 
 
 def _patch_last_turn(session_id: str, extra: dict[str, Any]) -> None:
@@ -157,6 +225,7 @@ def _patch_last_turn(session_id: str, extra: dict[str, Any]) -> None:
         turns = _TRACES.get(session_id)
         if turns:
             turns[-1].update(extra)
+            _flush_trace_file()
 
 
 def get_trace(session_id: str | None = None) -> dict[str, list[dict[str, Any]]]:
@@ -332,6 +401,15 @@ def format_for_voice(text: str) -> str:
     sentences = re.split(r"(?<=[.!?])\s+", text)
     if len(sentences) > 2:
         text = " ".join(sentences[:2])
+
+    # Word backstop: even 2 sentences can be a wall of numbers. Keep it crisp —
+    # nobody wants long answers on a call. Trim to ~35 words at a sentence break.
+    words = text.split()
+    if len(words) > 35:
+        clipped = " ".join(words[:35])
+        # Cut back to the last sentence end so we don't stop mid-phrase.
+        m = re.search(r"^(.*[.!?])", clipped)
+        text = (m.group(1) if m else clipped).strip()
 
     return text
 
@@ -697,30 +775,44 @@ async def vapi_chat_completions(request: Request) -> Any:
             yield "data: [DONE]\n\n"
             return
 
-        # 1. Backchannel + filler — spoken immediately (~200ms after caller stops).
-        # await sleep(0) yields control back to FastAPI so it flushes this chunk
-        # to Vapi over TCP before we block the executor. Without it the event loop
-        # stays synchronous and Vapi may not receive the chunk until the first
-        # wait_for timeout fires 4s later.
+        # HOW VAPI STREAMING WORKS (confirmed by testing):
+        # Each SSE chunk = one TTS utterance spoken immediately as it arrives.
+        # So: chunk1 spoken → chunk2 spoken → ... in sequence.
+        # Key rule: keep each chunk SHORT (one sentence) so TTS finishes it
+        # quickly and the next chunk plays before too much silence builds up.
+        # WRONG: bundle backchannel + filler + heartbeats into one chunk — Vapi
+        #        speaks the whole thing at once, heartbeats pile up and play after.
+        # RIGHT: send each phrase as its own chunk with a small async gap so
+        #        Vapi has time to start speaking before the next chunk arrives.
+
+        # 1. Backchannel — immediate, ~1 word, spoken in <500ms
         backchannel = _pick_backchannel(transcript, intent)
+        yield _sse_chunk(cid, model, {"content": backchannel}, None)
+        await asyncio.sleep(0)  # flush to Vapi NOW before executor starts
+
+        # 2. Filler — echoes back what we understood, sent 300ms later so
+        #    Vapi finishes speaking the backchannel first
+        await asyncio.sleep(0.3)
         filler = _build_smart_filler(transcript, intent)
         filler_text = backchannel + " " + filler
-        yield _sse_chunk(cid, model, {"content": filler_text}, None)
-        await asyncio.sleep(0)  # flush to Vapi NOW before executor starts
+        yield _sse_chunk(cid, model, {"content": " " + filler}, None)
         t_filler = round(time.perf_counter() - t0, 3)
         log.info("voice_filler_sent", session=session_id[:8], t_s=t_filler, text=filler_text)
         print(f"💬 FILLER [{session_id[:8]}] @{t_filler}s → {filler_text}", flush=True)
 
-        # 2. Run planner in background thread
+        # 3. Run planner in background thread (starts immediately alongside filler)
         loop = asyncio.get_event_loop()
         future = loop.run_in_executor(None, run_planner_turn, transcript, session_id)
 
-        # 3. Heartbeat every 4s while planner runs — Vapi speaks each as it arrives
+        # 3. Heartbeat every 4s while planner runs — each one is a fresh short
+        #    chunk so Vapi speaks it immediately as a new utterance.
+        #    Gap between heartbeats = 4s, giving TTS ~3s to speak + 1s silence.
         heartbeat_idx = 0
         heartbeat_log: list[dict[str, Any]] = []
         while not future.done():
             try:
                 await asyncio.wait_for(asyncio.shield(future), timeout=4.0)
+                break  # future completed within 4s window
             except asyncio.TimeoutError:
                 phrase = _HEARTBEATS[heartbeat_idx % len(_HEARTBEATS)]
                 yield _sse_chunk(cid, model, {"content": " " + phrase}, None)
@@ -750,7 +842,7 @@ async def vapi_chat_completions(request: Request) -> Any:
             "t_results_s": t_results,
         })
 
-        # 4. Real answer
+        # 5. Real answer — comes in as its own chunk, Vapi speaks after last heartbeat
         if heartbeat_idx > 0:
             final_reply = "Results aa gaye. " + final_reply
         yield _sse_chunk(cid, model, {"content": " " + final_reply}, None)

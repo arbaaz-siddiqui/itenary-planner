@@ -80,6 +80,7 @@ def _merge_addresses(base: list[dict[str, Any]], addr: list[dict[str, Any]]) -> 
                 h[field] = a[field]
 
 
-get_hotel_info_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+get_hotel_info_tool = tool(cache_impl("get_hotel_info")(_impl))
 get_hotel_info_tool.name = "get_hotel_info"
 mcp.tool(name="get_hotel_info")(_impl)

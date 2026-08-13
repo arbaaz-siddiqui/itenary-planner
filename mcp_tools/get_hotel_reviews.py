@@ -42,6 +42,7 @@ def _impl(hotel_id: int, max_reviews: int = 10) -> dict[str, Any]:
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
-get_hotel_reviews_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+get_hotel_reviews_tool = tool(cache_impl("get_hotel_reviews")(_impl))
 get_hotel_reviews_tool.name = "get_hotel_reviews"
 mcp.tool(name="get_hotel_reviews")(_impl)

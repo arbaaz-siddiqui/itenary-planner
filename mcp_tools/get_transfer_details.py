@@ -62,6 +62,7 @@ def _impl(
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
-get_transfer_details_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+get_transfer_details_tool = tool(cache_impl("get_transfer_details")(_impl))
 get_transfer_details_tool.name = "get_transfer_details"
 mcp.tool(name="get_transfer_details")(_impl)

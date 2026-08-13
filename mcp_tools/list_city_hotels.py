@@ -64,6 +64,7 @@ def _impl(
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
-list_city_hotels_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+list_city_hotels_tool = tool(cache_impl("list_city_hotels")(_impl))
 list_city_hotels_tool.name = "list_city_hotels"
 mcp.tool(name="list_city_hotels")(_impl)

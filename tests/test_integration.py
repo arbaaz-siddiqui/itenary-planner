@@ -339,19 +339,24 @@ def test_transfer_search_uses_a_o_codes() -> None:
     assert sent["TransferRateTypes"] == [
         {"TransferRateTypeId": 1, "Count": 1, "transferRateTypeName": "Adult"}
     ]
-    # New collection (June 2026): CAPITALIZED date keys, no agtMkp/agtMkpType.
-    # This is what fixed transfer search (live-verified). Pin it as a regression.
+    # CAPITALIZED date key (the supplier reads this casing).
     assert sent["DepartureDate"] == "2026-06-25"
     assert "departureDate" not in sent  # old lowercase key must be gone
-    assert "agtMkp" not in sent
-    assert "agtMkpType" not in sent
+    # agtMkp/agtMkpType/agtMkpCurrId ARE required — the payload was aligned with
+    # the client's working cURL in 319e0c4 and the supplier rejects the request
+    # without them. This test previously asserted their absence, which was the
+    # pre-319e0c4 contract.
+    assert sent["agtMkp"] == 0
+    assert sent["agtMkpType"] == 0
+    assert sent["agtMkpCurrId"] == 2
 
 
 @responses.activate
-def test_transfer_search_oneway_falls_back_to_departure_date() -> None:
-    # The staging API rejects an empty returnDate with HTTP 400
-    # ("Search data cannot be null") even for one-way searches. When no
-    # return_date is given we must send the departure date, not "".
+def test_transfer_search_oneway_omits_return_keys() -> None:
+    # One-way sends NO return keys at all. An earlier revision sent
+    # ReturnDate=departure_date to dodge an HTTP 400 on an EMPTY returnDate,
+    # but the payload was later aligned with the client's working cURL
+    # (319e0c4), which omits returnDate/returnTime entirely when isRoundTrip=0.
     responses.post(
         f"{BASE_URL}/api/transferservices/TransferList",
         json={"result": []},
@@ -369,8 +374,11 @@ def test_transfer_search_oneway_falls_back_to_departure_date() -> None:
         adults=1,
     )
     sent = json.loads(responses.calls[0].request.body)
-    assert sent["ReturnDate"] == "2026-06-25"  # NOT empty; capitalized per new collection
-    assert sent["isRoundTrip"] == 0  # still one-way
+    assert sent["isRoundTrip"] == 0  # one-way
+    assert "returnDate" not in sent
+    assert "ReturnDate" not in sent
+    assert "returnTime" not in sent
+    assert sent["DepartureDate"] == "2026-06-25"
 
 
 @responses.activate

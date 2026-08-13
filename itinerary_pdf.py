@@ -31,6 +31,74 @@ _ASSETS = Path(__file__).resolve().parent / "assets"
 HEADER_IMG = _ASSETS / "letterhead_header.jpg"
 FOOTER_IMG = _ASSETS / "letterhead_footer.jpg"
 
+def _coerce_day_items(raw: Any) -> list[DayItem]:
+    """Normalise day-plan entries to DayItem.
+
+    Accepts the agent's dicts ({title, start, detail, kind}) and plain strings
+    (older callers / free-text lines). Unknown key spellings fall back through a
+    few aliases so a slightly different shape degrades to readable text rather
+    than a printed Python dict.
+    """
+    if not isinstance(raw, list):
+        return []
+    out: list[DayItem] = []
+    for x in raw:
+        if isinstance(x, dict):
+            item = DayItem(
+                title=str(x.get("title") or x.get("name") or x.get("activity") or "").strip(),
+                start=str(x.get("start") or x.get("time") or x.get("start_time") or "").strip(),
+                detail=str(x.get("detail") or x.get("description") or x.get("note") or "").strip(),
+                kind=str(x.get("kind") or x.get("type") or x.get("category") or "").strip(),
+            )
+            # A dict with none of the known keys would render blank; keep its
+            # text rather than losing the row entirely.
+            if item.is_empty:
+                item = DayItem(title=" ".join(str(v) for v in x.values() if v))
+            if not item.is_empty:
+                out.append(item)
+        elif isinstance(x, str):
+            text = x.strip()
+            if text:
+                out.append(DayItem(title=text))
+        elif isinstance(x, (list, tuple, set)):
+            # A nested collection has no sensible single-line form; stringifying
+            # it would print "[]" or "['a', 'b']" into the PDF.
+            continue
+        elif x not in (None, 0, False):
+            out.append(DayItem(title=str(x)))
+    return out
+
+
+def _coerce_amount(value: Any) -> float | None:
+    """Best-effort money -> float. Returns None only for a genuinely absent amount.
+
+    The caller is usually an LLM tool call, so amounts arrive in whatever shape
+    the model emitted: 217366, "217366", "1,24,500", "Rs 45,000.00". Treating a
+    numeric STRING as "no price" is what made every PDF row read "On Request",
+    so parse those instead of dropping them.
+
+    `bool` is rejected explicitly: it subclasses int, so True would otherwise
+    render as a real price of Rs 1.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        # Strip currency symbols/codes, thousands separators and whitespace.
+        cleaned = value.strip()
+        for token in ("₹", "INR", "Rs.", "Rs", "rs"):
+            cleaned = cleaned.replace(token, "")
+        cleaned = cleaned.replace(",", "").replace(" ", "").strip()
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
 BRAND_RED = (238, 74, 52)  # Gujju Tours accent (from the footer banner)
 INK = (33, 37, 41)
 MUTED = (110, 116, 124)
@@ -56,11 +124,31 @@ class LineItem:
 
 
 @dataclass
+class DayItem:
+    """One scheduled entry within a day.
+
+    The agent sends these as dicts ({title, start, detail, kind}). They used to
+    be flattened with str(x), which printed the raw Python dict into the PDF:
+        {'detail': 'Private transfer to hotel', 'kind': 'transfer', ...}
+    Keeping the parts separate lets the day plan render as a real table.
+    """
+
+    title: str = ""
+    start: str = ""      # "10:00" — blank when untimed
+    detail: str = ""
+    kind: str = ""       # transfer | tour | flight | hotel | meal ...
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.title or self.detail)
+
+
+@dataclass
 class DayPlan:
     """One day of the trip."""
 
     title: str  # e.g. "Day 1 — Arrival & Marina"
-    items: list[str] = field(default_factory=list)
+    items: list[DayItem] = field(default_factory=list)
 
 
 @dataclass
@@ -113,42 +201,48 @@ def itinerary_doc_from_dict(data: dict[str, Any]) -> ItineraryDoc:
             day_plans.append(
                 DayPlan(
                     title=str(d.get("title") or ""),
-                    items=[str(x) for x in (d.get("items") or [])],
+                    items=_coerce_day_items(d.get("items")),
                 )
             )
 
     components = []
     for c in data.get("components") or []:
         if isinstance(c, dict):
-            amt = c.get("amount_inr")
             components.append(
                 LineItem(
                     label=str(c.get("label") or ""),
                     detail=str(c.get("detail") or ""),
-                    amount_inr=float(amt) if isinstance(amt, (int, float)) else None,
+                    amount_inr=_coerce_amount(c.get("amount_inr")),
                 )
             )
 
     schedule = []
     for s in data.get("payment_schedule") or []:
-        if isinstance(s, dict) and isinstance(s.get("amount_inr"), (int, float)):
-            schedule.append(
-                PaymentInstallment(
-                    label=str(s.get("label") or ""),
-                    amount_inr=float(s["amount_inr"]),
-                    due_date_iso=str(s.get("due_date_iso") or ""),
-                )
+        if not isinstance(s, dict):
+            continue
+        # A string amount used to fail the isinstance check and silently DROP
+        # the whole installment row from the payment plan. Coerce, and skip only
+        # when there is genuinely no parseable amount.
+        amount = _coerce_amount(s.get("amount_inr"))
+        if amount is None:
+            continue
+        schedule.append(
+            PaymentInstallment(
+                label=str(s.get("label") or ""),
+                amount_inr=amount,
+                due_date_iso=str(s.get("due_date_iso") or ""),
             )
+        )
 
-    total = data.get("total_inr")
-    nights = data.get("nights")
+    total = _coerce_amount(data.get("total_inr"))
+    nights_raw = _coerce_amount(data.get("nights"))
     return ItineraryDoc(
         customer_name=str(data.get("customer_name") or ""),
         destination=str(data.get("destination") or "Dubai"),
         origin_city=str(data.get("origin_city") or ""),
         start_date=str(data.get("start_date") or ""),
         end_date=str(data.get("end_date") or ""),
-        nights=int(nights) if isinstance(nights, (int, float)) else None,
+        nights=int(nights_raw) if nights_raw is not None else None,
         party_summary=str(data.get("party_summary") or ""),
         reference=str(data.get("reference") or ""),
         overview=str(data.get("overview") or ""),
@@ -156,7 +250,7 @@ def itinerary_doc_from_dict(data: dict[str, Any]) -> ItineraryDoc:
         components=components,
         inclusions=_items("inclusions"),
         exclusions=_items("exclusions"),
-        total_inr=float(total) if isinstance(total, (int, float)) else None,
+        total_inr=total,
         payment_schedule=schedule,
         notes=_items("notes"),
     )
@@ -287,7 +381,7 @@ def build_itinerary_pdf(doc: ItineraryDoc) -> bytes:
             pdf.set_font("Helvetica", "B", 11)
             pdf.set_text_color(*INK)
             pdf.multi_cell(0, 6, _ascii(day.title), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            _bullets(pdf, day.items)
+            _day_table(pdf, day.items)
             pdf.ln(1)
 
     # Selected services + pricing table
@@ -335,6 +429,52 @@ def build_itinerary_pdf(doc: ItineraryDoc) -> bytes:
 
     out = pdf.output()
     return bytes(out)
+
+
+def _day_table(pdf: _ItineraryPDF, items: list[DayItem]) -> None:
+    """Render one day's schedule as a Time | Activity table.
+
+    Mirrors the "Your Trip Includes" table so the document reads as one design.
+    The time column is dropped entirely when no entry that day is timed, so an
+    untimed itinerary doesn't get a column of blanks.
+    """
+    if not items:
+        return
+    col_time = 20 if any(i.start for i in items) else 0
+    col_main = pdf.w - pdf.l_margin - pdf.r_margin - col_time
+
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_fill_color(245, 246, 248)
+    pdf.set_text_color(*MUTED)
+    if col_time:
+        pdf.cell(col_time, 6, "  Time", border=0, fill=True)
+    pdf.cell(col_main, 6, "  Activity", border=0, fill=True,
+             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(*INK)
+
+    for it in items:
+        if col_time:
+            pdf.set_font("Helvetica", "", 9)
+            pdf.set_text_color(*MUTED)
+            pdf.cell(col_time, 6, "  " + _ascii(it.start), new_x=XPos.RIGHT, new_y=YPos.TOP)
+            pdf.set_text_color(*INK)
+        # Title carries the kind as a quiet suffix ("Arrival at DXB - transfer").
+        heading = it.title or it.detail
+        if it.kind and it.title:
+            heading = f"{heading}  ({it.kind})"
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.multi_cell(col_main, 6, "  " + _ascii(heading),
+                       new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        if it.detail and it.title:
+            pdf.set_font("Helvetica", "", 9)
+            pdf.set_text_color(*MUTED)
+            pdf.multi_cell(0, 5, "  " * (1 + col_time // 4) + _ascii(it.detail),
+                           new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_text_color(*INK)
+        pdf.set_draw_color(*RULE)
+        y = pdf.get_y() + 0.5
+        pdf.line(pdf.l_margin, y, pdf.w - pdf.r_margin, y)
+        pdf.ln(1.2)
 
 
 def _component_table(pdf: _ItineraryPDF, components: list[LineItem]) -> None:

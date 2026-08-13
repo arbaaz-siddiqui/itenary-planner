@@ -44,6 +44,7 @@ def _impl(city_name: str, max_results: int = 10) -> dict[str, Any]:
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
-lookup_hotel_city_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+lookup_hotel_city_tool = tool(cache_impl("lookup_hotel_city")(_impl))
 lookup_hotel_city_tool.name = "lookup_hotel_city"
 mcp.tool(name="lookup_hotel_city")(_impl)

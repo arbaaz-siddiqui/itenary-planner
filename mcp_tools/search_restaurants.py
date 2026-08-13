@@ -22,6 +22,7 @@ def _impl(
     adults: int = 2,
     children: int = 0,
     max_results: int = 5,
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
     """Search restaurants in the destination city."""
     try:
@@ -58,6 +59,7 @@ def _impl(
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
-search_restaurants_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+search_restaurants_tool = tool(cache_impl("search_restaurants")(_impl))
 search_restaurants_tool.name = "search_restaurants"
 mcp.tool(name="search_restaurants")(_impl)

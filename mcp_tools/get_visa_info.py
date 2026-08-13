@@ -52,10 +52,25 @@ def _impl(
             children=children,
         )
         options = parse_visa_response(raw)
+        option_dicts = []
+        for o in options:
+            d = o.model_dump()
+            # Presentation-ready extras so the agent doesn't have to derive them
+            # (and can't invent them): never "0 days", and a flat checklist.
+            d["processing_display"] = o.processing_display
+            d["price_display"] = o.price_display
+            d["document_checklist"] = [doc.name for doc in o.checklist_documents]
+            option_dicts.append(d)
         return {
-            "options": [o.model_dump() for o in options],
+            "options": option_dicts,
             "total_results": len(options),
             "pricing_available": any(o.pricing_available for o in options),
+            "pricing_note": (
+                "Visa pricing is not enabled on this supplier account — quote "
+                "visa cost as 'On Request' and confirm with the supplier."
+                if not any(o.pricing_available for o in options)
+                else ""
+            ),
             "search_params": {
                 "destination": destination_country,
                 "nationality": nationality_country,
@@ -72,6 +87,7 @@ def _impl(
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
-get_visa_info_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+get_visa_info_tool = tool(cache_impl("get_visa_info")(_impl))
 get_visa_info_tool.name = "get_visa_info"
 mcp.tool(name="get_visa_info")(_impl)

@@ -105,6 +105,7 @@ def _impl(base_currency: str = "", target_currency: str = "INR") -> dict[str, An
     }
 
 
-get_exchange_rate_tool = tool(_impl)
+from mcp_tools.result_cache import cache_impl
+get_exchange_rate_tool = tool(cache_impl("get_exchange_rate")(_impl))
 get_exchange_rate_tool.name = "get_exchange_rate"
 mcp.tool(name="get_exchange_rate")(_impl)
