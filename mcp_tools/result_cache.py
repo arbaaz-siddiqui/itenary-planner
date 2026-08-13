@@ -59,12 +59,34 @@ _TOOL_TTL = {
     "lookup_hotel_city": _STATIC_TTL,
 }
 
+# BUMP THIS whenever a tool's OUTPUT SHAPE OR SEMANTICS CHANGE.
+#
+# Why this exists: the key used to be sha1(tool_name + kwargs) with no notion of
+# code version. A fix to a tool therefore kept serving the PRE-FIX result for up
+# to the full TTL — an hour for the static tier. That is not hypothetical: a
+# customer was told "I couldn't find a Howard Johnson in Dubai. Most of the ones
+# I see are in the US or China" from a 20-minute-old cached lookup_entity result
+# created before the city-scoping fix shipped. The code was correct; the answer
+# was stale. It also made the bug unreproducible in a fresh process, which cost
+# a lot of debugging time.
+#
+# History:
+#   1 — initial
+#   2 — lookup_entity city scoping; hotel/flight payload slimming
+CACHE_EPOCH = 2
+
 _LOCK = threading.Lock()
 _CACHE: dict[str, tuple[Any, float]] = {}  # key -> (result, stored_at)
 
+# Unbounded growth guard: entries were never evicted (stale ones were merely
+# ignored), so full hotel/flight payloads accumulated for the process lifetime.
+_MAX_ENTRIES = 512
+
 
 def _key(tool: str, params: dict[str, Any]) -> str:
-    blob = json.dumps({"t": tool, "p": params}, sort_keys=True, default=str)
+    blob = json.dumps(
+        {"v": CACHE_EPOCH, "t": tool, "p": params}, sort_keys=True, default=str
+    )
     return hashlib.sha1(blob.encode()).hexdigest()[:16]
 
 
@@ -119,6 +141,14 @@ def cached_or_call(
     if cacheable:
         with _LOCK:
             _CACHE[k] = (result, now)
+            if len(_CACHE) > _MAX_ENTRIES:
+                # Drop expired entries first; if still over, evict oldest-stored.
+                for dead in [kk for kk, (_, ts) in _CACHE.items()
+                             if now - ts > _STATIC_TTL]:
+                    _CACHE.pop(dead, None)
+                while len(_CACHE) > _MAX_ENTRIES:
+                    oldest = min(_CACHE, key=lambda kk: _CACHE[kk][1])
+                    _CACHE.pop(oldest, None)
     out = dict(result) if isinstance(result, dict) else result
     if isinstance(out, dict):
         out["from_cache"] = False

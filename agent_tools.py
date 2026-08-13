@@ -661,3 +661,43 @@ def _build_all_tools() -> list[BaseTool]:
 
 
 ALL_TOOLS: list[BaseTool] = _build_all_tools()
+
+
+# =============================================================================
+# Per-surface tool sets
+# =============================================================================
+# Every surface used to receive all 35 tools — 9,773 tokens of schema on every
+# request. That matters twice over: context size is the dominant latency cost
+# (a turn with ZERO tool calls still takes ~6.5s on a 22k context), and a bigger
+# menu means more ways for the model to pick wrong. The Howard Johnson bug was
+# exactly that — the wrong tool out-attracting the right one.
+#
+# It also made prose bans unenforceable: system_prompt_voice.md says "Never call
+# display_options_tool (no screen)" while the tool was handed to voice anyway.
+# A tool the surface cannot use should not be on the menu at all.
+_UI_ONLY_TOOLS = frozenset({
+    "display_options_tool",     # renders image cards — web only
+    "build_trip_schedule_tool", # renders a calendar — web only
+})
+
+# Tools that only make sense where the customer can receive a file/link.
+_DOCUMENT_TOOLS = frozenset({"generate_itinerary_pdf_tool"})
+
+
+def tools_for_surface(surface: str) -> list[BaseTool]:
+    """Tools appropriate to a surface.
+
+    voice     — no screen, no attachments: drop UI renderers and the PDF.
+    whatsapp  — no image cards, but PDFs are delivered as attachments.
+    streamlit — everything.
+    """
+    s = (surface or "").strip().lower()
+    if s == "voice":
+        blocked = _UI_ONLY_TOOLS | _DOCUMENT_TOOLS
+    elif s == "whatsapp":
+        blocked = _UI_ONLY_TOOLS
+    else:
+        blocked = frozenset()
+    if not blocked:
+        return list(ALL_TOOLS)
+    return [t for t in ALL_TOOLS if t.name not in blocked]

@@ -32,7 +32,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.prebuilt import create_react_agent
 from langgraph.prebuilt import ToolNode
 
-from agent_tools import ALL_TOOLS
+from agent_tools import ALL_TOOLS, tools_for_surface
 from llm import build_llm, get_active_model_id
 from settings import get_state_settings
 
@@ -246,7 +246,10 @@ def build_react_agent(
             "may return empty. Use the all-services agent token (e.g. GT-021).",
         )
 
-    parallel_tools = ParallelToolNode(ALL_TOOLS)
+    # Surface-scoped: voice has no screen and cannot receive a PDF, WhatsApp has
+    # no image cards. Handing a surface tools it cannot use costs schema tokens
+    # on every request and gives the model more ways to route wrong.
+    parallel_tools = ParallelToolNode(tools_for_surface(surface))
 
     return create_react_agent(
         model=llm,

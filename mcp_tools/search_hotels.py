@@ -439,8 +439,19 @@ def _impl(
         # policy (dates + fee) was already returned inside rooms[], but it
         # collapsed to a has_free_cancellation boolean in the reply — so
         # "free until 28 Nov, then Rs 32,017" was available and never said.
+        #
+        # Then DROP rooms[]. Measured: rooms is 1,713 of ~1,800 tokens per
+        # hotel — 95% of the payload — and nothing renders it. A 5-hotel result
+        # was 10,725 tokens; without rooms it is ~741. Context size is the
+        # dominant latency cost (a zero-tool turn still takes 6.5s on a 22k
+        # context), so this is the single biggest speed win available.
+        # Room-level detail stays reachable via get_hotel_info/get_hotel_description
+        # for the ONE hotel a customer actually picks.
         for o in option_dicts:
             o["cancellation_display"] = _cancellation_display(o)
+            rooms = o.get("rooms") or []
+            o["room_options_count"] = len(rooms)
+            o.pop("rooms", None)
 
         # Coordinate enrichment: fetch lat/lng/address from the address endpoint
         # so the agent can pass hotel_lat/hotel_lng directly to search_airport_transfer_dubai

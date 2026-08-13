@@ -18,8 +18,34 @@ from mcp_tools.server import mcp
 
 logger = logging.getLogger(__name__)
 
-# Supported service types
-_VALID_SERVICES = {"hotels", "tours", "restaurants", "airlines"}
+# Supported service types.
+#
+# "hotels" is deliberately EXCLUDED. This endpoint searches worldwide, so
+# querying "Howard Johnson" returned Bakersfield / Changsha / Yibin and the
+# agent told a customer the Dubai property does not exist. Prompt and docstring
+# warnings were added and the model still routed here — a tool whose first line
+# reads "look up a hotel by name" will always out-attract one that reads "search
+# hotels in the destination city".
+#
+# search_hotels(destination_city=..., hotel_name=...) is city-scoped and
+# resolves against bookable inventory (it calls call_entity_search directly, so
+# nothing is lost by closing this path). Making the wrong call IMPOSSIBLE beats
+# instructing against it.
+_VALID_SERVICES = {"tours", "restaurants", "airlines"}
+_REDIRECTED_SERVICES = {
+    # Deliberately free of "not found" / "does not exist" wording: a model
+    # skimming this could echo the phrase to the customer, which is the exact
+    # failure being prevented. This is a ROUTING instruction, not a result.
+    "hotels": (
+        "Wrong tool for hotels — this search is worldwide and would return "
+        "same-brand properties in other countries. Retry with "
+        "search_hotels(destination_city=<city>, hotel_name=<name as the customer "
+        "said it>): it is city-scoped, resolves the property against bookable "
+        "inventory, and returns live availability and pricing in one step. "
+        "This message says nothing about whether the property is available — "
+        "only search_hotels can tell you that."
+    ),
+}
 
 
 def _impl(
@@ -28,26 +54,25 @@ def _impl(
     size: int = 5,
     city: str = "",
 ) -> dict[str, Any]:
-    """Look up a hotel, tour, restaurant, or airline by name.
+    """Resolve a TOUR, RESTAURANT or AIRLINE name to its numeric ID.
 
-    Use this BEFORE booking calls when the user names a specific property —
-    e.g. "Atlantis", "Desert Safari", "Khandani Rajdhani", "Emirates".
-    Returns the `location_id` which is the numeric ID (hotel_id / tour_id /
-    restaurant_id) accepted by all other search and detail tools.
+    NOT FOR HOTELS. For any named hotel use
+    `search_hotels(destination_city=..., hotel_name=...)` — it is city-scoped
+    and returns live availability and pricing in one call. This tool searches
+    worldwide and will happily return a same-brand hotel on another continent.
 
-    WARNING — this endpoint searches WORLDWIDE. "Howard Johnson" returns
-    properties in the US and China, not Dubai. ALWAYS pass `city` when you know
-    the destination, and never tell a customer a hotel doesn't exist based on
-    this tool alone. For a named hotel on a known trip,
-    `search_hotels(destination_city=..., hotel_name=...)` is the correct tool —
-    it is city-scoped and resolves against bookable local inventory.
+    Use before booking/detail calls when the user names a specific tour,
+    restaurant or airline — e.g. "Desert Safari", "Khandani Rajdhani",
+    "Emirates". Returns the `location_id` accepted by the other tools.
 
     Args:
-        service:  What to search — "hotels", "tours", "restaurants", or "airlines"
-        query:    Free-text name typed by the user, e.g. "Atlantis Dubai"
+        service:  "tours", "restaurants", or "airlines" (NOT "hotels")
+        query:    Free-text name typed by the user
         size:     Max results to return (default 5, max 20)
-        city:     Destination city to scope to, e.g. "Dubai". In-city matches are
-                  ranked first and `scoped_note` warns when nothing matches.
+        city:     Destination city to scope to, e.g. "Dubai". ALWAYS pass this
+                  when you know the destination — results are worldwide
+                  otherwise. In-city matches rank first and `scoped_note` warns
+                  when nothing matches.
 
     Returns a list of matches, each with:
         - id (int)              ← use this as hotel_id / tour_id / restaurant_id
@@ -61,23 +86,34 @@ def _impl(
         - iata_code (str)       ← airlines only, empty string for others
         - total_services (int)  ← how many bookable services this entity has
 
-    Usage examples:
-        lookup_entity(service="hotels", query="Atlantis Dubai")
-          → [{id: 823, name: "Atlantis The Royal", type: "hotel", city: "Dubai", ...}]
-
-        lookup_entity(service="tours", query="desert safari dubai")
+    Usage examples (note: every one passes `city`):
+        lookup_entity(service="tours", query="desert safari", city="Dubai")
           → [{id: 244, name: "Desert Safari In Faqa", type: "Tour", city: "Dubai", ...}]
 
-        lookup_entity(service="restaurants", query="khandani rajdhani")
+        lookup_entity(service="restaurants", query="khandani rajdhani", city="Dubai")
           → [{id: 4, name: "Khandani Rajdhani - Indian Restaurant in Karama", ...}]
 
         lookup_entity(service="airlines", query="emirates")
           → [{id: 176, name: "Emirates", iata_code: "EK", ...}]
 
-    Tip: filter results by type=="hotel" (not "city") when you want only
-    bookable hotel properties, not city-level suggestions.
+        # For a hotel, do NOT use this tool:
+        search_hotels(destination_city="Dubai", hotel_name="Howard Johnson", ...)
     """
     svc = service.lower().strip()
+    # Recoverable redirect: tell the model exactly which tool to call instead,
+    # rather than a bare "invalid service" it might report to the customer.
+    if svc in _REDIRECTED_SERVICES:
+        return {
+            "error": True,
+            "error_type": "WrongTool",
+            "message": _REDIRECTED_SERVICES[svc],
+            "use_instead": "search_hotels",
+            "retry_with": {
+                "tool": "search_hotels",
+                "destination_city": city or "<the trip destination>",
+                "hotel_name": query.strip(),
+            },
+        }
     if svc not in _VALID_SERVICES:
         return {
             "error": True,

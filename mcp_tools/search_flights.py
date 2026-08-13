@@ -211,6 +211,35 @@ def _baggage_display(checked: Any, cabin: Any) -> str:
     return " + ".join(parts)
 
 
+# Fields the model never reads but that cost real context. Measured on a live
+# 4-option search: fare_source_code and itinerary_source_code are ~450 tokens
+# EACH — 900 of ~1,900 tokens per option — opaque supplier booking blobs. The
+# raw segment arrays are another ~500, already summarised into outbound/inbound.
+#
+# They stay in the flight_cache entry (booking + dedup need them); only the copy
+# handed to the LLM is slimmed. get_flight_details re-fetches full fare rules
+# for the ONE flight a customer picks.
+_MODEL_DROP_FIELDS = (
+    "fare_source_code",
+    "itinerary_source_code",
+    "segments_outbound",
+    "segments_return",
+    "fare_basis_codes",
+    "penalties",
+)
+
+
+def _slim_for_model(option: dict[str, Any]) -> dict[str, Any]:
+    """Strip booking-only internals before the option reaches the LLM."""
+    slim = {k: v for k, v in option.items() if k not in _MODEL_DROP_FIELDS}
+    # Keep a short handle so the agent can still refer to a specific fare and
+    # the booking path can look the full record back up from the cache.
+    code = str(option.get("fare_source_code") or "")
+    if code:
+        slim["fare_ref"] = code[:12]
+    return slim
+
+
 def _to_dict(o: Any, searched_pax: int) -> dict[str, Any]:
     d = o.model_dump()
     d["price_total_inr"] = o.price_inr
@@ -397,6 +426,7 @@ def _impl(
         # Diversify: collapse identical (airline, price) fares + cap per airline so
         # the customer sees variety (IndiGo, Emirates, Air India…), not one airline.
         display = _diversify(display_pool, max_results)
+        display = [_slim_for_model(o) for o in display]
         cheapest = display[0] if display else None
 
         return {
