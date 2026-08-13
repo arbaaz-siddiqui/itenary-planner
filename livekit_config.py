@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import uuid
 
 from dotenv import load_dotenv
 
@@ -197,9 +198,13 @@ async def place_call(number: str, *, room_name: str | None = None) -> dict:
     if not number:
         return {"error": "no phone number"}
 
-    # A unique room per call. No Date/random here — the caller passes one, else
-    # we derive from the number (fine for one-at-a-time manual testing).
-    room = room_name or f"{ROOM_PREFIX}{number.lstrip('+')}"
+    # A unique room per call. The room name becomes the planner session_id (see
+    # voice_livekit.entrypoint), so deriving it from the phone number alone made
+    # EVERY call to a given number resume the previous call's conversation — the
+    # caller said "Dubai jana hai" and Nikki replied that flights and a hotel
+    # were already locked, from a test days earlier. The random suffix gives each
+    # call a clean session.
+    room = room_name or f"{ROOM_PREFIX}{number.lstrip('+')}-{uuid.uuid4().hex[:8]}"
 
     lk = _client()
     try:
