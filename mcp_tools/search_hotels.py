@@ -495,6 +495,30 @@ def _impl(
                 f"({room_count} room(s) booked), NOT per person. price_inr is the "
                 "room total; per_night_inr is per room per night. Do not divide by pax."
             ),
+            # search_airport_transfer_dubai needs a hotel, so it cannot run in the
+            # same parallel wave as this search. The agent kept ending the turn
+            # here and asking "Should I look for airport transfers?" — about
+            # something the customer had already asked for. Prompt rules did not
+            # hold (0/3 on the eval), so the instruction travels WITH the data
+            # the next call needs.
+            **(
+                {
+                    "next_step": {
+                        "tool": "search_airport_transfer_dubai",
+                        "reason": (
+                            "The customer asked for airport pickup/transfers. That "
+                            "search needs a hotel, which you now have — call it in "
+                            "THIS turn using the recommended hotel below. Do not ask "
+                            "the customer whether to look; they already asked."
+                        ),
+                        "hotel_name": option_dicts[0].get("hotel_name"),
+                        "hotel_lat": option_dicts[0].get("latitude"),
+                        "hotel_lng": option_dicts[0].get("longitude"),
+                    }
+                }
+                if option_dicts
+                else {}
+            ),
             "search_params": {
                 "destination": destination_city,
                 "check_in": check_in,

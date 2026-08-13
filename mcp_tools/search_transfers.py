@@ -260,6 +260,19 @@ def _impl(
                 "Shared = per-person cost (price_inr ÷ adults). "
                 "Private = per-vehicle cost (fixed regardless of pax count)."
             ),
+            # The agent offered customers a "Private car or Shared shuttle?"
+            # choice on a route where the supplier returns Private only. State
+            # what actually came back so it cannot offer phantom inventory.
+            "types_available": sorted({o["transfer_type"] for o in options_out}),
+            "availability_note": (
+                (
+                    "Only PRIVATE vehicles are available for this route — do NOT "
+                    "offer the customer a shared option or ask them to choose "
+                    "between shared and private."
+                )
+                if options_out and {o["transfer_type"] for o in options_out} == {"Private"}
+                else ""
+            ),
             "search_params": {
                 "hotel_lat": hotel_lat,
                 "hotel_lng": hotel_lng,
