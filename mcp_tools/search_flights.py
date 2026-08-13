@@ -184,6 +184,33 @@ def _leg_summary(segments: Any) -> dict[str, Any]:
     }
 
 
+def _baggage_display(checked: Any, cabin: Any) -> str:
+    """['25kg'], ['7kg'] -> '25kg check-in + 7kg cabin'.
+
+    The supplier sometimes returns '0pc'/'0kg' meaning "not specified" rather
+    than "no allowance"; those are dropped so we never tell a customer they get
+    zero baggage when we simply don't know.
+    """
+    def _clean(vals: Any) -> str:
+        if not isinstance(vals, list):
+            return ""
+        seen: list[str] = []
+        for v in vals:
+            text = str(v).strip()
+            if not text or text.lower() in ("0pc", "0kg", "0", "none"):
+                continue
+            if text not in seen:
+                seen.append(text)
+        return " / ".join(seen)
+
+    parts = []
+    if bag := _clean(checked):
+        parts.append(f"{bag} check-in")
+    if cab := _clean(cabin):
+        parts.append(f"{cab} cabin")
+    return " + ".join(parts)
+
+
 def _to_dict(o: Any, searched_pax: int) -> dict[str, Any]:
     d = o.model_dump()
     d["price_total_inr"] = o.price_inr
@@ -193,6 +220,12 @@ def _to_dict(o: Any, searched_pax: int) -> dict[str, Any]:
     d["outbound"] = _leg_summary(d.get("segments_outbound"))
     if d.get("segments_return"):
         d["inbound"] = _leg_summary(d.get("segments_return"))
+    # Baggage is a deciding fact for Indian leisure travellers, not a
+    # "breakdown" — surface it flat so the reply can quote it without walking
+    # the nested fare structure.
+    d["baggage_display"] = _baggage_display(
+        d.get("baggage_info"), d.get("cabin_baggage_info")
+    )
     return d
 
 

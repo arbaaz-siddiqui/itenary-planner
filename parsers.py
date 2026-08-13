@@ -604,35 +604,42 @@ def _parse_transfer(t: Any, rates: dict[str, float], image_base_url: str) -> Tra
     price_inr = _safe_to_inr(price, currency, rates)
     if price_inr is None:
         return None
-    transfer_type = str(t.get("transferType") or "")
+    supplier_tier = str(t.get("transferType") or "")
     vehicle_type = str(t.get("vehicleType") or "")
     vehicle_name = str(t.get("vehicleName") or "")
-    # Real supplier transferType values (confirmed from B2C): "Standard", "Private Transfer", "Large"
-    # None of the B2C results are shared — all are private vehicles.
-    # Shared detection kept in case supplier ever returns shared options.
+    # Real supplier transferType values (confirmed from B2C): "Standard",
+    # "Private Transfer", "Large" — all private vehicles. We normalise to a
+    # clear Shared|Private label, but KEEP the supplier's own tier in
+    # `supplier_tier`: overwriting it lost the Standard-vs-Large distinction
+    # whenever vehicleType was empty.
+    #
+    # Shared detection must cover the industry terms too — a "SIC"
+    # (seat-in-coach) row mislabelled Private would be quoted at a per-vehicle
+    # price for what is actually a per-seat product.
     name_lc = vehicle_name.lower()
-    transfer_type_lc = transfer_type.lower()
-    is_shared = "shared" in transfer_type_lc or "sharing" in transfer_type_lc or "shared" in name_lc
-    # "Standard", "Private Transfer", "Large" all map to Private
-    is_private = not is_shared
-    badges: list[str] = []
-    if is_shared:
-        badges.append("Shared")
-    else:
-        badges.append("Private")
+    tier_lc = supplier_tier.lower()
+    _SHARED_MARKERS = ("shared", "sharing", "seat-in-coach", "seat in coach", "sic", "group")
+
+    def _has_shared_marker(text: str) -> bool:
+        # "sic" only as a standalone token, so "Basic"/"Music" don't match.
+        tokens = re.split(r"[^a-z]+", text)
+        return any(m in text for m in _SHARED_MARKERS if m != "sic") or "sic" in tokens
+
+    is_shared = _has_shared_marker(tier_lc) or _has_shared_marker(name_lc)
+    transfer_type = "Shared" if is_shared else "Private"
+    badges: list[str] = [transfer_type]
     if vehicle_type:
         badges.append(vehicle_type)
-    # Normalize to clear Shared|Private label
-    if is_shared:
-        transfer_type = "Shared"
-    else:
-        transfer_type = "Private"
+    # Surface the supplier's tier when it says something the label doesn't.
+    if supplier_tier and supplier_tier.lower() not in (transfer_type.lower(), vehicle_type.lower()):
+        badges.append(supplier_tier)
     return TransferOption(
         transfer_id=str(t.get("transferID") or t.get("uniqueKey") or t.get("vehicleId") or ""),
         unique_key=str(t.get("uniqueKey") or ""),
         vehicle_name=str(t.get("vehicleName") or ""),
         vehicle_type=vehicle_type,
         transfer_type=transfer_type,
+        supplier_tier=supplier_tier,
         capacity=int(t.get("capacity") or 0),
         luggage_capacity=int(t.get("luggageCapacity") or 0),
         fuel_type=str(t.get("fuelType") or ""),
@@ -641,7 +648,12 @@ def _parse_transfer(t: Any, rates: dict[str, float], image_base_url: str) -> Tra
         currency_original=str(currency),
         distance_km=float(t.get("distanceKM") or 0),
         estimated_time=str(t.get("estimatedTime") or ""),
+        # The supplier sends only `policyName` ("Non refundable", "24 Hours
+        # Prior Cancellation Policy") — there is no structured cancellation
+        # data to summarise, so mirror it rather than leaving the summary
+        # field permanently empty.
         policy_name=str(t.get("policyName") or ""),
+        cancellation_policy_summary=str(t.get("policyName") or ""),
         image_url=_resolve_image_url(t.get("imagePath"), image_base_url),
         supplier_name=str(t.get("supplierName") or ""),
         badges=badges,

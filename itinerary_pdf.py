@@ -152,6 +152,28 @@ class DayPlan:
 
 
 @dataclass
+class VisaSection:
+    """Visa details, carried from the earlier get_visa_info call.
+
+    The PDF had no visa field, so visa could only ride along as a free-form
+    component line — and the agent ended up re-asking the customer for visa
+    details at PDF time even though it had already fetched them.
+    """
+
+    visa_type: str = ""
+    entry_type: str = ""
+    stay_duration: str = ""
+    validity: str = ""
+    processing: str = ""
+    price_display: str = ""     # "On Request" when the supplier has no pricing
+    documents: list[str] = field(default_factory=list)
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.visa_type or self.documents)
+
+
+@dataclass
 class PaymentInstallment:
     label: str
     amount_inr: float
@@ -176,6 +198,7 @@ class ItineraryDoc:
     overview: str = ""  # short intro paragraph
     day_plans: list[DayPlan] = field(default_factory=list)
     components: list[LineItem] = field(default_factory=list)  # selected services
+    visa: VisaSection | None = None
     inclusions: list[str] = field(default_factory=list)
     exclusions: list[str] = field(default_factory=list)
 
@@ -234,6 +257,27 @@ def itinerary_doc_from_dict(data: dict[str, Any]) -> ItineraryDoc:
             )
         )
 
+    visa_raw = data.get("visa")
+    visa = None
+    if isinstance(visa_raw, dict):
+        candidate = VisaSection(
+            visa_type=str(visa_raw.get("visa_type") or visa_raw.get("type") or "").strip(),
+            entry_type=str(visa_raw.get("entry_type") or visa_raw.get("entry") or "").strip(),
+            stay_duration=str(visa_raw.get("stay_duration") or visa_raw.get("stay") or "").strip(),
+            validity=str(visa_raw.get("validity") or "").strip(),
+            processing=str(
+                visa_raw.get("processing")
+                or visa_raw.get("processing_display")
+                or ""
+            ).strip(),
+            price_display=str(
+                visa_raw.get("price_display") or visa_raw.get("price") or ""
+            ).strip(),
+            documents=[str(d).strip() for d in (visa_raw.get("documents") or []) if str(d).strip()],
+        )
+        if not candidate.is_empty:
+            visa = candidate
+
     total = _coerce_amount(data.get("total_inr"))
     nights_raw = _coerce_amount(data.get("nights"))
     return ItineraryDoc(
@@ -248,6 +292,7 @@ def itinerary_doc_from_dict(data: dict[str, Any]) -> ItineraryDoc:
         overview=str(data.get("overview") or ""),
         day_plans=day_plans,
         components=components,
+        visa=visa,
         inclusions=_items("inclusions"),
         exclusions=_items("exclusions"),
         total_inr=total,
@@ -396,6 +441,28 @@ def build_itinerary_pdf(doc: ItineraryDoc) -> bytes:
         pdf.cell(0, 8, _ascii(f"Total (all-inclusive): {_money(doc.total_inr)}"),
                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_text_color(*INK)
+
+    # Visa — carried from the earlier get_visa_info call, never re-asked.
+    if doc.visa is not None and not doc.visa.is_empty:
+        _section_title(pdf, "Visa")
+        v = doc.visa
+        if v.visa_type:
+            _kv(pdf, "Type", _ascii(v.visa_type))
+        if v.entry_type:
+            _kv(pdf, "Entry", _ascii(v.entry_type))
+        if v.stay_duration:
+            _kv(pdf, "Stay", _ascii(v.stay_duration))
+        if v.validity:
+            _kv(pdf, "Validity", _ascii(v.validity))
+        if v.processing:
+            _kv(pdf, "Processing", _ascii(v.processing))
+        if v.price_display:
+            _kv(pdf, "Fee", _ascii(v.price_display))
+        if v.documents:
+            pdf.ln(1)
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.cell(0, 6, "Documents required", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            _bullets(pdf, v.documents)
 
     # Payment schedule
     if doc.payment_schedule:

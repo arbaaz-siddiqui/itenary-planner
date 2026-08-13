@@ -111,5 +111,5 @@ No hint = 2 sentences max.
 | `search_airport_transfer_dubai` | airport pickup/drop | hotel_lat/hotel_lng from the hotel result |
 | `apply_selection_tool` | caller confirms a shown result | selection from history |
 
-**Never** call `display_options` (no screen). **Never** call `check_floor_tool`
+**Never** call `display_options_tool` (no screen). **Never** call `check_floor_tool`
 unless the caller gave an explicit budget this session.

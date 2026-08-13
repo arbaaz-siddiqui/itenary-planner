@@ -44,6 +44,10 @@ def save_itinerary_pdf(doc: ItineraryDoc | dict) -> tuple[str, Path]:
 
     itinerary_id = _make_id(data)
     path = _dir() / f"{itinerary_id}.pdf"
+    # Content-hashed: identical content reuses the same file and id. That is
+    # intentional (no duplicate renders), and the caller still gets a valid
+    # id/path back, so a "regenerate" always returns a working link rather than
+    # appearing to do nothing.
     if not path.exists():
         path.write_bytes(build_itinerary_pdf(model))
     return itinerary_id, path

@@ -1253,14 +1253,18 @@ with chat_tab:
                 _render_calendar(entry["schedule"])
 
     # "Generate itinerary PDF" button: build from confirmed trip details using
-    # the generate_itinerary_pdf tool (real, tool-sourced numbers).
+    # the generate_itinerary_pdf_tool (real, tool-sourced numbers). The name
+    # must match the registered tool exactly — it previously said
+    # "generate_itinerary_pdf", which does not exist, so the model had to guess
+    # and the PDF often took two or three asks.
     if st.session_state.get("pdf_request_pending"):
         st.session_state.pdf_request_pending = False
         _process_message(
             "Please generate the itinerary PDF now using the trip details we've "
             "confirmed (origin, dates, party, the flights/hotel/tours/visa we "
             "discussed, the total, and the payment schedule). Call the "
-            "generate_itinerary_pdf tool with the real numbers — do not invent any."
+            "generate_itinerary_pdf_tool with the real numbers — do not invent "
+            "any, and do not ask me for details we already covered."
         )
         st.rerun()
 
