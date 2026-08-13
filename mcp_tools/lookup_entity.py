@@ -26,6 +26,7 @@ def _impl(
     service: str,
     query: str,
     size: int = 5,
+    city: str = "",
 ) -> dict[str, Any]:
     """Look up a hotel, tour, restaurant, or airline by name.
 
@@ -34,10 +35,19 @@ def _impl(
     Returns the `location_id` which is the numeric ID (hotel_id / tour_id /
     restaurant_id) accepted by all other search and detail tools.
 
+    WARNING — this endpoint searches WORLDWIDE. "Howard Johnson" returns
+    properties in the US and China, not Dubai. ALWAYS pass `city` when you know
+    the destination, and never tell a customer a hotel doesn't exist based on
+    this tool alone. For a named hotel on a known trip,
+    `search_hotels(destination_city=..., hotel_name=...)` is the correct tool —
+    it is city-scoped and resolves against bookable local inventory.
+
     Args:
         service:  What to search — "hotels", "tours", "restaurants", or "airlines"
         query:    Free-text name typed by the user, e.g. "Atlantis Dubai"
         size:     Max results to return (default 5, max 20)
+        city:     Destination city to scope to, e.g. "Dubai". In-city matches are
+                  ranked first and `scoped_note` warns when nothing matches.
 
     Returns a list of matches, each with:
         - id (int)              ← use this as hotel_id / tour_id / restaurant_id
@@ -111,15 +121,50 @@ def _impl(
     # caller searches hotels — city rows don't have a bookable hotel_id.
     hotel_results = [r for r in results if r["id"] > 0 and r["type"].lower() not in ("city", "high_level_region", "neighborhood")]
 
+    # City scoping. This endpoint searches GLOBALLY: "Howard Johnson" returns
+    # Bakersfield / Changsha / Yibin and NOT the Dubai property, which is how a
+    # customer asking about a Dubai hotel was told it only exists in the US and
+    # China. When the caller knows the destination, keep in-city matches first
+    # and report how many were dropped so the agent can't silently read out a
+    # foreign list.
+    city_filter = (city or "").strip().lower()
+    out_of_city = 0
+    if city_filter and hotel_results:
+        in_city = [r for r in hotel_results if city_filter in str(r.get("city", "")).lower()]
+        out_of_city = len(hotel_results) - len(in_city)
+        if in_city:
+            # Rank in-city first; keep the rest so the agent can still see them.
+            hotel_results = in_city + [r for r in hotel_results if r not in in_city]
+
+    scoped_note = ""
+    if city_filter:
+        if out_of_city and hotel_results and city_filter in str(hotel_results[0].get("city", "")).lower():
+            scoped_note = (
+                f"Ranked {len(hotel_results) - out_of_city} match(es) in {city} first; "
+                f"{out_of_city} result(s) are in other cities — do NOT offer those."
+            )
+        elif out_of_city == len(hotel_results):
+            scoped_note = (
+                f"NONE of these results are in {city} — this endpoint searches worldwide. "
+                f"Do NOT tell the customer the hotel doesn't exist. "
+                f"Call search_hotels(destination_city='{city}', hotel_name=...) instead, "
+                f"which resolves the property against local inventory."
+            )
+
     return {
         "results": hotel_results,
         "all_results": results,       # includes city suggestions if caller needs them
         "total": len(hotel_results),
         "service": svc,
         "query": query.strip(),
+        "city_filter": city or "",
+        "scoped_note": scoped_note,
         "usage_hint": (
-            "For hotels: pass results[0]['id'] as hotel_ids=[id] in get_hotel_info, "
-            "or pass results[0]['name'] as hotel_name in search_hotels. "
+            "This search is GLOBAL — always check each result's 'city' before showing it. "
+            "For a named hotel in a known destination, prefer "
+            "search_hotels(destination_city=..., hotel_name=...) which is city-scoped. "
+            "Otherwise: pass results[0]['id'] as hotel_ids=[id] in get_hotel_info, "
+            "or results[0]['name'] as hotel_name in search_hotels. "
             "Also capture results[0]['latitude'] and results[0]['longitude'] — "
             "you will need these as hotel_lat/hotel_lng for search_airport_transfer_dubai."
             if svc == "hotels" else

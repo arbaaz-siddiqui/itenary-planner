@@ -109,7 +109,9 @@ def _resolve_hotel_by_name(name_query: str, city_id: int) -> int | None:
     discovered = discover_city_hotel_ids(city_id)
     from booking_api import call_hotel_static_data
     from reference_data_loader import get_hotel_ids_for_city
-    curated = list(get_hotel_ids_for_city("dubai"))
+    # Use the city we resolved above, not a hardcoded "dubai" — otherwise the
+    # curated list for Dubai was searched no matter which city was requested.
+    curated = list(get_hotel_ids_for_city((_city_name or "dubai").lower()))
     top_discovered = [hid for hid, _ in (discovered or [])[:200]]
     seen: set[int] = set()
     candidate_ids: list[int] = []
@@ -296,7 +298,14 @@ def _impl(
             else:
                 return {
                     "error": True,
-                    "message": f"Could not find a hotel matching '{hotel_name}' in {city['name']}. Try a different name or search without specifying a hotel.",
+                    "message": (
+                        f"No property matching '{hotel_name}' is bookable in "
+                        f"{city['name']} for these dates. This does NOT mean the "
+                        f"hotel does not exist — tell the customer we can't book "
+                        f"it for these dates and offer to check nearby options or "
+                        f"different dates. Do not claim the hotel is in another "
+                        f"country."
+                    ),
                     "error_type": "HotelNotFound",
                     "hotel_name_searched": hotel_name,
                 }
