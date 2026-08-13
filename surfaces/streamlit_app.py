@@ -16,6 +16,7 @@ import json
 import re
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import streamlit as st
@@ -49,11 +50,28 @@ except ImportError:  # when run as `streamlit run surfaces/streamlit_app.py`
 inject_theme()
 
 
+def _prompt_fingerprint() -> float:
+    """Newest mtime across the prompt files the agent bakes in at build time.
+
+    The agent object lives in st.session_state, so an open browser tab keeps
+    using the agent — and therefore the SYSTEM PROMPT — it was built with, even
+    after the server restarts. Editing a prompt and reloading the page looked
+    like the fix hadn't applied. Rebuild when a prompt file changes.
+    """
+    root = Path(__file__).resolve().parent.parent / "prompts"
+    try:
+        return max(p.stat().st_mtime for p in root.glob("*.md"))
+    except ValueError:
+        return 0.0
+
+
 def _init_session() -> None:
-    if "agent" not in st.session_state:
+    fingerprint = _prompt_fingerprint()
+    if "agent" not in st.session_state or st.session_state.get("_prompt_fp") != fingerprint:
         st.session_state.agent = build_react_agent(
             surface="streamlit", checkpoint_store=build_in_memory_checkpoint()
         )
+        st.session_state._prompt_fp = fingerprint
     st.session_state.setdefault("thread_id", f"web_{uuid.uuid4().hex[:12]}")
     st.session_state.setdefault("chat_history", [])
     # Full debug records: one dict per tool call with turn, name, input, output.
