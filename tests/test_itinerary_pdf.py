@@ -208,6 +208,42 @@ class TestDayItems:
         doc = itinerary_doc_from_dict({"day_plans": [{"title": "D", "items": [bad]}]})
         assert doc.day_plans[0].items == []
 
+    def test_visa_section_is_carried_into_the_doc(self) -> None:
+        """Visa was re-asked at PDF time because the tool had no visa field."""
+        doc = itinerary_doc_from_dict(
+            {
+                "visa": {
+                    "visa_type": "30 Days Single Entry Tourist Visa",
+                    "entry_type": "Single",
+                    "stay_duration": "30 Days",
+                    "processing": "Confirm with supplier",
+                    "price_display": "On Request",
+                    "documents": ["Passport Copy", "Passport Size Photograph"],
+                }
+            }
+        )
+        assert doc.visa is not None
+        assert doc.visa.visa_type.startswith("30 Days")
+        assert doc.visa.documents == ["Passport Copy", "Passport Size Photograph"]
+        pdf = build_itinerary_pdf(doc)
+        assert pdf[:5] == b"%PDF-"
+
+    @pytest.mark.parametrize("raw", [None, {}, "", [], {"visa_type": "", "documents": []}])
+    def test_absent_visa_renders_no_section(self, raw: Any) -> None:
+        doc = itinerary_doc_from_dict({"visa": raw})
+        assert doc.visa is None
+        assert build_itinerary_pdf(doc)[:5] == b"%PDF-"
+
+    def test_visa_accepts_alias_keys(self) -> None:
+        doc = itinerary_doc_from_dict(
+            {"visa": {"type": "Tourist", "entry": "Multiple",
+                      "stay": "60 Days", "processing_display": "3-4 days"}}
+        )
+        assert doc.visa is not None
+        assert (doc.visa.visa_type, doc.visa.entry_type) == ("Tourist", "Multiple")
+        assert doc.visa.stay_duration == "60 Days"
+        assert doc.visa.processing == "3-4 days"
+
     def test_renders_without_dict_repr_in_pdf(self) -> None:
         """End-to-end: the rendered bytes must not contain a dict repr."""
         doc = itinerary_doc_from_dict(

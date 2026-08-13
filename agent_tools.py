@@ -499,6 +499,7 @@ def generate_itinerary_pdf_tool(
     overview: str = "",
     day_plans: list[dict[str, Any]] | None = None,
     components: list[dict[str, Any]] | None = None,
+    visa: dict[str, Any] | None = None,
     inclusions: list[str] | None = None,
     exclusions: list[str] | None = None,
     total_inr: float | None = None,
@@ -530,6 +531,15 @@ def generate_itinerary_pdf_tool(
         components: priced services
             [{"label": "Flights (Air India)", "detail": "BOM->DXB return, 2 adults",
               "amount_inr": 217366}]. amount_inr null => "On Request".
+        visa: the visa the customer chose, REUSED from the `get_visa_info` result
+            you already have — never ask the customer for this at PDF time:
+              {"visa_type": "30 Days Single Entry Tourist Visa",
+               "entry_type": "Single", "stay_duration": "30 Days",
+               "validity": "58 Days From Date Of Issue",
+               "processing": "Confirm with supplier",
+               "price_display": "On Request",
+               "documents": ["Passport Copy", "Passport Size Photograph", ...]}
+            Omit only if the trip genuinely has no visa component.
         inclusions/exclusions/notes: lists of plain strings.
         total_inr: final all-inclusive total.
         payment_schedule: [{"label": "Deposit", "amount_inr": 78598,
@@ -554,6 +564,7 @@ def generate_itinerary_pdf_tool(
         "overview": overview,
         "day_plans": day_plans or [],
         "components": components or [],
+        "visa": visa or None,
         "inclusions": inclusions or [],
         "exclusions": exclusions or [],
         "total_inr": total_inr,
