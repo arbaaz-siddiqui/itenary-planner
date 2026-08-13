@@ -222,10 +222,13 @@ def build_react_agent(
     # stay crisp AND fast. Voice is tightest; chat/whatsapp get a bit more room for
     # the option cards but still far below the old 4096 ceiling.
     if max_tokens is None:
-        # Voice stays tight (spoken). Chat/whatsapp get enough room for a longer
-        # option list when the customer asks "show me 10" — 1500 fits ~10-12
-        # one-line options without letting the model write essays.
-        max_tokens = 300 if surface == "voice" else 1500
+        # Voice stays tight (spoken) — short replies are what keep a call fast.
+        # Chat/whatsapp show 3 options with the FULL detail set each (baggage,
+        # board, cancellation terms) plus a large generate_itinerary_pdf_tool
+        # payload; 1500 left no headroom for both, so a rich itinerary could be
+        # truncated mid-tool-call. Depth is capped by the 3-option rule in the
+        # prompt, not by cutting the model off mid-sentence.
+        max_tokens = 300 if surface == "voice" else 2600
     llm = build_llm(temperature=temperature, max_tokens=max_tokens, model_override=model_override)
     checkpointer = checkpoint_store or build_in_memory_checkpoint()
 

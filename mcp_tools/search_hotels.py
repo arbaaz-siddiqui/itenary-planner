@@ -59,6 +59,41 @@ def _hotel_ids_to_search(
     return out
 
 
+def _cancellation_display(option: dict[str, Any]) -> str:
+    """One-line cancellation summary for the cheapest room.
+
+    "Free cancellation until 28-11-2026" / "Non-refundable" / "Free until
+    28-11-2026, then Rs 32,017". Empty string when the supplier told us nothing
+    — better to say nothing than to guess at a customer's refund rights.
+    """
+    if option.get("has_free_cancellation"):
+        base = "Free cancellation"
+    else:
+        base = ""
+    rooms = option.get("rooms") or []
+    if not isinstance(rooms, list) or not rooms:
+        return base or ""
+    first = rooms[0] if isinstance(rooms[0], dict) else {}
+    terms = first.get("cancellation_policy") or []
+    if not isinstance(terms, list) or not terms:
+        return base or ""
+    term = terms[0] if isinstance(terms[0], dict) else {}
+    if term.get("is_nrf"):
+        return "Non-refundable"
+    deadline = str(term.get("to_date") or "").strip()
+    fee = term.get("cancellation_price")
+    if term.get("is_free_cancellation"):
+        return f"Free cancellation until {deadline}" if deadline else "Free cancellation"
+    # Not free: state the fee and, when known, the date it applies from.
+    if isinstance(fee, (int, float)) and fee > 0:
+        from core import format_inr
+
+        if deadline:
+            return f"Cancellation fee {format_inr(fee)} (from {deadline})"
+        return f"Cancellation fee {format_inr(fee)}"
+    return base or "Non-refundable"
+
+
 def _resolve_hotel_by_name(name_query: str, city_id: int) -> int | None:
     """Resolve a hotel name to its ID using the fast public autocomplete API.
 
@@ -399,6 +434,13 @@ def _impl(
             options = filtered
 
         option_dicts = [o.model_dump() for o in options]
+
+        # Flatten the cheapest room's cancellation terms. The full per-room
+        # policy (dates + fee) was already returned inside rooms[], but it
+        # collapsed to a has_free_cancellation boolean in the reply — so
+        # "free until 28 Nov, then Rs 32,017" was available and never said.
+        for o in option_dicts:
+            o["cancellation_display"] = _cancellation_display(o)
 
         # Coordinate enrichment: fetch lat/lng/address from the address endpoint
         # so the agent can pass hotel_lat/hotel_lng directly to search_airport_transfer_dubai

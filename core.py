@@ -550,7 +550,8 @@ class TransferOption(BaseModel):
     unique_key: str = ""
     vehicle_name: str
     vehicle_type: str = ""
-    transfer_type: str
+    transfer_type: str          # normalised: "Shared" | "Private"
+    supplier_tier: str = ""     # supplier's own label: "Standard", "Large", ...
     capacity: int = 0
     luggage_capacity: int = 0
     fuel_type: str = ""
