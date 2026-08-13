@@ -234,6 +234,43 @@ class TestDayItems:
         assert doc.visa is None
         assert build_itinerary_pdf(doc)[:5] == b"%PDF-"
 
+    def test_multi_night_pdf_refuses_empty_day_plans(self) -> None:
+        """A customer given a 5-day plan in chat got a PDF with no itinerary.
+
+        day_plans is optional, so an empty one silently produced a price table
+        and nothing else. Refuse instead — the error is actionable and the model
+        retries, rather than handing over a hollow document.
+        """
+        from agent_tools import generate_itinerary_pdf_tool
+
+        fn = getattr(generate_itinerary_pdf_tool, "func", generate_itinerary_pdf_tool)
+        out = fn(destination="Dubai", nights=4,
+                 components=[{"label": "Hotel", "amount_inr": 41035}])
+        assert out["error"] is True
+        assert out["error_type"] == "MissingDayPlans"
+        assert "day_plans" in out["message"]
+
+    def test_day_trip_without_day_plans_still_renders(self) -> None:
+        """0-night trips have no schedule to show — must not be blocked."""
+        from agent_tools import generate_itinerary_pdf_tool
+
+        fn = getattr(generate_itinerary_pdf_tool, "func", generate_itinerary_pdf_tool)
+        out = fn(destination="Dubai", nights=0,
+                 components=[{"label": "Tour", "amount_inr": 500}])
+        assert not out.get("error")
+        assert out["itinerary_id"]
+
+    def test_multi_night_with_day_plans_renders(self) -> None:
+        from agent_tools import generate_itinerary_pdf_tool
+
+        fn = getattr(generate_itinerary_pdf_tool, "func", generate_itinerary_pdf_tool)
+        out = fn(destination="Dubai", nights=4,
+                 day_plans=[{"title": "Day 1", "items": [
+                     {"title": "Arrive DXB", "start": "21:55", "kind": "transfer"}]}],
+                 components=[{"label": "Hotel", "amount_inr": 41035}])
+        assert not out.get("error")
+        assert out["itinerary_id"]
+
     def test_visa_accepts_alias_keys(self) -> None:
         doc = itinerary_doc_from_dict(
             {"visa": {"type": "Tourist", "entry": "Multiple",

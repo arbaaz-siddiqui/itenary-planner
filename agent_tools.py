@@ -583,6 +583,30 @@ def generate_itinerary_pdf_tool(
         "payment_schedule": payment_schedule or [],
         "notes": notes or [],
     }
+    # A customer who was just given a day-by-day plan in chat expects to see it
+    # in the document. The model kept writing a full 5-day schedule in the reply
+    # and then calling this with day_plans empty, producing a PDF with a price
+    # table and no itinerary. day_plans is optional, so nothing objected.
+    #
+    # Refuse rather than ship a hollow PDF: this returns an actionable error the
+    # model can immediately retry, instead of a link the customer will complain
+    # about. Only enforced for multi-night trips, where a schedule is the point.
+    if not (day_plans or []) and (nights or 0) >= 1:
+        return {
+            "error": True,
+            "error_type": "MissingDayPlans",
+            "message": (
+                f"day_plans is empty for a {nights}-night trip, so the PDF would "
+                "have no itinerary — only a price table. Retry this call with "
+                "day_plans filled in: one entry per day, each item a dict like "
+                '{"title": "Dubai Fountain Show", "start": "18:00", '
+                '"detail": "Burj Khalifa lake ride", "kind": "tour"}. Use the '
+                "day-by-day plan you already described to the customer — do not "
+                "invent new activities, and do not ask them to repeat it."
+            ),
+            "retry_with": {"day_plans": "[{title, items:[{title,start,detail,kind}]}, ...]"},
+        }
+
     try:
         itinerary_id, _path = save_itinerary_pdf(data)
     except Exception as e:  # never crash the turn over a PDF

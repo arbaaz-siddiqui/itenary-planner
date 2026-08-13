@@ -71,6 +71,30 @@ NOT_FOUND_PATTERNS = [
 PHANTOM_SHARED = r"\bshared\b.{0,40}\b(?:shuttle|transfer|option)|(?:private|shared)\s*(?:car|vehicle)?\s*(?:or|vs\.?)\s*(?:shared|private)"
 
 
+def _pdf_has_day_plan() -> bool:
+    """Does the most recently written PDF contain a Day-by-Day section?
+
+    Decompresses the newest file's content streams and looks for the section
+    heading the renderer emits. Checking the tool fired is not enough — the
+    reported bug was a PDF that generated fine and contained no itinerary.
+    """
+    import glob
+    import zlib
+
+    files = glob.glob(str(Path(__file__).resolve().parent.parent / "itineraries" / "*.pdf"))
+    if not files:
+        return False
+    newest = max(files, key=lambda p: Path(p).stat().st_mtime)
+    raw = Path(newest).read_bytes()
+    text = ""
+    for m in re.finditer(rb"stream\r?\n(.*?)endstream", raw, re.S):
+        try:
+            text += zlib.decompress(m.group(1)).decode("latin-1")
+        except Exception:
+            continue
+    return "Day-by-Day" in text
+
+
 def _hits(text: str, patterns: list[tuple[str, str]]) -> list[str]:
     low = text.lower()
     out: list[str] = []
@@ -194,6 +218,30 @@ def journeys() -> list[Journey]:
             ],
         ),
         Journey(
+            # Replicates the real customer chat of 13 Aug that exposed two bugs:
+            # the agent re-asked for a flight time it had itself printed two
+            # turns earlier, and it wrote a full 5-day plan in chat then
+            # produced a PDF containing no itinerary at all.
+            id="J6_real_customer_long",
+            wants=("hotel", "flights", "transfers", "tours"),
+            turns=[
+                Turn("i want to know about the avaialbility of the Hotel Howard Johnson "
+                     "for 4 nights form 1 december to 5 december for 2 ppl 1 room",
+                     expect_tools=("search_hotels",), require_any_tool=True),
+                Turn("i want to book flights for the same dates", require_any_tool=True),
+                Turn("do we have pick up and drop options too", require_any_tool=True),
+                Turn("do we have any premium pickup?"),
+                Turn("ok what about tours available?", require_any_tool=True),
+                Turn("i want to plan a detailed iternary for my tour for all days"),
+                Turn("i want all the things i dont want to miss anything so plan "
+                     "accordingly and also mention the timings too."),
+                Turn("i am going with the cheapest Air India flight option"),
+                Turn("so lock the iternary and also now tell me what is the total amount?"),
+                Turn("also give me the pdf for all the data and what is my total amount?",
+                     expect_tools=("generate_itinerary_pdf_tool",)),
+            ],
+        ),
+        Journey(
             id="J5_hinglish",
             wants=("flights", "hotel", "visa"),
             turns=[
@@ -266,6 +314,12 @@ def run_journey(j: Journey, run: int, model: str | None) -> JourneyResult:
 
         if "generate_itinerary_pdf_tool" in tools and not pdf_attempt:
             pdf_attempt = i
+            # The customer's complaint was not "no PDF" but "the PDF has no
+            # itinerary in it" — a price table with the day-by-day plan missing,
+            # right after the agent wrote that plan out in chat. Verify the
+            # rendered document, not just that the tool fired.
+            if not _pdf_has_day_plan():
+                problems.append("PDF generated WITHOUT the day-by-day itinerary")
 
         logs.append(TurnLog(i, turn.say, reply, tools, dt, problems))
 
