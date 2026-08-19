@@ -98,10 +98,13 @@ def _impl(
         return_time:    Return pickup time HH:MM (default "12:00")
         adults:         Total number of passengers — IMPORTANT for per-person cost calculation
         transfer_type:  Filter results — "Shared", "Private", or "" for all types.
-                        Ask the customer BEFORE calling: "Private gaadi chahiye ya sharing?"
+                        Leave "" and DO NOT ask the customer first. Dubai airport
+                        inventory is currently Private-only, so asking "shared or
+                        private?" wastes a turn and then disappoints. Search, then
+                        state what actually came back.
         hotel_place_id: Google Place ID of the hotel. Optional — leave empty string if unknown.
                         The transfer API can match on lat/lng coordinates alone.
-        max_results:    Max options to return (default 5)
+        max_results:    Max options to return (default 20)
 
     PRICING RULES (always explain these to the customer):
         Shared transfer  → price_inr is the TOTAL vehicle cost.
@@ -112,9 +115,11 @@ def _impl(
                            E.g. vehicle costs ₹3,000 for up to 6 people → ₹3,000 total.
 
     WHEN TO CALL:
-        After confirming flight + hotel. Ask: "Airport transfer chahiye?"
-        If yes, ask: "Private chahiye ya shared (sharing mein sasta padta hai)?"
-        Then call with the appropriate transfer_type filter and the actual adults count.
+        As soon as you have a hotel — do NOT wait for the customer to pick one and
+        do NOT ask permission first. If they mentioned pickup/transfers at all,
+        they already asked. Take the recommended hotel's `hotel_name` from the
+        search_hotels result, call this in the SAME turn, and say which hotel the
+        transfers are for. Re-run if they later choose a different hotel.
     """
     try:
         airport = get_default_dubai_airport()

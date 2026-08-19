@@ -96,10 +96,14 @@ def _init_session() -> None:
 # =============================================================================
 # Card detection
 # =============================================================================
+# MULTILINE matters: the trigger phrase almost never starts the message. A
+# "plan everything" reply opens with a lead-in or a section heading and puts
+# "Here are the top 3 flights:" partway down, so a `^` anchored to position 0
+# matched nothing and the richest turn in the product rendered zero cards.
 CARD_TRIGGER_RE = re.compile(
-    r"^\s*here\s+are\s+the\s+top\s+\d+\s+"
+    r"^[ \t]*\**\s*here\s+are\s+the\s+top\s+\d+\s+"
     r"(flights?|hotels?|tours?|transfers?|restaurants?|visa\s+options?)\s*:",
-    re.IGNORECASE,
+    re.IGNORECASE | re.MULTILINE,
 )
 USER_DISPLAY_KEYWORDS = (
     "show me",
@@ -410,7 +414,7 @@ _API_BACKED_TOOLS = {
     "search_flights",
     "search_hotels",
     "search_tours",
-    "search_transfers",
+    "search_airport_transfer_dubai",  # registered name; "search_transfers" never existed
     "search_restaurants",
     "get_visa_info",
     "list_packages",

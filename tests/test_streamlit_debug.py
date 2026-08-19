@@ -25,6 +25,7 @@ _HELPERS = {
     "_status_code_emoji",
     "_mentions_price",
     "_last_api_turn",
+    "_should_render_cards",
 }
 
 
@@ -35,11 +36,18 @@ def _load_helpers() -> dict[str, Callable[..., Any]]:
             return True
         # Keep ONLY module-level `re.compile(...)` constants the helpers depend
         # on (e.g. PRICE_RE) — not other module globals like the renderer map.
-        return (
+        if (
             isinstance(n, ast.Assign)
             and isinstance(n.value, ast.Call)
             and isinstance(n.value.func, ast.Attribute)
             and n.value.func.attr == "compile"
+        ):
+            return True
+        # USER_DISPLAY_KEYWORDS — a plain tuple constant _should_render_cards needs.
+        return (
+            isinstance(n, ast.Assign)
+            and isinstance(n.value, ast.Tuple)
+            and any(getattr(t, "id", "") == "USER_DISPLAY_KEYWORDS" for t in n.targets)
         )
 
     body: list[ast.stmt] = [n for n in tree.body if _keep(n)]
@@ -181,3 +189,49 @@ class TestLastApiTurn:
 
     def test_includes_current_turn(self, helpers: dict[str, Any]) -> None:
         assert helpers["_last_api_turn"](self._log(), 2) == 2
+
+
+class TestCardTrigger:
+    """The card trigger phrase almost never starts the message.
+
+    CARD_TRIGGER_RE was anchored with `^` but compiled WITHOUT re.MULTILINE, so
+    it only matched at absolute position 0. The prompt tells the model to write
+    "one short section per component" for a plan-everything turn, so the phrase
+    lands partway down — and the richest turn in the product rendered no cards.
+    """
+
+    def test_phrase_at_start(self, helpers: dict[str, Any]) -> None:
+        assert helpers["_should_render_cards"]("", "Here are the top 3 flights:")
+
+    def test_phrase_after_lead_in(self, helpers: dict[str, Any]) -> None:
+        text = "Got it — Delhi to Dubai.\n\nHere are the top 3 flights:"
+        assert helpers["_should_render_cards"]("", text)
+
+    def test_phrase_after_markdown_heading(self, helpers: dict[str, Any]) -> None:
+        text = "**Flights**\nHere are the top 3 flights:"
+        assert helpers["_should_render_cards"]("", text)
+
+    def test_second_section_of_multi_component_reply(self, helpers: dict[str, Any]) -> None:
+        """The plan-everything turn: several sections, each with its own trigger."""
+        text = (
+            "Here's the full plan.\n\n"
+            "Here are the top 3 flights:\n- ...\n\n"
+            "Here are the top 3 hotels:\n- ...\n"
+        )
+        assert helpers["_should_render_cards"]("", text)
+
+    @pytest.mark.parametrize(
+        "kind",
+        ["flights", "hotels", "tours", "transfers", "restaurants", "visa options"],
+    )
+    def test_every_component_kind(self, helpers: dict[str, Any], kind: str) -> None:
+        text = f"Sure.\n\nHere are the top 3 {kind}:"
+        assert helpers["_should_render_cards"]("", text)
+
+    def test_recommendation_does_not_trigger(self, helpers: dict[str, Any]) -> None:
+        """Never render cards when recommending ONE option."""
+        text = "I'd go with Emirates — 82,885 rupees, nonstop. Lock it?"
+        assert not helpers["_should_render_cards"]("", text)
+
+    def test_user_keyword_still_works(self, helpers: dict[str, Any]) -> None:
+        assert helpers["_should_render_cards"]("show me hotels", "Sure thing.")
