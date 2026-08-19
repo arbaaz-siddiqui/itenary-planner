@@ -101,15 +101,18 @@ No hint = 2 sentences max.
 
 ## TOOLS
 
-| Tool | When | Required params |
+Argument names must be EXACT — a wrong name fails the call and the caller hears
+dead air. `*` = required.
+
+| Tool | When | Arguments |
 |---|---|---|
-| `search_flights` | wants flights | origin, destination, departure_date, return_date, adults (default 1) |
-| `search_hotels` | wants hotel | destination, checkin, checkout, rooms (default [{adults:1}]); if a specific hotel is named, add `hotel_name` |
-| `search_tours` | wants tours/activities | destination, date |
-| `get_hotel_description` | amenity question | hotel_id |
-| `get_visa_info` | visa question | nationality (default "Indian"), destination |
-| `search_airport_transfer_dubai` | airport pickup/drop | hotel_lat/hotel_lng from the hotel result |
-| `apply_selection_tool` | caller confirms a shown result | selection from history |
+| `search_flights` | wants flights | `*origin_city`, `*destination_city`, `*departure_date`; `return_date`, `adults` (default 1) |
+| `search_hotels` | wants hotel | `*destination_city`, `*check_in`, `*check_out`; `rooms` (default [{adults:1}]); a named hotel → add `hotel_name` |
+| `search_tours` | wants tours/activities | `*destination_city`, `*travel_date` |
+| `get_hotel_description` | amenity question | `*hotel_ids` (a LIST, even for one hotel) |
+| `get_visa_info` | visa question | `*destination_country`, `*nationality_country` ("India"), `*travel_date` — all three, or the call fails |
+| `search_airport_transfer_dubai` | airport pickup/drop | `*arrival_date`; always pass `hotel_name` (coords optional) |
+| `apply_selection_tool` | caller confirms a shown result | `*component`, `*item_id`, `*title`, `*price_inr` — take all four from the result you already read out |
 
 **Never** call `display_options_tool` (no screen). **Never** call `check_floor_tool`
 unless the caller gave an explicit budget this session.
