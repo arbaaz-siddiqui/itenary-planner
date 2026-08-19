@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import sqlite3
 import sys
@@ -87,7 +88,13 @@ def build_sqlite_checkpoint(db_path: str | None = None) -> BaseCheckpointSaver:
 # Prompt loader
 # =============================================================================
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
-SYSTEM_PROMPT_VERSION = "v1"
+# Which prompts/system_prompt_<version>.md to load.
+# v2 is the shipping default: same rules as v1 (all 47 behaviours verified
+# present) but restructured to lead with the booking flow and an exact tool
+# table, and ~27% smaller. Set SYSTEM_PROMPT_VERSION=v1 to fall back without a
+# redeploy if v2 ever misbehaves; the */saftey/development branches are pinned
+# to v1 as a full rollback.
+SYSTEM_PROMPT_VERSION = os.environ.get("SYSTEM_PROMPT_VERSION", "v2").strip() or "v2"
 
 
 @lru_cache(maxsize=4)

@@ -34,6 +34,8 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+import uuid
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -49,7 +51,6 @@ from livekit.plugins import sarvam, silero
 from voice_service import (
     _build_smart_filler,
     _detect_intent,
-    _length_instruction,
     _patch_last_turn,
     _pick_backchannel,
     run_planner_turn,
@@ -77,21 +78,21 @@ for _n in (
 # varied so the caller hears a live, attentive person, not a stuck recording.
 # Grouped by "position" so early ones sound fresh and later ones reassure.
 _HEARTBEATS_EARLY = [
-    "Haan, dekh rahi hoon...",
-    "Ek second...",
-    "Check kar rahi hoon...",
-    "Haan haan, mil raha hai...",
+    "dekh rahi results",
+    "Please thoda intezaar kriyega",
+    "Sorry for delay, thoda sa wait kriyega",
+    "bs hi ho gaya, almost",
 ]
 _HEARTBEATS_LATE = [
-    "Bas aa hi gaya...",
-    "Almost ho gaya...",
-    "Thoda sa aur...",
-    "Haan, bas ek pal...",
+    "Bas aa hi gye results",
+    "Almost ho gaya",
+    "Thoda sa aur rukiye",
+    "Haan, almost done",
 ]
 
 # Cadence: first nudge quickly (feels responsive), then relax so we don't
 # chatter over the caller. seconds to wait before heartbeat #1, #2, #3, ...
-_HEARTBEAT_GAPS = [2.5, 3.5, 4.0, 4.0, 5.0]
+_HEARTBEAT_GAPS = [2.5, 3.5, 4.5, 5.0, 5.5]
 
 
 def _heartbeat_phrase(idx: int) -> str:
@@ -147,24 +148,43 @@ class NikkiAgent(Agent):
 
         # 2. Run the blocking LangGraph planner in a background thread.
         loop = asyncio.get_event_loop()
-        augmented = transcript + _length_instruction(intent)
-        future = loop.run_in_executor(None, run_planner_turn, augmented, session_id)
+        # Pass the RAW transcript: run_planner_turn re-detects intent and appends
+        # the length hint itself. Appending it here too produced a doubled
+        # "[DETAIL MODE: ...] [DETAIL MODE: ...]" on every detail turn, which
+        # pushed the model past the 2-sentence rule and then got hard-truncated
+        # mid-thought by format_for_voice. (The Vapi path already passes raw.)
+        future = loop.run_in_executor(None, run_planner_turn, transcript, session_id)
 
         # 3. Heartbeats — each its own say() → real-time playback. Cadence starts
         #    quick then relaxes (see _HEARTBEAT_GAPS) so it feels attentive, not chatty.
         heartbeat_idx = 0
         heartbeat_log: list[dict] = []
+        # Keep the handles: say() is fire-and-forget and queues into a FIFO, so a
+        # heartbeat that started just before the planner returned would otherwise
+        # still be playing when we speak the answer — the caller hears "thoda sa
+        # wait kriyega" AFTER the result was already in hand. We interrupt any
+        # still-playing heartbeat before delivering the reply.
+        pending_says: list[Any] = []
         while not future.done():
             gap = _HEARTBEAT_GAPS[min(heartbeat_idx, len(_HEARTBEAT_GAPS) - 1)]
             try:
                 await asyncio.wait_for(asyncio.shield(future), timeout=gap)
             except asyncio.TimeoutError:
+                if future.done():
+                    break  # answer landed while we were waiting — don't start filler
                 phrase = _heartbeat_phrase(heartbeat_idx)
                 t_hb = round(time.perf_counter() - t0, 3)
                 log.info("livekit_heartbeat", session=session_id[:8], t_s=t_hb, text=phrase)
                 heartbeat_log.append({"text": phrase, "t_s": t_hb})
-                self.session.say(phrase, add_to_chat_ctx=False)
+                pending_says.append(self.session.say(phrase, add_to_chat_ctx=False))
                 heartbeat_idx += 1
+
+        # Cut off any heartbeat still speaking so the answer isn't queued behind it.
+        for handle in pending_says:
+            try:
+                handle.interrupt()
+            except Exception:  # noqa: BLE001 - already finished, or no such handle
+                pass
 
         # 4. Final planner reply.
         try:
@@ -196,7 +216,14 @@ class NikkiAgent(Agent):
 # Worker entrypoint — one per incoming call/room
 # =============================================================================
 async def entrypoint(ctx: JobContext) -> None:
-    session_id = ctx.room.name or (ctx.job.id if ctx.job else None) or "livekit-room"
+    # NEVER fall back to a constant: session_id becomes the LangGraph checkpoint
+    # thread id, so two calls sharing it would share one conversation — the exact
+    # trip-state leak the per-call room name fixed for outbound calls.
+    session_id = (
+        ctx.room.name
+        or (ctx.job.id if ctx.job else None)
+        or f"livekit-{uuid.uuid4().hex}"
+    )
     log.info("livekit_call_start", room=session_id)
 
     await ctx.connect()
@@ -207,14 +234,17 @@ async def entrypoint(ctx: JobContext) -> None:
 
     stt = sarvam.STT(
         language="en-IN",
-        model="saarika:v2.5",
+        mode="transcribe",
+        model="saaras:v4",
         api_key=sarvam_key,
     )
 
     tts = sarvam.TTS(
         target_language_code="en-IN",
         model="bulbul:v3",
-        speaker=os.getenv("SARVAM_SPEAKER", "pooja"),  # valid bulbul:v3 female voice
+        speaker=os.getenv("SARVAM_SPEAKER", "pooja"),  # from env get ritu if not set use pooja
+        pace=1,
+        speech_sample_rate=16000, # 22050, 24000 also available
         api_key=sarvam_key,
     )
 

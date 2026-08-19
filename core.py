@@ -619,6 +619,33 @@ class VisaDocument(BaseModel):
     is_required: bool = True
 
 
+class VisaFare(BaseModel):
+    """One priced row: a processing tier (Normal/Express) x pax type (Adult/Child).
+
+    The supplier returns these as `visaRates[*].fareInfo[*]`. The old parser kept
+    only the FIRST one, which silently dropped Child pricing and the Express
+    tier — a family of four got quoted one adult Normal fare.
+    """
+
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+    process_type: str = "Normal"  # "Normal" | "Express"
+    processing_time_text: str = ""
+    pax_type: str = "Adult"  # "Adult" | "Child"
+    price_inr: float = 0.0
+    min_age: int = 0
+    max_age: int = 0
+
+    @property
+    def price_display(self) -> str:
+        return format_inr(self.price_inr) if self.price_inr > 0 else "On Request"
+
+    @property
+    def age_display(self) -> str:
+        if self.max_age and self.min_age:
+            return f"{self.min_age}-{self.max_age} yrs"
+        return ""
+
+
 class VisaOption(BaseModel):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
     visa_id: int | str
@@ -637,6 +664,10 @@ class VisaOption(BaseModel):
     # Richer detail the supplier returns that the flat list above drops.
     documents: list[VisaDocument] = Field(default_factory=list)
     process_types: list[str] = Field(default_factory=list)  # e.g. ["Normal", "Express"]
+    # Every priced row (tier x pax type). `price_per_person_inr` above stays the
+    # headline adult-Normal fare for back-compat; this carries the full matrix.
+    fares: list[VisaFare] = Field(default_factory=list)
+    child_price_inr: float = 0.0
 
     @property
     def price_display(self) -> str:
@@ -652,6 +683,30 @@ class VisaOption(BaseModel):
         if self.processing_days > 0:
             return f"{self.processing_days} working days"
         return "Confirm with supplier"
+
+    @property
+    def child_price_display(self) -> str:
+        """Child fare, or "" when the supplier priced only adults."""
+        return format_inr(self.child_price_inr) if self.child_price_inr > 0 else ""
+
+    @property
+    def fare_lines(self) -> list[str]:
+        """Ready-to-show fare matrix, one line per processing tier.
+
+        e.g. "Normal (3-4 Working Days): Adult ₹7,497 · Child ₹1,950"
+        Built here so the agent relays it instead of deriving (or inventing) it.
+        """
+        by_tier: dict[str, list[VisaFare]] = {}
+        for f in self.fares:
+            if f.price_inr > 0:
+                by_tier.setdefault(f.process_type or "Normal", []).append(f)
+        lines: list[str] = []
+        for tier, fares in by_tier.items():
+            proc = next((f.processing_time_text for f in fares if f.processing_time_text), "")
+            head = f"{tier} ({proc})" if proc else tier
+            pax = " · ".join(f"{f.pax_type} {f.price_display}" for f in fares)
+            lines.append(f"{head}: {pax}")
+        return lines
 
     @property
     def checklist_documents(self) -> list[VisaDocument]:

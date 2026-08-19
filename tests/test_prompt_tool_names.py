@@ -33,7 +33,9 @@ _TOOL_PREFIXES = (
 _BACKTICKED = re.compile(r"`([a-z][a-z0-9_]*)`")
 
 # Known non-tool identifiers that match a tool prefix by coincidence.
-_NOT_TOOLS = {"price_per_adult_inr"}
+# `check_in`/`check_out` are search_hotels ARGUMENTS, not tools; they only match
+# because the prefix list includes "check_" for check_floor_tool.
+_NOT_TOOLS = {"price_per_adult_inr", "check_in", "check_out"}
 
 
 def _registered() -> set[str]:

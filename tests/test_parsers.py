@@ -496,6 +496,143 @@ class TestVisaParser:
         assert options[0].pricing_available is True
 
 
+class TestVisaPricing:
+    """Priced visa response — what the supplier returns for nationality 245.
+
+    The numbers below are REAL staging values. `price` is AED even though the
+    row says `currency: "INR"`; `priceWithoutROE` is the supplier's own INR
+    figure and is what our conversion must reproduce:
+
+        inr = (price - serviceFee) * (1 / buyingROE)
+
+    with buyingROE = 0.0387204523 → 1/buyingROE = 25.826145.
+    """
+
+    # 1 / 0.0387204523, the rate the supplier actually prices at.
+    ROE = 25.826145
+
+    @pytest.fixture
+    def priced(self) -> dict:
+        return {
+            "result": {
+                "visas": [
+                    {
+                        "visaId": 3,
+                        "name": "Dubai Tourist E Visa",
+                        "visaTypeId": 1,
+                        "options": [
+                            {
+                                "visaOptionId": 10,
+                                "visaOptionName": "30 Days Single Entry Tourist Visa",
+                                "entryType": "Single",
+                                "validityPeriod": "58 Days From Date Of Issue",
+                                "stayPeriod": "30 Days",
+                                "isEvisa": True,
+                                "visaRates": [
+                                    {
+                                        "processType": "Normal",
+                                        "processingTime": "3-4 Working Days",
+                                        "fareInfo": [
+                                            {
+                                                "paxType": "Adult",
+                                                "price": 295.287231,
+                                                "priceWithoutROE": 7497.0,
+                                                "serviceFee": 5.0,
+                                                "currency": "INR",
+                                                "minAge": 13,
+                                                "maxAge": 99,
+                                            },
+                                            {
+                                                "paxType": "Child",
+                                                "price": 80.505,
+                                                "priceWithoutROE": 1950.0,
+                                                "serviceFee": 5.0,
+                                                "currency": "INR",
+                                                "minAge": 3,
+                                                "maxAge": 12,
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        "processType": "Express",
+                                        "processingTime": "1 Working Day",
+                                        "fareInfo": [
+                                            {
+                                                "paxType": "Adult",
+                                                "price": 372.7281,
+                                                "priceWithoutROE": 9497.0,
+                                                "serviceFee": 5.0,
+                                                "currency": "INR",
+                                                "minAge": 13,
+                                                "maxAge": 99,
+                                            }
+                                        ],
+                                    },
+                                ],
+                                "requiredDocuments": [{"applicantType": "Passport Copy"}],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+
+    @pytest.fixture(autouse=True)
+    def _stub_roe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pin the ROE so the test never depends on the live rate."""
+        import parsers
+
+        monkeypatch.setattr(parsers, "_visa_pricing_roe", lambda: self.ROE)
+
+    def test_adult_price_matches_supplier_inr(self, priced: dict) -> None:
+        """(295.287231 - 5.0) * 25.826145 == 7497.00, the supplier's own figure."""
+        opt = parse_visa_response(priced)[0]
+        assert opt.pricing_available is True
+        assert opt.price_per_person_inr == pytest.approx(7497.0, abs=0.01)
+
+    def test_child_price_captured(self, priced: dict) -> None:
+        """The old parser stopped at the first fare and dropped Child entirely."""
+        opt = parse_visa_response(priced)[0]
+        assert opt.child_price_inr == pytest.approx(1950.0, abs=0.01)
+
+    def test_service_fee_is_subtracted(self, priced: dict) -> None:
+        """Forgetting the fee inflates every fare by exactly 5 AED (~₹129)."""
+        opt = parse_visa_response(priced)[0]
+        without_fee_subtracted = 295.287231 * self.ROE
+        assert opt.price_per_person_inr < without_fee_subtracted - 100
+
+    def test_express_tier_retained(self, priced: dict) -> None:
+        """Both processing tiers must survive — the old parser kept only the first."""
+        opt = parse_visa_response(priced)[0]
+        tiers = {f.process_type for f in opt.fares}
+        assert tiers == {"Normal", "Express"}
+        express = next(f for f in opt.fares if f.process_type == "Express")
+        assert express.price_inr == pytest.approx(9497.0, abs=0.01)
+
+    def test_fare_lines_render_both_tiers(self, priced: dict) -> None:
+        opt = parse_visa_response(priced)[0]
+        joined = " | ".join(opt.fare_lines)
+        assert "Normal (3-4 Working Days)" in joined
+        assert "Express (1 Working Day)" in joined
+        assert "Child" in joined
+
+    def test_falls_back_to_supplier_inr_when_roe_unavailable(
+        self, priced: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No live ROE → use priceWithoutROE rather than inventing a rate."""
+        import parsers
+
+        monkeypatch.setattr(parsers, "_visa_pricing_roe", lambda: None)
+        opt = parse_visa_response(priced)[0]
+        assert opt.price_per_person_inr == pytest.approx(7497.0, abs=0.01)
+
+    def test_selling_roe_would_overquote(self, priced: dict) -> None:
+        """Guard the actual bug: sellingROE (26.345) overquotes by ~₹280."""
+        opt = parse_visa_response(priced)[0]
+        selling_result = (295.287231 - 5.0) * 26.3452500728
+        assert selling_result - opt.price_per_person_inr > 100
+
+
 # =============================================================================
 # Currency ROE
 # =============================================================================

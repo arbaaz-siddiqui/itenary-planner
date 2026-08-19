@@ -26,6 +26,7 @@ from booking_api import (
     call_transfer_search,
     call_visa_info,
 )
+from booking_api.endpoints import VISA_INDIAN_NATIONALITY_ID
 from booking_api.http_client import get_client
 from core import (
     BookingApiNotFound,
@@ -270,7 +271,9 @@ def test_visa_payload_uses_lowercase_guest_info() -> None:
     sent = json.loads(responses.calls[0].request.body)
     assert sent["countryId"] == 213
     assert sent["nationalityId"] == 213
-    assert sent["citizenId"] == 213  # defaults to country_id
+    # citizenId defaults to the visa service's Indian-passport code (245), NOT
+    # country_id. Verified live: any other value returns an empty `fareInfo`.
+    assert sent["citizenId"] == VISA_INDIAN_NATIONALITY_ID
     assert sent["visaTypeId"] == 1
     assert sent["checkInDate"] == "10-25-2026"  # mm-dd-yyyy
     assert sent["guestInfo"]["adults"] == 1  # lowercase

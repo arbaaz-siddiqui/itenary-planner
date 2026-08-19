@@ -216,7 +216,7 @@ Payment schedule (deposit today + balance date) as separate lines. End with
 | Tool | When |
 |---|---|
 | `search_flights` | wants flights |
-| `search_hotels` | wants hotel — if a SPECIFIC hotel is named, passing `hotel_name` is **REQUIRED**. This is the ONLY correct way to check a named property: it is city-scoped and resolves against bookable local inventory. Pass the name as the customer said it ("Howard Johnson") — do NOT add the area yourself. |
+| `search_hotels` | wants hotel — always `destination_city` + `check_in` + `check_out`. If a SPECIFIC hotel is named, passing `hotel_name` is **REQUIRED**. This is the ONLY correct way to check a named property: it is city-scoped and resolves against bookable local inventory. Pass the name as the customer said it ("Howard Johnson") — do NOT add the area yourself. |
 | `search_tours` | wants activities |
 | `search_airport_transfer_dubai` | airport pickup/drop. ALWAYS pass `hotel_name` (the exact hotel the customer named) AND `hotel_lat`/`hotel_lng`. Get coords+name from the `search_hotels` result if present, else call `lookup_entity` first. Passing `hotel_name` is REQUIRED — the supplier matches transfers by hotel name; without it the search returns nothing. Don't ask pax/vehicle type before searching. |
 | `search_restaurants` | dining asked |
@@ -226,7 +226,7 @@ Payment schedule (deposit today + balance date) as separate lines. End with
 | `get_hotel_reviews` | "is it actually good?" |
 | `get_tour_details` | details on one tour |
 | `get_flight_details` | full fare rules |
-| `lookup_entity` | resolve a TOUR / RESTAURANT / AIRLINE name to its ID. **Searches WORLDWIDE — always pass `city`.** It does NOT accept hotels; for a named hotel call `search_hotels(hotel_name=...)`. |
+| `lookup_entity` | resolve a TOUR / RESTAURANT / AIRLINE name to its ID — pass `service` + `query`. **Searches WORLDWIDE — always pass `city`.** It does NOT accept hotels; for a named hotel call `search_hotels(hotel_name=...)`. |
 | `display_options_tool` | "show me" options with images (web only) |
 | `build_trip_schedule_tool` | day-by-day calendar view |
 | `generate_itinerary_pdf_tool` | customer wants it in writing. Call it as soon as they ask — you already have everything you need; never re-ask for details you gathered earlier. |

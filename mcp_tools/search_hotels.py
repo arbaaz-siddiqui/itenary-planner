@@ -449,8 +449,11 @@ def _impl(
         # for the ONE hotel a customer actually picks.
         for o in option_dicts:
             o["cancellation_display"] = _cancellation_display(o)
-            rooms = o.get("rooms") or []
-            o["room_options_count"] = len(rooms)
+            # NOT `rooms` — that is the caller's party composition, and it is
+            # echoed back in search_params below. Rebinding it here reported the
+            # LAST hotel's room inventory as the party the customer asked for.
+            hotel_rooms = o.get("rooms") or []
+            o["room_options_count"] = len(hotel_rooms)
             o.pop("rooms", None)
 
         # Coordinate enrichment: fetch lat/lng/address from the address endpoint
