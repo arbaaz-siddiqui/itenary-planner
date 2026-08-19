@@ -84,6 +84,7 @@ TRANSFER_DETAILS_PATH = "/api/transferservices/TransferDetail"
 RESTAURANT_LIST_PATH = "/api/restaurant/v1/restaurants"
 RESTAURANT_DETAILS_PATH_TPL = "/api/restaurant/v1/restaurants/{id}"
 VISA_LIST_PATH = "/api/visa/v1/visas"
+VISA_INDIAN_NATIONALITY_ID = 245
 PACKAGE_LIST_PATH = "/api/staticpackageservices/staticpackage/packagelist"
 PACKAGE_RATE_PATH = "/api/staticpackageservices/staticpackage/packagerate"
 PACKAGE_STATIC_DATA_PATH = "/api/staticpackageservices/staticpackage/packagestaticdata"
@@ -764,8 +765,14 @@ def call_visa_info(
       must be in MM-DD-YYYY format ..."); the Postman sample '10-10-2026' only
       passed because day==month made it ambiguous.
     """
+    if not nationality_id:
+        nationality_id = VISA_INDIAN_NATIONALITY_ID
     if not citizen_id:
-        citizen_id = country_id  # client sample sets it equal to countryId
+        # NOT country_id. Verified live: only 245 returns populated fareInfo —
+        # 105 ("India" elsewhere in our data) and 213 (UAE) both come back
+        # HTTP 200 with `fareInfo: []`, which we used to misreport as "supplier
+        # pricing not enabled on this account".
+        citizen_id = VISA_INDIAN_NATIONALITY_ID
     payload: dict[str, Any] = {
         "countryId": country_id,
         "nationalityId": nationality_id,

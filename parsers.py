@@ -39,11 +39,12 @@ from core import (
     TransferNormalizationError,
     TransferOption,
     VisaDocument,
+    VisaFare,
     VisaNormalizationError,
     VisaOption,
     to_inr,
 )
-from fx import live_rate_map
+from fx import live_rate_map, supplier_pricing_roe
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
@@ -796,6 +797,18 @@ def parse_visa_response(raw: dict[str, Any], *, max_results: int | None = None) 
     return options[:max_results] if max_results else options
 
 
+def _visa_pricing_roe() -> float | None:
+    """INR-per-AED the supplier prices at (1/buyingROE), or None if unavailable.
+
+    Thin wrapper so the visa parser has one seam to stub in tests. `fx` already
+    caches the underlying ROE call, so calling this per fare row is cheap.
+    """
+    try:
+        return supplier_pricing_roe()
+    except Exception:  # never let an FX hiccup break a visa parse
+        return None
+
+
 def _parse_visa_option(
     opt: Any,
     parent_name: str,
@@ -809,29 +822,81 @@ def _parse_visa_option(
     if option_id is None:
         return None
 
-    # Pricing comes via `visaRates[*].fareInfo[*]`. Empty when not enabled
-    # for this agent — return as "On Request".
+    # Pricing comes via `visaRates[*].fareInfo[*]` — one row per processing
+    # tier (Normal/Express) x pax type (Adult/Child). `fareInfo` is EMPTY
+    # unless the request used nationalityId/citizenId 245; see call_visa_info.
+    #
+    # Currency trap: `price` is AED even though the row is labelled
+    # `currency: "INR"`. The supplier's own INR figure is `priceWithoutROE`,
+    # and it is reproduced exactly (to the paisa, verified on all 10 UAE
+    # fares) by:
+    #
+    #     inr = (price - serviceFee) * (1 / buyingROE)
+    #
+    # NOT by `sellingROE`, which overquotes by ₹282–₹537 per visa. We compute
+    # via the ROE API and fall back to `priceWithoutROE` if that call fails.
     price_original = 0.0
-    currency_original = "INR"
+    currency_original = "AED"
     price_inr = 0.0
+    child_price_inr = 0.0
     pricing_available = False
+    fares: list[VisaFare] = []
+
+    roe = _visa_pricing_roe()
     for rate in opt.get("visaRates") or []:
         if not isinstance(rate, dict):
             continue
-        fare_info = rate.get("fareInfo") or []
-        for fi in fare_info:
+        tier = str(rate.get("processType") or "Normal").strip() or "Normal"
+        tier_proc = str(rate.get("processingTime") or "").strip()
+        for fi in rate.get("fareInfo") or []:
             if not isinstance(fi, dict):
                 continue
-            amount = fi.get("amount") or fi.get("rate") or fi.get("price")
-            currency = fi.get("currency") or fi.get("currencyCode") or "AED"
-            if amount and float(amount) > 0:
-                pricing_available = True
-                price_original = float(amount)
-                currency_original = str(currency)
-                price_inr = _safe_to_inr(price_original, currency_original, rates) or 0.0
-                break
-        if pricing_available:
-            break
+            raw_amount = fi.get("price") or fi.get("amount") or fi.get("rate")
+            try:
+                amount = float(raw_amount) if raw_amount is not None else 0.0
+            except (TypeError, ValueError):
+                continue
+            if amount <= 0:
+                continue
+            try:
+                fee = float(fi.get("serviceFee") or 0.0)
+            except (TypeError, ValueError):
+                fee = 0.0
+
+            if roe:
+                converted = (amount - fee) * roe
+            else:
+                # No live ROE — trust the supplier's own INR field over any
+                # rate we might guess at.
+                try:
+                    converted = float(fi.get("priceWithoutROE") or 0.0)
+                except (TypeError, ValueError):
+                    converted = 0.0
+            if converted <= 0:
+                continue
+
+            pax = str(fi.get("paxType") or "Adult").strip() or "Adult"
+            pricing_available = True
+            fares.append(
+                VisaFare(
+                    process_type=tier,
+                    processing_time_text=tier_proc,
+                    pax_type=pax,
+                    price_inr=round(converted, 2),
+                    min_age=int(fi.get("minAge") or 0),
+                    max_age=int(fi.get("maxAge") or 0),
+                )
+            )
+            # Headline price stays the cheapest ADULT fare (Normal tier) so
+            # existing callers and budget math keep working.
+            if pax.lower().startswith("adult"):
+                if price_inr == 0.0 or converted < price_inr:
+                    price_inr = round(converted, 2)
+                    price_original = amount
+                    currency_original = "AED"
+            elif pax.lower().startswith("child"):
+                if child_price_inr == 0.0 or converted < child_price_inr:
+                    child_price_inr = round(converted, 2)
 
     # requiredDocuments[*] carries name + description + isRequired. Keep the
     # flat name list for back-compat AND the structured form, so callers can
@@ -895,6 +960,8 @@ def _parse_visa_option(
         document_requirements=documents,
         documents=documents_detailed,
         process_types=process_types,
+        fares=fares,
+        child_price_inr=child_price_inr,
     )
 
 

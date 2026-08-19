@@ -1,10 +1,3 @@
-"""get_visa_info — agent + MCP tool.
-
-NOTE: ActivityLinker returns ₹0 prices for our account (pricing permission
-not enabled). The `pricing_available` flag tells UIs to show "On Request"
-instead of misleading ₹0 values.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -13,12 +6,23 @@ from typing import Any
 from langchain_core.tools import tool
 
 from booking_api import call_visa_info
+from booking_api.endpoints import VISA_INDIAN_NATIONALITY_ID
 from core import TripPlannerError
 from mcp_tools.server import mcp
 from parsers import parse_visa_response
 from reference_data_loader import resolve_country_id
 
 logger = logging.getLogger(__name__)
+
+# Spellings customers/LLMs actually use for an Indian passport.
+_INDIAN_NATIONALITY_ALIASES = {
+    "india",
+    "indian",
+    "in",
+    "ind",
+    "republic of india",
+    "indian passport",
+}
 
 
 def _impl(
@@ -31,22 +35,30 @@ def _impl(
     """Get visa requirements and (where available) pricing."""
     try:
         country_id = resolve_country_id(destination_country)
-        nationality_id = resolve_country_id(nationality_country)
         if country_id is None:
             return {
                 "error": True,
                 "message": f"Unknown destination country: {destination_country!r}",
                 "error_type": "UnsupportedRoute",
             }
-        if nationality_id is None:
+        # The visa service has its own country table, so we must NOT reuse
+        # resolve_country_id() here (it returns 105 for India, which makes the
+        # supplier return unpriced fares). Indian passport is the only
+        # nationality we sell to; anything else we can't price.
+        nationality = (nationality_country or "India").strip().lower()
+        if nationality not in _INDIAN_NATIONALITY_ALIASES:
             return {
                 "error": True,
-                "message": f"Unknown nationality: {nationality_country!r}",
+                "message": (
+                    f"Visa pricing is only available for Indian passports; "
+                    f"got {nationality_country!r}."
+                ),
                 "error_type": "UnsupportedRoute",
             }
         raw = call_visa_info(
             country_id=country_id,
-            nationality_id=nationality_id,
+            nationality_id=VISA_INDIAN_NATIONALITY_ID,
+            citizen_id=VISA_INDIAN_NATIONALITY_ID,
             travel_date=travel_date,
             adults=adults,
             children=children,
@@ -60,14 +72,18 @@ def _impl(
             d["processing_display"] = o.processing_display
             d["price_display"] = o.price_display
             d["document_checklist"] = [doc.name for doc in o.checklist_documents]
+            # Full fare matrix: Normal/Express x Adult/Child, already formatted
+            # so the agent relays it rather than deriving (or inventing) it.
+            d["child_price_display"] = o.child_price_display
+            d["fare_lines"] = o.fare_lines
             option_dicts.append(d)
         return {
             "options": option_dicts,
             "total_results": len(options),
             "pricing_available": any(o.pricing_available for o in options),
             "pricing_note": (
-                "Visa pricing is not enabled on this supplier account — quote "
-                "visa cost as 'On Request' and confirm with the supplier."
+                "The supplier returned no fares for these visas — quote 'On "
+                "Request' and confirm with the supplier. Do NOT quote ₹0."
                 if not any(o.pricing_available for o in options)
                 else ""
             ),

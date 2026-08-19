@@ -148,6 +148,40 @@ def live_rate_map(*, _now: float | None = None) -> dict[str, float]:
     return rates
 
 
+def supplier_pricing_roe(*, _now: float | None = None) -> float | None:
+    """INR-per-AED rate the SUPPLIER prices at — i.e. `1 / buyingROE`.
+
+    Not the same number as `live_rate_map()["AED"]`, which uses `sellingROE`.
+    `/api/Currency/ROE/INR` returns both:
+
+        {"buyingROE": 0.0387204523, "sellingROE": 26.3452500728}
+
+    Verified against the visa endpoint's own `priceWithoutROE` figures: the
+    supplier converts at `1/buyingROE` (25.826), NOT `sellingROE` (26.345).
+    Using the selling rate overquotes a UAE visa by ₹282–₹537. Anywhere we
+    must reproduce the supplier's OWN INR price, use this.
+
+    Returns None when the live call fails — callers fall back to the
+    supplier-provided INR field rather than inventing a rate.
+    """
+    try:
+        from booking_api import call_currency_roe
+
+        raw = call_currency_roe(target_currency="INR")
+    except Exception as e:  # never let an FX lookup break a parse
+        logger.warning("supplier pricing ROE fetch failed: %s", e)
+        return None
+
+    payload = raw.get("result") if isinstance(raw, dict) else None
+    if not isinstance(payload, dict):
+        payload = raw if isinstance(raw, dict) else {}
+    for key in ("buyingROE", "BuyingROE", "buyingRoe", "buyRate"):
+        v = payload.get(key)
+        if isinstance(v, (int, float)) and v > 0:
+            return 1.0 / float(v)
+    return None
+
+
 def clear_fx_cache() -> None:
     """Drop the cached live rate (tests / forced refresh)."""
     with _LOCK:
