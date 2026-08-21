@@ -309,7 +309,9 @@ class TestTourParser:
         assert options
         for o in options:
             ratio = o.price_per_adult_inr / o.price_original
-            assert 20 <= ratio <= 26, f"AED→INR ratio off: {ratio}"
+        # Upper bound is 30, not 26: AED/INR is a LIVE rate (26.3 as of
+        # Aug 2026) and the old 26 ceiling failed on a normal market move.
+            assert 20 <= ratio <= 30, f"AED→INR ratio off: {ratio}"
 
     def test_max_results(self, list_raw: dict, rate_raw: dict) -> None:
         options = parse_tour_response(list_raw, rate_raw, max_results=2)
@@ -579,27 +581,43 @@ class TestVisaPricing:
 
     @pytest.fixture(autouse=True)
     def _stub_roe(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Pin the ROE so the test never depends on the live rate."""
+        """Pin the conversion so the test never depends on the live rate.
+
+        The supplier's rule (client-confirmed) is `price / buyingROE` and it
+        INCLUDES the service fee, so the expected figure is `priceWithoutROE`
+        (the net fare) PLUS fee*ROE.
+        """
         import parsers
 
-        monkeypatch.setattr(parsers, "_visa_pricing_roe", lambda: self.ROE)
+        monkeypatch.setattr(
+            parsers,
+            "convert_supplier_price",
+            lambda amount, **kw: (round(float(amount) * self.ROE, 2), "INR"),
+        )
 
-    def test_adult_price_matches_supplier_inr(self, priced: dict) -> None:
-        """(295.287231 - 5.0) * 25.826145 == 7497.00, the supplier's own figure."""
+    def test_adult_price_includes_the_service_fee(self, priced: dict) -> None:
+        """price / buyingROE == 7626.06 — the TOTAL the customer pays.
+
+        That is the net fare (`priceWithoutROE` = 7497) plus the 5 AED service
+        fee converted (129.06). The client confirmed the fee is included.
+        """
         opt = parse_visa_response(priced)[0]
         assert opt.pricing_available is True
-        assert opt.price_per_person_inr == pytest.approx(7497.0, abs=0.01)
+        assert opt.price_per_person_inr == pytest.approx(295.287231 * self.ROE, abs=0.05)
 
     def test_child_price_captured(self, priced: dict) -> None:
         """The old parser stopped at the first fare and dropped Child entirely."""
         opt = parse_visa_response(priced)[0]
-        assert opt.child_price_inr == pytest.approx(1950.0, abs=0.01)
+        assert opt.child_price_inr == pytest.approx(80.505 * self.ROE, abs=0.05)
 
-    def test_service_fee_is_subtracted(self, priced: dict) -> None:
-        """Forgetting the fee inflates every fare by exactly 5 AED (~₹129)."""
+    def test_service_fee_is_included_not_stripped(self, priced: dict) -> None:
+        """The quoted price must EXCEED the net fare by the converted fee.
+
+        We previously subtracted the fee, under-quoting by ~₹129 per visa.
+        """
         opt = parse_visa_response(priced)[0]
-        without_fee_subtracted = 295.287231 * self.ROE
-        assert opt.price_per_person_inr < without_fee_subtracted - 100
+        net_fare = 7497.0
+        assert opt.price_per_person_inr > net_fare + 100
 
     def test_express_tier_retained(self, priced: dict) -> None:
         """Both processing tiers must survive — the old parser kept only the first."""
@@ -607,7 +625,7 @@ class TestVisaPricing:
         tiers = {f.process_type for f in opt.fares}
         assert tiers == {"Normal", "Express"}
         express = next(f for f in opt.fares if f.process_type == "Express")
-        assert express.price_inr == pytest.approx(9497.0, abs=0.01)
+        assert express.price_inr == pytest.approx(372.7281 * self.ROE, abs=0.05)
 
     def test_fare_lines_render_both_tiers(self, priced: dict) -> None:
         opt = parse_visa_response(priced)[0]
@@ -619,18 +637,18 @@ class TestVisaPricing:
     def test_falls_back_to_supplier_inr_when_roe_unavailable(
         self, priced: dict, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """No live ROE → use priceWithoutROE rather than inventing a rate."""
+        """No live rate → use priceWithoutROE rather than inventing a number."""
         import parsers
 
-        monkeypatch.setattr(parsers, "_visa_pricing_roe", lambda: None)
+        monkeypatch.setattr(parsers, "convert_supplier_price", lambda amount, **kw: (None, ""))
         opt = parse_visa_response(priced)[0]
         assert opt.price_per_person_inr == pytest.approx(7497.0, abs=0.01)
 
-    def test_selling_roe_would_overquote(self, priced: dict) -> None:
-        """Guard the actual bug: sellingROE (26.345) overquotes by ~₹280."""
+    def test_buying_roe_not_selling_roe(self, priced: dict) -> None:
+        """Guard the branch: sellingROE would overquote by ~2%."""
         opt = parse_visa_response(priced)[0]
-        selling_result = (295.287231 - 5.0) * 26.3452500728
-        assert selling_result - opt.price_per_person_inr > 100
+        selling_result = 295.287231 * 26.3452500728
+        assert selling_result > opt.price_per_person_inr
 
 
 # =============================================================================

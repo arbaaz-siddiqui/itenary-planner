@@ -345,9 +345,16 @@ def get_client() -> BookingApiClient:
 
 @lru_cache(maxsize=1)
 def get_b2c_client() -> BookingApiClient:
-    """Client for the B2C host (stagingb2c.gujjutours.com). Same token + retry
-    behaviour as the main client, different base URL. Used by the B2C tour
-    endpoints (options, price-check calendar, option details)."""
+    """Client for the B2C host (stagingb2c.gujjutours.com).
+
+    Currently UNUSED. The three B2C tour endpoints it served (options,
+    option-details, price-check-calendar) all returned an nginx 404 — that host
+    serves nothing on any path, including its own root, and resolves to the same
+    IP as stagingapi. They were removed on 2026-08-19; see
+    docs/adr-001-time-aware-itinerary.md.
+
+    Kept so the plumbing is ready if the client supplies a working B2C base URL
+    (override with BOOKING_B2C_BASE_URL)."""
     booking = get_booking_api_settings()
     http = get_http_settings()
     return BookingApiClient(

@@ -535,10 +535,72 @@ class TourOption(BaseModel):
     is_recommended: bool = False
     supplier_name: str = ""
     image_url: str = ""
+    # Needed to look up timeslots: the Timeslot endpoint requires BOTH
+    # tour_option_id and supplier_id, and option_id only appears in the rates
+    # response (keyed by tourID). Without these threaded through, slot lookup
+    # is impossible from a search result.
+    supplier_id: int = 0
+    option_id: int = 0
+    # Client requirement (non-negotiable): every tour must state whether it is
+    # shared or private, and its cancellation terms. Both were parsed away.
+    transfer_scenario: str = ""   # "Without Transfer" | "Sharing Transfer" | "Private Transfer" | "All Transfer"
+    transfer_options: list[str] = Field(default_factory=list)  # from tour details
+    cancellation_policy: str = ""  # e.g. "Free Cancellation 24 hours Prior"
+    is_slot_based: bool = False    # True only when REAL slots exist (00:00 placeholders stripped)
+    timeslots: list[dict[str, Any]] = Field(default_factory=list)
 
     @property
     def price_display(self) -> str:
         return format_inr(self.price_per_adult_inr)
+
+    @property
+    def has_transfer_choice(self) -> bool:
+        """True when the customer can pick shared vs private on this tour."""
+        s = (self.transfer_scenario or "").strip().lower()
+        return "all" in s or len(self.transfer_options) > 1
+
+    @property
+    def sharing_display(self) -> str:
+        """Shared/private in words the customer understands — always shown.
+
+        `transferScenario` says whether TRANSFERS are included and in which
+        modes. Where `get_tour_details` gave us the actual `transferType` list we
+        name those options exactly, because "Sharing Transfer, Private Transfer"
+        is more useful than a category label.
+
+        Deliberately no PRICE here: the rates endpoint returns exactly ONE rate
+        per tour with no per-transfer-type breakdown, so any "private costs X"
+        figure would be invented. The agent previously did invent one
+        (multiplying the per-adult fare by the party size) — that is the
+        hallucination this property exists to prevent.
+        """
+        if self.transfer_options:
+            names = ", ".join(self.transfer_options)
+            return f"Transfer options: {names} (same tour price)"
+        s = (self.transfer_scenario or "").strip().lower()
+        if "all" in s:
+            return "Shared or private transfer available (same tour price)"
+        if "private" in s:
+            return "Private transfer included"
+        if "shar" in s:
+            return "Shared (sharing) transfer included"
+        if "without" in s:
+            return "Ticket only — no transfer included"
+        return "Transfer basis on request"
+
+    @property
+    def cancellation_display(self) -> str:
+        """Cancellation terms, or an honest 'confirm' rather than silence.
+
+        Never return "" — the agent was telling customers there was no policy
+        at all, which is worse than saying we need to check.
+        """
+        return self.cancellation_policy.strip() or "Cancellation terms on request — confirm before booking"
+
+    @property
+    def can_check_slots(self) -> bool:
+        """Whether we have the ids needed to query timeslots for this tour."""
+        return bool(self.supplier_id and self.option_id)
 
 
 # =============================================================================

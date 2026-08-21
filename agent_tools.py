@@ -8,6 +8,7 @@ The registry combines plain tools + the 7 MCP tools into ALL_TOOLS.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
 from langchain_core.tools import BaseTool, tool
@@ -422,6 +423,341 @@ def build_trip_schedule_tool(days: list[dict[str, Any]]) -> dict[str, Any]:
     return {"schedule": True, "days": clean_days, "total_days": len(clean_days)}
 
 
+# Last itinerary built by plan_itinerary_tool, so the PDF can reuse its day
+# plan rather than erroring and forcing the model to retry.
+_LAST_PLAN: dict[str, Any] = {}
+
+
+@lru_cache(maxsize=8)
+def _tour_facts_index(travel_date: str) -> tuple[tuple[str, float, str, str], ...]:
+    """(name_lower, price_per_adult, duration, timeslots_json) for the catalogue.
+
+    Cached: a plan with six tours must not trigger six catalogue searches.
+    """
+    import json as _json
+
+    try:
+        from mcp_tools.search_tours import _impl as _search_tours
+
+        res = _search_tours(
+            destination_city="Dubai", travel_date=travel_date, max_results=400
+        )
+        return tuple(
+            (
+                str(o.get("name") or "").lower(),
+                float(o.get("price_per_adult_inr") or 0.0),
+                str(o.get("duration") or ""),
+                _json.dumps(o.get("timeslots") or []),
+            )
+            for o in (res.get("options") or [])
+            if o.get("name")
+        )
+    except Exception:  # noqa: BLE001 — missing facts are reported, never fatal
+        return ()
+
+
+def _tour_facts_lookup(title: str, travel_date: str) -> dict[str, Any]:
+    """Price, duration and slots for a tour named in a plan.
+
+    Exact match first, then containment either way round, because the model
+    often shortens a name ("Abu Dhabi City Tour" for "Abu Dhabi City Tour from
+    Dubai"). Returns {} when nothing matches — never a guess.
+    """
+    import json as _json
+
+    want = (title or "").strip().lower()
+    if not want:
+        return {}
+    index = _tour_facts_index(travel_date)
+    hit = next((row for row in index if row[0] == want), None)
+    if hit is None:
+        # Longest containment match wins, so "Dubai Frame" does not grab
+        # "Dubai Frame Ticket" ahead of an exact-ish alternative.
+        cands = [r for r in index if want in r[0] or r[0] in want]
+        hit = max(cands, key=lambda r: len(r[0])) if cands else None
+    if hit is None:
+        return {}
+    _name, price, duration, slots_json = hit
+    try:
+        slots = _json.loads(slots_json)
+    except Exception:  # noqa: BLE001
+        slots = []
+    return {"price": price, "duration": duration, "timeslots": slots}
+
+
+def _tour_price_lookup(title: str, travel_date: str) -> float:
+    """Per-adult price for a tour named in a plan. 0.0 when unmatched."""
+    return float(_tour_facts_lookup(title, travel_date).get("price") or 0.0)
+
+
+@tool
+def plan_itinerary_tool(
+    start_date: str,
+    nights: int,
+    tours: list[dict[str, Any]] | None = None,
+    arrival_time: str = "",
+    hotel_name: str = "",
+    hotel_checkin_time: str = "",
+    departure_time: str = "",
+    adults: int = 0,
+    flight_total_inr: float = 0.0,
+    hotel_total_inr: float = 0.0,
+    visa_per_adult_inr: float = 0.0,
+    transfer_total_inr: float = 0.0,
+    fill_days: bool = True,
+) -> dict[str, Any]:
+    """Build a VALIDATED day-by-day itinerary with real times.
+
+    CALL THIS instead of writing a day-by-day plan yourself. It checks each
+    tour against its published timeslots and the rest policy, so the times are
+    computed facts rather than guesses. Prefer this over
+    build_trip_schedule_tool whenever tours are involved.
+
+    Rules it enforces (you do not have to reason about these):
+      - 3 hours to settle in after landing before any activity.
+      - A slot-based tour is only placed at a REAL published slot time.
+      - Nothing starts after 21:00; nothing runs past midnight.
+      - The departure day stays clear of tours.
+      - A tour whose last slot falls before the customer is free MOVES to a
+        later day — the Burj-Khalifa-on-arrival-day case.
+
+    Args:
+        start_date: arrival date, ISO yyyy-mm-dd
+        nights: nights booked (days = nights + 1)
+        tours: the tours the customer wants, each:
+            {"name": str,
+             "duration": "0-Days 2-Hours 0-Minutes"   # from search_tours
+             "timeslots": [...]}                      # from get_tour_timeslots
+            Pass `timeslots` whenever you have them — without them the tour is
+            scheduled by duration alone and may be placed at an unbookable time.
+        arrival_time: flight landing time "HH:MM" — pass it, it drives the rest rule
+        hotel_name: for the transfer line
+        hotel_checkin_time: "HH:MM" if known; otherwise a 60min transfer is assumed
+        departure_time: return flight "HH:MM", so the last day is kept clear
+
+    Returns:
+        {days: [{day_number, date, label, items: [{start, end, title, kind,
+         detail, slot_id}]}], excluded: [{title, reason, detail}], policy: {...}}
+
+        **Relay `excluded` reasons to the customer verbatim.** They are specific
+        ("last slot is 18:00, but you are not free until 20:45") and explain why
+        something is not on the plan. Silently dropping a tour they asked for is
+        the failure this field exists to prevent.
+    """
+    from scheduling import build_itinerary
+
+    # The model routinely passes bare names — [{"name": "Dubai Frame"}] — with
+    # no price and no duration. Resolve both from the catalogue first, otherwise
+    # every tour is treated as a 2-hour block and the day plan is fiction.
+    enriched: list[dict[str, Any]] = []
+    for t in tours or []:
+        if not isinstance(t, dict):
+            continue
+        row = dict(t)
+        title = str(row.get("name") or row.get("title") or "").strip()
+        if title:
+            facts = _tour_facts_lookup(title, start_date)
+            if not row.get("duration") and facts.get("duration"):
+                row["duration"] = facts["duration"]
+            if not (row.get("price_per_adult_inr") or row.get("price_inr")) and facts.get("price"):
+                row["price_per_adult_inr"] = facts["price"]
+            if not row.get("timeslots") and facts.get("timeslots"):
+                row["timeslots"] = facts["timeslots"]
+        enriched.append(row)
+    tours = enriched
+
+    # TOP UP so the trip is not mostly empty. Three tours cannot fill five days,
+    # and telling the model to "search for more and call again" did not work —
+    # it printed "Free Day" three times instead. So we add recommended-first
+    # catalogue tours (skipping anything already chosen) until there is roughly
+    # one day's activity per day. `auto_filled` names every addition so the
+    # agent can say which were its own picks and offer to swap them.
+    auto_filled: list[str] = []
+    from scheduling import SchedulePolicy as _Policy, parse_duration_minutes
+
+    per_day = _Policy().target_activity_min_per_day
+    if fill_days and int(nights or 0) >= 1:
+        def _dedupe_key(name: str) -> str:
+            """Collapse near-duplicate catalogue entries.
+
+            The catalogue lists the same attraction several times ("Dubai Frame"
+            / "Dubai Frame Ticket", "Butterfly Garden Dubai" / "Dubai Butterfly
+            Garden Ticket"). Booking a customer onto both is embarrassing, so
+            match on the significant words, order-independent.
+            """
+            drop = {
+                "the", "a", "an", "in", "of", "at", "to", "from", "with", "and",
+                "dubai", "abu", "dhabi", "ticket", "tickets", "tour", "tours",
+                "experience", "entry", "pass", "combo",
+            }
+            words = {w for w in name.lower().replace("-", " ").split() if w not in drop}
+            return " ".join(sorted(words)) or name.lower()
+
+        chosen_keys = {_dedupe_key(str(t.get("name") or "")) for t in tours}
+        # Budget: full days for the middle of the trip, half days for arrival and
+        # departure. NO slack multiplier — an earlier 15% over-shoot added 14
+        # tours and crammed six into one day.
+        # A trip of N nights has N usable days (arrival and departure count as
+        # roughly one between them). Budget a full day of activity for each.
+        usable_days = max(1, int(nights or 1))
+        want_min = per_day * usable_days
+        have_min = sum(parse_duration_minutes(t.get("duration")) or 120 for t in tours)
+
+        # No add cap: an earlier cap of `usable_days * 2` stopped the top-up
+        # before the budget was met and left the last day blank. The minute
+        # budget plus the duplicate filter are the real limiters.
+        catalogue = list(_tour_facts_index(start_date))
+        for name, price, duration, _slots in catalogue:
+            if have_min >= want_min:
+                break
+            if not name or price <= 0:
+                continue
+            key = _dedupe_key(name)
+            if key in chosen_keys:
+                continue
+            mins = parse_duration_minutes(duration) or 120
+            if mins > per_day:  # cannot fit a single day on its own
+                continue
+            chosen_keys.add(key)
+            tours.append(
+                {"name": name.title(), "price_per_adult_inr": price, "duration": duration}
+            )
+            auto_filled.append(name.title())
+            have_min += mins
+
+    _sched_kwargs = dict(
+        start_date=start_date,
+        nights=nights,
+        arrival_time=arrival_time or None,
+        hotel_name=hotel_name,
+        hotel_checkin_time=hotel_checkin_time or None,
+        departure_time=departure_time or None,
+    )
+    out = build_itinerary(tours=tours, **_sched_kwargs)
+    if out.get("error"):
+        return out
+
+    # CLOSE THE LOOP. The open-loop estimate above could still leave a day bare
+    # (short tours, tours that would not fit a slot). Keep adding catalogue
+    # tours while any day is empty — this is what makes "Free Day" impossible
+    # rather than merely unlikely.
+    if fill_days:
+        pool = [
+            (n, p, d)
+            for n, p, d, _s in _tour_facts_index(start_date)
+            if n and p > 0 and (parse_duration_minutes(d) or 120) <= per_day
+        ]
+        guard = 0
+        while out.get("empty_days") and guard < 40:
+            guard += 1
+            added = False
+            for name, price, duration in pool:
+                key = _dedupe_key(name)
+                if key in chosen_keys:
+                    continue
+                chosen_keys.add(key)
+                tours.append(
+                    {"name": name.title(), "price_per_adult_inr": price, "duration": duration}
+                )
+                auto_filled.append(name.title())
+                added = True
+                break
+            if not added:
+                break  # catalogue exhausted; nothing more we can honestly add
+            out = build_itinerary(tours=tours, **_sched_kwargs)
+            if out.get("error"):
+                return out
+
+    # COST THE TRIP HERE. Left to itself the model wrote an "ESTIMATED TOTAL"
+    # table with a guessed tours line — twice, differing by Rs 3,000, and both
+    # UNDER the real figure by Rs 15-18k (it guessed ~25,000/~28,000 when the
+    # five tours it scheduled actually cost Rs 43,264 for four adults). The
+    # prompt already forbids estimates; a 26B model does not hold that rule
+    # under a full context. So the arithmetic happens in code.
+    pax = max(1, int(adults or 0))
+    scheduled: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for day in out.get("days") or []:
+        for item in day.get("items") or []:
+            if item.get("kind") != "tour":
+                continue
+            title = str(item.get("title") or "")
+            if title in seen:
+                continue
+            seen.add(title)
+            per_adult = 0.0
+            for t in tours or []:
+                if isinstance(t, dict) and str(t.get("name") or t.get("title") or "") == title:
+                    try:
+                        per_adult = float(
+                            t.get("price_per_adult_inr") or t.get("price_inr") or 0.0
+                        )
+                    except (TypeError, ValueError):
+                        per_adult = 0.0
+                    break
+            # PRICE IT OURSELVES if the caller passed a bare name. The model
+            # routinely sends [{"name": "Dubai Citytour"}] with no price, having
+            # already shown the customer ₹2,022 two messages earlier — and the
+            # total then read "Tours: pricing to be confirmed" while the trip
+            # total silently excluded them. Looking the price up here means a
+            # bare name still produces a correct total.
+            if per_adult <= 0 and title:
+                per_adult = _tour_price_lookup(title, start_date)
+            scheduled.append(
+                {
+                    "tour": title,
+                    "per_adult_inr": round(per_adult, 2),
+                    "group_inr": round(per_adult * pax, 2),
+                }
+            )
+
+    tours_total = round(sum(s["group_inr"] for s in scheduled), 2)
+    priced = [s for s in scheduled if s["per_adult_inr"] > 0]
+    visa_total = round(float(visa_per_adult_inr or 0.0) * pax, 2)
+    components = {
+        "flights": round(float(flight_total_inr or 0.0), 2),
+        "hotel": round(float(hotel_total_inr or 0.0), 2),
+        "tours": tours_total,
+        "visa": visa_total,
+        "transfers": round(float(transfer_total_inr or 0.0), 2),
+    }
+    # Cache for generate_itinerary_pdf_tool: the day plan it needs already
+    # exists here, so a PDF request should never bounce on MissingDayPlans.
+    global _LAST_PLAN
+    _LAST_PLAN = {
+        "days": out.get("days") or [],
+        "start_date": start_date,
+        "nights": nights,
+        "adults": pax,
+        "total_inr": out.get("total_inr"),
+        "cost_breakdown": out.get("cost_breakdown") or {},
+    }
+    out["auto_filled_tours"] = auto_filled
+    out["tour_costs"] = scheduled
+    out["cost_breakdown"] = components
+    out["total_inr"] = round(sum(components.values()), 2)
+    out["adults"] = pax
+    missing = [s["tour"] for s in scheduled if s["per_adult_inr"] <= 0]
+    out["costing_note"] = (
+        "These totals are computed, not estimated — quote `total_inr` and the "
+        "`cost_breakdown` lines VERBATIM. Never write your own total, and never "
+        "label it 'estimated'. "
+        + (
+            f"No price was supplied for: {', '.join(missing)} — say those are "
+            f"still to be priced rather than guessing."
+            if missing
+            else f"All {len(priced)} scheduled tours are priced."
+        )
+        + (
+            ""
+            if components["flights"] and components["hotel"]
+            else " Flight/hotel totals were not passed in, so the total covers "
+            "only what is listed — say so."
+        )
+    )
+    return out
+
+
 @tool
 def compose_customer_payment_summary_tool(
     total_inr_inclusive: float,
@@ -592,6 +928,17 @@ def generate_itinerary_pdf_tool(
     # model can immediately retry, instead of a link the customer will complain
     # about. Only enforced for multi-night trips, where a schedule is the point.
     if not (day_plans or []) and (nights or 0) >= 1:
+        # Reuse the plan we just built rather than bouncing the call. The model
+        # otherwise burns a full round-trip re-sending a schedule it already
+        # produced — which happened on every single PDF request.
+        cached = (_LAST_PLAN or {}).get("days") or []
+        if cached and str(_LAST_PLAN.get("start_date") or "") == str(start_date or ""):
+            day_plans = [
+                {"title": d.get("title") or f"Day {d.get('day_number')}",
+                 "items": d.get("items") or []}
+                for d in cached
+            ]
+    if not (day_plans or []) and (nights or 0) >= 1:
         return {
             "error": True,
             "error_type": "MissingDayPlans",
@@ -638,8 +985,7 @@ def _build_all_tools() -> list[BaseTool]:
     from mcp_tools.get_package_details import get_package_details_tool
     from mcp_tools.get_restaurant_details import get_restaurant_details_tool
     from mcp_tools.get_tour_details import get_tour_details_tool
-    from mcp_tools.get_tour_option_details import get_tour_option_details_tool
-    from mcp_tools.get_tour_options import get_tour_options_tool
+    from mcp_tools.get_tour_timeslots import get_tour_timeslots_tool
     from mcp_tools.get_transfer_details import get_transfer_details_tool
     from mcp_tools.get_visa_info import get_visa_info_tool
     from mcp_tools.list_visa_countries import list_visa_countries_tool
@@ -668,8 +1014,7 @@ def _build_all_tools() -> list[BaseTool]:
         # Detail tools (MCP-exposed)
         get_flight_details_tool,
         get_tour_details_tool,
-        get_tour_options_tool,
-        get_tour_option_details_tool,
+        get_tour_timeslots_tool,
         get_transfer_details_tool,
         get_restaurant_details_tool,
         get_package_details_tool,
@@ -693,6 +1038,7 @@ def _build_all_tools() -> list[BaseTool]:
         generate_itinerary_pdf_tool,
         display_options_tool,
         build_trip_schedule_tool,
+        plan_itinerary_tool,
     ]
 
 

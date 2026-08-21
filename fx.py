@@ -148,41 +148,154 @@ def live_rate_map(*, _now: float | None = None) -> dict[str, float]:
     return rates
 
 
-def supplier_pricing_roe(*, _now: float | None = None) -> float | None:
-    """INR-per-AED rate the SUPPLIER prices at — i.e. `1 / buyingROE`.
+def account_currency_code() -> str:
+    """The agent's billing currency, from `creditlimitCurrencyCode` in the JWT.
 
-    Not the same number as `live_rate_map()["AED"]`, which uses `sellingROE`.
-    `/api/Currency/ROE/INR` returns both:
-
-        {"buyingROE": 0.0387204523, "sellingROE": 26.3452500728}
-
-    Verified against the visa endpoint's own `priceWithoutROE` figures: the
-    supplier converts at `1/buyingROE` (25.826), NOT `sellingROE` (26.345).
-    Using the selling rate overquotes a UAE visa by ₹282–₹537. Anywhere we
-    must reproduce the supplier's OWN INR price, use this.
-
-    Returns None when the live call fails — callers fall back to the
-    supplier-provided INR field rather than inventing a rate.
+    The supplier's conversion rule keys off this, so it must come from the token
+    rather than be assumed. Ours is "INR". Falls back to INR if the claim is
+    missing or the token cannot be decoded.
     """
+    import base64
+    import json as _json
+
+    try:
+        from settings import get_booking_api_settings
+
+        tok = get_booking_api_settings().token or ""
+        part = tok.split(".")[1]
+        part += "=" * (-len(part) % 4)
+        claims = _json.loads(base64.urlsafe_b64decode(part))
+        code = str(claims.get("creditlimitCurrencyCode") or "").strip().upper()
+        return code or "INR"
+    except Exception as e:  # noqa: BLE001 — never let token parsing break a parse
+        logger.warning("could not read creditlimitCurrencyCode from token: %s", e)
+        return "INR"
+
+
+# Cache the (buying, selling) pair per currency. WITHOUT this, converting a
+# 270-tour list made 270 HTTP calls and parsing took 43 SECONDS. ROE is a
+# daily-ish rate, so the existing ROE_CACHE_TTL_SECS window is plenty.
+_ROE_PAIR_CACHE: dict[str, tuple[tuple[float | None, float | None], float]] = {}
+_ROE_PAIR_LOCK = threading.Lock()
+
+
+def _roe_pair(target_currency: str) -> tuple[float | None, float | None]:
+    """(buyingROE, sellingROE) for a currency, or (None, None) if unavailable.
+
+    Cached for ROE_CACHE_TTL_SECS — see the note above; this is a hot path.
+    """
+    code = (target_currency or "INR").strip().upper()
+    now = time.monotonic()
+    with _ROE_PAIR_LOCK:
+        hit = _ROE_PAIR_CACHE.get(code)
+        if hit and (now - hit[1]) < ROE_CACHE_TTL_SECS:
+            return hit[0]
+    pair = _fetch_roe_pair(code)
+    # Only cache a usable answer, so a transient failure retries next call.
+    if pair[0] or pair[1]:
+        with _ROE_PAIR_LOCK:
+            _ROE_PAIR_CACHE[code] = (pair, now)
+    return pair
+
+
+def _fetch_roe_pair(target_currency: str) -> tuple[float | None, float | None]:
+    """Uncached network fetch of the ROE pair."""
     try:
         from booking_api import call_currency_roe
 
-        raw = call_currency_roe(target_currency="INR")
+        raw = call_currency_roe(target_currency=target_currency)
     except Exception as e:  # never let an FX lookup break a parse
-        logger.warning("supplier pricing ROE fetch failed: %s", e)
-        return None
-
+        logger.warning("ROE fetch failed for %s: %s", target_currency, e)
+        return None, None
     payload = raw.get("result") if isinstance(raw, dict) else None
     if not isinstance(payload, dict):
         payload = raw if isinstance(raw, dict) else {}
-    for key in ("buyingROE", "BuyingROE", "buyingRoe", "buyRate"):
-        v = payload.get(key)
-        if isinstance(v, (int, float)) and v > 0:
-            return 1.0 / float(v)
-    return None
+
+    def _pick(*keys: str) -> float | None:
+        for k in keys:
+            v = payload.get(k)
+            if isinstance(v, (int, float)) and v > 0:
+                return float(v)
+        return None
+
+    return (
+        _pick("buyingROE", "BuyingROE", "buyingRoe", "buyRate"),
+        _pick("sellingROE", "SellingROE", "sellingRoe", "sellRate"),
+    )
+
+
+def convert_supplier_price(
+    price: float,
+    *,
+    fare_currency: str = "",
+    display_currency: str | None = None,
+) -> tuple[float | None, str]:
+    """Convert a supplier fare to the currency we quote in.
+
+    The supplier's own rule (confirmed by the client, 2026-08-21):
+
+        Base/system currency is ALWAYS AED, so `fareInfo.price` is in AED even
+        when the row is labelled `currency: "INR"`.
+
+        if creditlimitCurrencyCode == fareInfo.currency:  price / buyingROE
+        else:                                             price * sellingROE
+
+    Worked examples from the client, both reproduced by this function:
+        300.868335 AED / 0.0387979638 (INR buying)  = 7750.00 INR
+        300.868335 AED * 0.2750170184 (USD selling) =   82.75 USD
+
+    Note this INCLUDES the supplier's service fee, so it is the total the
+    customer pays. It is deliberately ~fee larger than the endpoint's own
+    `priceWithoutROE` field (which is the fare NET of the fee).
+
+    Returns (amount, currency_code). Amount is None when no rate is available —
+    callers must then fall back rather than invent a number.
+    """
+    try:
+        amount = float(price)
+    except (TypeError, ValueError):
+        return None, ""
+    if amount <= 0:
+        return None, ""
+
+    target = (display_currency or account_currency_code() or "INR").strip().upper()
+    # IMPORTANT: the rule compares the account currency against
+    # `fareInfo.currency` — the row's OWN label — not against the AED base. The
+    # visa endpoint labels its rows "INR", so for an INR account the labels match
+    # and we DIVIDE by buyingROE. Defaulting this to "AED" inverted the branch
+    # and overquoted by ~2% (7921 instead of 7765).
+    fare_cur = (fare_currency or target).strip().upper()
+
+    buying, selling = _roe_pair(target)
+    # INR is quoted in whole rupees — paisa on a visa fee reads like a bug.
+    # Minor units matter for USD/EUR, so only INR-like currencies are rounded.
+    places = 0 if target in {"INR", "JPY"} else 2
+
+    # The branch is on whether the fare row is denominated in OUR currency.
+    if fare_cur == target:
+        if buying:
+            return round(amount / buying, places), target
+    elif selling:
+        return round(amount * selling, places), target
+    # One retry on the other rate rather than returning nothing.
+    if buying:
+        return round(amount / buying, places), target
+    return None, target
+
+
+def supplier_pricing_roe(*, _now: float | None = None) -> float | None:
+    """Multiplier that turns an AED fare into the account currency (1/buyingROE).
+
+    Kept for callers that want a plain rate. `convert_supplier_price()` is the
+    preferred entry point — it implements the supplier's full currency rule.
+    """
+    buying, _ = _roe_pair(account_currency_code())
+    return (1.0 / buying) if buying else None
 
 
 def clear_fx_cache() -> None:
-    """Drop the cached live rate (tests / forced refresh)."""
+    """Drop the cached live rates (tests / forced refresh)."""
     with _LOCK:
         _cache.clear()
+    with _ROE_PAIR_LOCK:
+        _ROE_PAIR_CACHE.clear()

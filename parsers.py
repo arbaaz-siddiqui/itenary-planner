@@ -44,7 +44,7 @@ from core import (
     VisaOption,
     to_inr,
 )
-from fx import live_rate_map, supplier_pricing_roe
+from fx import convert_supplier_price, live_rate_map
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
@@ -476,6 +476,42 @@ def _parse_room(
 # =============================================================================
 # === tour
 # =============================================================================
+# Cancellation policy id -> name. Resolved live (2026-08-21) by calling
+# Tourdetails for one representative tour per id: the LIST response only carries
+# `cancellationPolicyID`, while the human-readable name lives in the detail
+# response. Mapping them here means every tour in a list can state its terms
+# without an extra API call per tour.
+#
+# The client's requirement is non-negotiable: a tour must never be presented
+# without its cancellation terms. Unknown ids fall back to "on request" rather
+# than to silence — the failure being fixed is the agent saying there is NO
+# policy when there plainly is one.
+_TOUR_CANCELLATION_POLICIES: dict[int, str] = {
+    1: "Free cancellation before 24 hours",
+    2: "Free cancellation up to 24 hours prior",
+    3: "Free cancellation up to 48 hours prior",
+    5: "Free cancellation up to 12 hours prior",
+    6: "Yas Island cancellation policy",
+    7: "Free cancellation up to 72 hours prior",
+    11: "Free cancellation (24 hours notice)",
+    12: "Free cancellation (48 hours notice)",
+    13: "No cancellation",
+    16: "Free cancellation (72 hours notice)",
+    17: "Conditional cancellation",
+    19: "Free cancellation before redemption",
+    22: "Standard cancellation policy",
+    23: "Non-refundable",
+}
+
+
+def tour_cancellation_policy(policy_id: Any) -> str:
+    """Human-readable cancellation terms for a tour's policy id."""
+    try:
+        return _TOUR_CANCELLATION_POLICIES.get(int(policy_id), "")
+    except (TypeError, ValueError):
+        return ""
+
+
 def parse_tour_response(
     list_raw: dict[str, Any],
     rate_raw: dict[str, Any],
@@ -525,7 +561,11 @@ def _parse_tour(
     rate_entry = rate_map.get(tour_id, {})
     final_rate = rate_entry.get("finalRate")
     currency = rate_entry.get("currencyCode") or "AED"
-    price_inr = _safe_to_inr(final_rate, currency, rates) or 0.0
+    # Supplier's own currency rule (client-confirmed) rather than the generic
+    # sellingROE map, which overquotes by ~2%. Falls back to the old path if no
+    # live rate is available.
+    converted, _cur = convert_supplier_price(final_rate, fare_currency=currency)
+    price_inr = converted or _safe_to_inr(final_rate, currency, rates) or 0.0
     image_url = _resolve_image_url(t.get("imagePath"), image_base_url)
     return TourOption(
         tour_id=tour_id,
@@ -548,6 +588,12 @@ def _parse_tour(
         rating=float(t.get("tourrating") or 0),
         reviews_count=int(t.get("reviewsCount") or 0),
         is_recommended=bool(t.get("isRecommanded") or t.get("isRecommended")),
+        transfer_scenario=str(t.get("transferScenario") or ""),
+        cancellation_policy=tour_cancellation_policy(t.get("cancellationPolicyID")),
+        # Slot lookup needs both. supplierId is on the tour row; optionId only
+        # exists on the RATE row, which is why the rate map is consulted here.
+        supplier_id=_safe_int(t.get("supplierId")) or 0,
+        option_id=_safe_int(rate_entry.get("optionId")) or 0,
         supplier_name=str(t.get("supplierName") or ""),
         image_url=image_url,
     )
@@ -797,18 +843,6 @@ def parse_visa_response(raw: dict[str, Any], *, max_results: int | None = None) 
     return options[:max_results] if max_results else options
 
 
-def _visa_pricing_roe() -> float | None:
-    """INR-per-AED the supplier prices at (1/buyingROE), or None if unavailable.
-
-    Thin wrapper so the visa parser has one seam to stub in tests. `fx` already
-    caches the underlying ROE call, so calling this per fare row is cheap.
-    """
-    try:
-        return supplier_pricing_roe()
-    except Exception:  # never let an FX hiccup break a visa parse
-        return None
-
-
 def _parse_visa_option(
     opt: Any,
     parent_name: str,
@@ -842,7 +876,6 @@ def _parse_visa_option(
     pricing_available = False
     fares: list[VisaFare] = []
 
-    roe = _visa_pricing_roe()
     for rate in opt.get("visaRates") or []:
         if not isinstance(rate, dict):
             continue
@@ -858,16 +891,21 @@ def _parse_visa_option(
                 continue
             if amount <= 0:
                 continue
-            try:
-                fee = float(fi.get("serviceFee") or 0.0)
-            except (TypeError, ValueError):
-                fee = 0.0
-
-            if roe:
-                converted = (amount - fee) * roe
-            else:
-                # No live ROE — trust the supplier's own INR field over any
-                # rate we might guess at.
+            # Supplier's own rule (client-confirmed 2026-08-21): the fare is in
+            # AED, and the conversion branches on whether the row's own
+            # `currency` label matches our account currency
+            # (`creditlimitCurrencyCode` in the JWT):
+            #     same     -> price / buyingROE
+            #     different -> price * sellingROE
+            # This INCLUDES the service fee, so it is the total the customer
+            # pays — deliberately ~fee more than `priceWithoutROE`, which is the
+            # fare NET of the fee.
+            converted, _cur = convert_supplier_price(
+                amount, fare_currency=str(fi.get("currency") or "")
+            )
+            if not converted:
+                # No live rate — fall back to the supplier's own net figure
+                # rather than inventing a number.
                 try:
                     converted = float(fi.get("priceWithoutROE") or 0.0)
                 except (TypeError, ValueError):

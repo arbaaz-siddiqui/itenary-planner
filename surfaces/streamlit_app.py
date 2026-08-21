@@ -51,17 +51,27 @@ inject_theme()
 
 
 def _prompt_fingerprint() -> float:
-    """Newest mtime across the prompt files the agent bakes in at build time.
+    """Newest mtime across the prompt AND tool-code files the agent depends on.
 
     The agent object lives in st.session_state, so an open browser tab keeps
     using the agent — and therefore the SYSTEM PROMPT — it was built with, even
     after the server restarts. Editing a prompt and reloading the page looked
     like the fix hadn't applied. Rebuild when a prompt file changes.
     """
-    root = Path(__file__).resolve().parent.parent / "prompts"
+    root = Path(__file__).resolve().parent.parent
     try:
-        return max(p.stat().st_mtime for p in root.glob("*.md"))
-    except ValueError:
+        stamps = [p.stat().st_mtime for p in (root / "prompts").glob("*.md")]
+        # Tool CODE matters as much as the prompt: a change to search_hotels or
+        # agent_tools alters the SHAPE and PRICING of results, and an open tab
+        # was happily serving the agent (and cache) it started with.
+        stamps += [p.stat().st_mtime for p in (root / "mcp_tools").glob("*.py")]
+        stamps += [
+            (root / name).stat().st_mtime
+            for name in ("agent_tools.py", "parsers.py", "fx.py", "scheduling.py")
+            if (root / name).exists()
+        ]
+        return max(stamps)
+    except (ValueError, OSError):
         return 0.0
 
 
@@ -72,6 +82,19 @@ def _init_session() -> None:
             surface="streamlit", checkpoint_store=build_in_memory_checkpoint()
         )
         st.session_state._prompt_fp = fingerprint
+        # Anything cached under the previous code/prompt is stale by definition.
+        try:
+            from mcp_tools.result_cache import clear_result_cache
+
+            clear_result_cache()
+        except Exception:  # noqa: BLE001 — a cold cache is never fatal
+            pass
+        try:
+            from fx import clear_fx_cache
+
+            clear_fx_cache()
+        except Exception:  # noqa: BLE001
+            pass
     st.session_state.setdefault("thread_id", f"web_{uuid.uuid4().hex[:12]}")
     st.session_state.setdefault("chat_history", [])
     # Full debug records: one dict per tool call with turn, name, input, output.
@@ -105,6 +128,20 @@ CARD_TRIGGER_RE = re.compile(
     r"(flights?|hotels?|tours?|transfers?|restaurants?|visa\s+options?)\s*:",
     re.IGNORECASE | re.MULTILINE,
 )
+
+# The model rarely writes the exact trigger phrase. Left to itself it emits
+# emoji section headings — "🏨 Hotels (5 Nights)", "✈️ Flights (Hyderabad ↔
+# Dubai)", "**Hotels (3 Nights)**" — and every one of those rendered as prose
+# with NO cards, because only the phrase above was recognised. Match the way it
+# actually writes: a line that is essentially a component heading.
+CARD_HEADING_RE = re.compile(
+    # optional emoji / markdown / list marker, then the component word, then
+    # anything short (a bracketed qualifier, a colon) to the end of the line.
+    r"^[ \t]*[^\w\n]{0,4}\s*\**\s*#{0,4}\s*\**\s*"
+    r"(flights?|hotels?|tours?|activit(?:y|ies)|transfers?|restaurants?|visas?)"
+    r"\b[^\n]{0,40}$",
+    re.IGNORECASE | re.MULTILINE,
+)
 USER_DISPLAY_KEYWORDS = (
     "show me",
     "list",
@@ -122,7 +159,13 @@ USER_DISPLAY_KEYWORDS = (
 
 
 def _should_render_cards(user_text: str, agent_text: str) -> bool:
-    if CARD_TRIGGER_RE.search(agent_text or ""):
+    text = agent_text or ""
+    if CARD_TRIGGER_RE.search(text):
+        return True
+    # A component heading plus a price is a listing, whatever words it used.
+    # Requiring the price keeps a passing mention ("your hotel is booked") from
+    # triggering a card wall.
+    if CARD_HEADING_RE.search(text) and PRICE_RE.search(text):
         return True
     t = (user_text or "").lower()
     return any(kw in t for kw in USER_DISPLAY_KEYWORDS)
@@ -274,12 +317,51 @@ def _render_hotel(o: dict[str, Any]) -> None:
                     st.caption(f"Room: {o['cheapest_room_type']}")
                 if o.get("cheapest_board"):
                     st.caption(f"Board: {o['cheapest_board']}")
-                if o.get("has_free_cancellation"):
-                    st.caption("✓ Free cancellation")
+                if o.get("amenities_display"):
+                    st.caption(f"🛎️ {o['amenities_display']}")
+                if o.get("dining_display"):
+                    st.caption(f"🍽️ {o['dining_display']}")
+                # The rate we priced, then whether a flexible one exists at all.
+                # Two separate facts: the cheapest room is usually
+                # non-refundable, which is NOT the hotel's only option.
+                if o.get("cancellation_display"):
+                    icon = "✅" if o.get("has_free_cancellation") else "⚠️"
+                    st.caption(f"{icon} {o['cancellation_display']}")
+                if o.get("refundable_display") and not o.get("has_free_cancellation"):
+                    st.caption(f"🔄 {o['refundable_display']}")
             with c2:
                 st.markdown(f"### {format_inr(o.get('price_inr', 0))}")
                 nights = o.get("nights", 0)
                 st.caption(f"{nights} nights · {format_inr(o.get('per_night_inr', 0))}/night")
+
+        # Per-room cancellation table, rendered in CODE rather than left to the
+        # model. The tool returns `room_policies` correctly, but a hotel result
+        # carries 28 keys in a ~4.7k-token payload and a 26B model reliably
+        # grabs the top-level `cancellation_display` and stops — so the customer
+        # kept being told "Non-refundable" for hotels that had 4 flexible rooms.
+        policies = o.get("room_policies") or []
+        if policies:
+            free_n = sum(1 for p in policies if p.get("refundable"))
+            label = (
+                f"🔄 Cancellation by room — {free_n} refundable of {len(policies)} shown"
+                if free_n
+                else "🔄 Cancellation by room — none refundable"
+            )
+            with st.expander(label, expanded=bool(free_n)):
+                st.dataframe(
+                    [
+                        {
+                            "Room": p.get("room", ""),
+                            "Board": p.get("board", ""),
+                            "Total": p.get("price_display", ""),
+                            "Cancellation": ("✅ " if p.get("refundable") else "❌ ")
+                            + str(p.get("policy", "")),
+                        }
+                        for p in policies
+                    ],
+                    hide_index=True,
+                    use_container_width=True,
+                )
 
 
 def _render_tour(o: dict[str, Any]) -> None:
@@ -1026,17 +1108,25 @@ def _summarize_tc(tc: dict[str, Any]) -> str:
     return "ok"
 
 
-def _process_message(user_message: str) -> None:
+def _process_message(user_message: str, *, display_as: str | None = None) -> None:
+    """Run one turn. `display_as` is what the CUSTOMER sees in the bubble.
+
+    Button-driven turns need a long, explicit instruction for the model ("call
+    generate_itinerary_pdf_tool with the real numbers, do not invent any…") but
+    showing that verbatim looks like the customer typed a prompt at the AI. The
+    model still receives `user_message`; only the bubble differs.
+    """
     user_ts = _now_stamp()
+    shown = display_as or user_message
     st.session_state.chat_history.append(
-        {"role": "user", "content": user_message, "ts": user_ts}
+        {"role": "user", "content": shown, "ts": user_ts}
     )
     st.session_state.turn_number += 1
     turn = st.session_state.turn_number
 
     with st.chat_message("user"):
         _render_timestamp(user_ts)
-        st.markdown(user_message)
+        st.markdown(shown)
 
     # Mark the HTTP cursor BEFORE the turn so we can collect exactly the supplier
     # requests that fire during it and attribute them to this turn's tool calls.
@@ -1125,6 +1215,52 @@ def _process_message(user_message: str) -> None:
             status.update(label="Done", state="complete")
         if not isinstance(assistant_text, str):
             assistant_text = result.text or ""
+
+        # A BLANK reply. Seen live: the customer said "ok lock this hotel too and
+        # what are the tours options available?" and got an empty bubble, then had
+        # to type "try again please". The stream succeeded, so the except branch
+        # above never fired — the model simply emitted tool calls and no prose
+        # (it hit the recursion cap, or produced tool-only output).
+        #
+        # Never show an empty bubble: say what happened and, when tools DID run,
+        # say what we found so the turn is not a dead loss.
+        if not assistant_text.strip():
+            calls = extract_tool_calls(result.response) or []
+            tool_names = [tc.get("tool_name", "") for tc in calls]
+
+            # A tool that already produced a customer-ready sentence — the PDF
+            # builder returns `summary` WITH the download link. Prefer that over
+            # any apology: the work succeeded, so saying "I didn't get a reply
+            # out" is simply false (the customer saw the download appear and was
+            # told it had failed).
+            done_msg = ""
+            for tc in calls:
+                out = _coerce_output(tc.get("output"))
+                if isinstance(out, dict) and not out.get("error"):
+                    if out.get("summary") and out.get("download_url"):
+                        done_msg = str(out["summary"])
+                        break
+            if done_msg:
+                assistant_text = done_msg
+            else:
+                searched = sorted({
+                    n.replace("search_", "").replace("get_", "").replace("_", " ").strip()
+                    for n in tool_names if n.startswith(("search_", "get_"))
+                })
+                if searched:
+                    assistant_text = (
+                        "I pulled up " + ", ".join(searched) + " but didn't get the "
+                        "summary written. Ask me again and I'll lay the results out."
+                    )
+                else:
+                    assistant_text = (
+                        "Sorry — I didn't get a reply out for that one. Could you say it again?"
+                    )
+            import logging as _lg
+            _lg.getLogger("streamlit.turn").warning(
+                "empty assistant reply (tools=%s)", tool_names
+            )
+            status.update(label="Empty reply — asked user to retry", state="error")
         # Fallback: nothing streamed (tool-only turn / error) → stamp now so the
         # message still carries a timestamp.
         if assistant_ts is None:
@@ -1246,13 +1382,6 @@ chat_tab, voice_tab, leads_tab, debug_tab = st.tabs(["💬 Chat", "📞 Voice", 
 
 with chat_tab:
     # Empty-state hint so the chat doesn't look broken before the first message.
-    if not st.session_state.chat_history:
-        st.info(
-            "👋 Tell me about your Dubai trip — origin city, dates/nights, who's "
-            "travelling, and your budget. Every API and tool call shows live in the "
-            "**🔧 Debug** tab so you can see exactly what data each answer is built on.",
-            icon="🧭",
-        )
 
     # Replay chat history — only render rich cards for the last 6 messages to
     # avoid rerendering all hotel/flight cards on every interaction (causes freeze).
@@ -1286,7 +1415,9 @@ with chat_tab:
             "confirmed (origin, dates, party, the flights/hotel/tours/visa we "
             "discussed, the total, and the payment schedule). Call the "
             "generate_itinerary_pdf_tool with the real numbers — do not invent "
-            "any, and do not ask me for details we already covered."
+            "any, and do not ask me for details we already covered.",
+            # The customer clicked a button; don't show them the prompt we sent.
+            display_as="📄 Generate my itinerary PDF",
         )
         st.rerun()
 

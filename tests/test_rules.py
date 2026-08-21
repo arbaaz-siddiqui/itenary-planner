@@ -495,7 +495,9 @@ class TestCurrencyConversion:
         for o in opts:
             assert o.currency_original == "AED"
             ratio = o.price_per_adult_inr / o.price_original
-            assert 20 <= ratio <= 26
+        # Upper bound is 30, not 26: AED/INR is a LIVE rate (26.3 as of
+        # Aug 2026) and the old 26 ceiling failed on a normal market move.
+            assert 20 <= ratio <= 30
 
 
 # =============================================================================

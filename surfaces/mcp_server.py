@@ -19,8 +19,6 @@ import mcp_tools.get_hotel_reviews
 import mcp_tools.get_package_details
 import mcp_tools.get_restaurant_details
 import mcp_tools.get_tour_details
-import mcp_tools.get_tour_option_details
-import mcp_tools.get_tour_options
 import mcp_tools.get_transfer_details
 import mcp_tools.get_visa_info
 import mcp_tools.list_city_hotels

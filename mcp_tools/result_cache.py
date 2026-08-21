@@ -46,8 +46,6 @@ _TOOL_TTL = {
     "get_hotel_description": _STATIC_TTL,
     "get_hotel_reviews": _STATIC_TTL,
     "get_tour_details": _STATIC_TTL,
-    "get_tour_options": _STATIC_TTL,
-    "get_tour_option_details": _STATIC_TTL,
     "get_transfer_details": _STATIC_TTL,
     "get_flight_details": _VOLATILE_TTL,
     "get_restaurant_details": _STATIC_TTL,
@@ -73,7 +71,7 @@ _TOOL_TTL = {
 # History:
 #   1 — initial
 #   2 — lookup_entity city scoping; hotel/flight payload slimming
-CACHE_EPOCH = 2
+CACHE_EPOCH = 3  # bumped 2026-08-21: result shape + pricing changed
 
 _LOCK = threading.Lock()
 _CACHE: dict[str, tuple[Any, float]] = {}  # key -> (result, stored_at)

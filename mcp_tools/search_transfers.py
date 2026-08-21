@@ -147,12 +147,22 @@ def _impl(
             if not _generic:
                 # Name given → entity search canonicalises it AND gives authoritative
                 # coords. This is why coords are OPTIONAL: a good name is enough.
-                res = call_entity_search(service="hotels", query=hotel_name.strip(), size=5)
-                hits = [
-                    h for h in (res.get("data") or [])
-                    if isinstance(h, dict) and h.get("type", "").lower() == "hotel"
-                    and h.get("latitude") and h.get("longitude")
-                ]
+                # City-scope the query FIRST. Entity search is worldwide, so a
+                # generic name ("Social Hotel") matches Portugal/Jaipur/Bogota
+                # long before the Dubai property. Try "<name> Dubai", then fall
+                # back to the bare name.
+                _q = hotel_name.strip()
+                _queries = [_q] if "dubai" in _q.lower() else [f"{_q} Dubai", _q]
+                hits: list[dict] = []
+                for _query in _queries:
+                    res = call_entity_search(service="hotels", query=_query, size=5)
+                    hits = [
+                        h for h in (res.get("data") or [])
+                        if isinstance(h, dict) and h.get("type", "").lower() == "hotel"
+                        and h.get("latitude") and h.get("longitude")
+                    ]
+                    if hits:
+                        break
                 if hits:
                     hotel_lat = float(hits[0]["latitude"])
                     hotel_lng = float(hits[0]["longitude"])

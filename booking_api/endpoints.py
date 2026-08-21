@@ -46,7 +46,7 @@ from booking_api.headers import (
     hotel_static_headers,
     transfer_headers,
 )
-from booking_api.http_client import get_b2c_client, get_client
+from booking_api.http_client import get_client
 from core import (
     BookingApiError,
     CurrencyRoeFailed,
@@ -75,10 +75,6 @@ TOUR_LIST_PATH = "/api/v1/tourservices/TourSearch/toursearchlist"
 TOUR_RATE_PATH = "/api/v1/tourservices/TourSearch/toursearchlistrate"
 TOUR_DETAILS_PATH = "/api/v1/tourservices/TourSearch/Tourdetails"
 TOUR_TIMESLOT_PATH = "/api/v1/tourservices/TourSearch/Timeslot"
-# B2C host (stagingb2c) — see get_b2c_client().
-TOUR_OPTIONS_PATH = "/api/tours/options"
-TOUR_PRICE_CALENDAR_PATH = "/api/tours/tour-price-check-calender"  # supplier's spelling
-TOUR_OPTION_DETAILS_PATH = "/api/tours/option-details"
 TRANSFER_LIST_PATH = "/api/transferservices/TransferList"
 TRANSFER_DETAILS_PATH = "/api/transferservices/TransferDetail"
 RESTAURANT_LIST_PATH = "/api/restaurant/v1/restaurants"
@@ -420,19 +416,6 @@ def call_tour_details(*, tour_id: int) -> dict[str, Any]:
 # These drill into a chosen tour: TourList/Rate gives tourId + supplierId, then
 # options -> time slots / price calendar / option details. Three of them live on
 # the B2C host (get_b2c_client); TourTimeSlot is on the main B2B host.
-
-
-def call_tour_options(*, tour_id: int, travel_date: str, lang: str = "en") -> dict[str, Any]:
-    """Available options/variants for a tour (B2C). Returns tourOptionId/ratePlanId."""
-    payload: dict[str, Any] = {"tourID": tour_id, "travelDate": travel_date, "lang": lang}
-    try:
-        return get_b2c_client().post(TOUR_OPTIONS_PATH, json=payload, headers=base_headers())
-    except Exception as e:
-        if isinstance(e, BookingApiError):
-            raise
-        raise TourDetailsFailed(f"Tour options call failed: {e}", endpoint=TOUR_OPTIONS_PATH) from e
-
-
 def call_tour_timeslots(
     *,
     tour_id: int,
@@ -462,68 +445,6 @@ def call_tour_timeslots(
         raise TourDetailsFailed(
             f"Tour timeslot call failed: {e}", endpoint=TOUR_TIMESLOT_PATH
         ) from e
-
-
-def call_tour_price_calendar(
-    *,
-    tour_id: int,
-    tour_option_id: int,
-    start_month: int,
-    end_month: int,
-    rate_plan_id: int = 0,
-    timeslot_id: int = 0,
-    lang: str = "en",
-) -> dict[str, Any]:
-    """Price-availability calendar for a tour option across a month range (B2C)."""
-    payload: dict[str, Any] = {
-        "tourId": tour_id,
-        "tourOptionId": tour_option_id,
-        "ratePlanId": rate_plan_id,
-        "timeslotId": timeslot_id,
-        "startMonth": start_month,
-        "endMonth": end_month,
-        "lang": lang,
-    }
-    try:
-        return get_b2c_client().post(
-            TOUR_PRICE_CALENDAR_PATH, json=payload, headers=base_headers()
-        )
-    except Exception as e:
-        if isinstance(e, BookingApiError):
-            raise
-        raise TourDetailsFailed(
-            f"Tour price-calendar call failed: {e}", endpoint=TOUR_PRICE_CALENDAR_PATH
-        ) from e
-
-
-def call_tour_option_details(
-    *, tour_id: int, tour_option_id: str, supplier_id: int, lang: str = "en"
-) -> dict[str, Any]:
-    """Full detail for a tour option: pricing, inclusions, cancellation (B2C).
-
-    The collection sends NO auth header for this endpoint, but passing the Bearer
-    token (as get_b2c_client does) is harmless and consistent.
-    """
-    payload: dict[str, Any] = {
-        "tourId": tour_id,
-        "tourOptionId": str(tour_option_id),
-        "supplierId": supplier_id,
-        "lang": lang,
-    }
-    try:
-        return get_b2c_client().post(
-            TOUR_OPTION_DETAILS_PATH, json=payload, headers=base_headers()
-        )
-    except Exception as e:
-        if isinstance(e, BookingApiError):
-            raise
-        raise TourDetailsFailed(
-            f"Tour option-details call failed: {e}", endpoint=TOUR_OPTION_DETAILS_PATH
-        ) from e
-
-
-# =============================================================================
-# Transfers (list + details)
 # =============================================================================
 # fromType / toType single-letter codes from Postman collection:
 #   A = Airport, H = Hotel/Property.

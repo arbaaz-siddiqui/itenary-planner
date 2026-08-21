@@ -235,3 +235,85 @@ class TestCardTrigger:
 
     def test_user_keyword_still_works(self, helpers: dict[str, Any]) -> None:
         assert helpers["_should_render_cards"]("show me hotels", "Sure thing.")
+
+
+class TestEmojiHeadingTriggersCards:
+    """The model almost never writes "Here are the top 3 hotels:".
+
+    Left to itself it emits emoji section headings — "🏨 Hotels (5 Nights)",
+    "✈️ Flights (Hyderabad ↔ Dubai)" — and the whole reply rendered as prose
+    with NO cards, because only the literal phrase was recognised. A component
+    heading PLUS a price is a listing, whatever words were used.
+    """
+
+    SCREENSHOT = (
+        "✈️ Flights (Hyderabad ↔ Dubai)\n"
+        "Prices are for all 4 adults together.\n"
+        "IndiGo — ₹2,36,269 · 08:10→10:25 (Nonstop, 3h 45m)\n"
+        "🏨 Hotels (5 Nights)\n"
+        "Social Hotel — ₹16,646 total (₹3,329/night)\n"
+    )
+
+    def test_the_real_failing_reply_now_renders(self, helpers: dict[str, Any]) -> None:
+        assert helpers["_should_render_cards"]("", self.SCREENSHOT)
+
+    @pytest.mark.parametrize(
+        "heading",
+        [
+            "🏨 Hotels (3 Nights)",
+            "✈️ Flights (Hyderabad ↔ Dubai)",
+            "**Hotels (5 Nights)**",
+            "## Tours",
+            "🎟️ Tours & Activities",
+            "- Transfers",
+        ],
+    )
+    def test_component_headings(self, helpers: dict[str, Any], heading: str) -> None:
+        assert helpers["_should_render_cards"]("", f"{heading}\nSomething — ₹19,975 total")
+
+    def test_heading_without_a_price_does_not_trigger(self, helpers: dict[str, Any]) -> None:
+        """Requiring a price stops a passing mention causing a card wall."""
+        assert not helpers["_should_render_cards"]("", "🏨 Hotels\nYour hotel is confirmed.")
+
+    def test_single_recommendation_still_does_not_trigger(
+        self, helpers: dict[str, Any]
+    ) -> None:
+        text = "I'd go with Emirates — ₹82,885, nonstop. Lock it in?"
+        assert not helpers["_should_render_cards"]("", text)
+
+    def test_original_phrase_still_works(self, helpers: dict[str, Any]) -> None:
+        assert helpers["_should_render_cards"]("", "Here are the top 3 hotels:")
+
+
+class TestButtonAndEmptyReply:
+    """Two live UI complaints.
+
+    1. Clicking "Generate PDF" showed the raw instruction we send the model
+       ("Call the generate_itinerary_pdf_tool with the real numbers — do not
+       invent any…") as if the customer had typed it.
+    2. The PDF generated and downloaded fine, but the reply said "Sorry — I
+       didn't get a reply out for that one." The empty-text guard only looked at
+       search_/get_ tools, so a successful PDF turn fell through to the apology.
+    """
+
+    APP = Path(__file__).resolve().parent.parent / "surfaces" / "streamlit_app.py"
+
+    def test_process_message_takes_a_display_label(self) -> None:
+        src = self.APP.read_text(encoding="utf-8")
+        assert "display_as: str | None = None" in src
+        # and the bubble must render the label, not the raw instruction
+        assert "shown = display_as or user_message" in src
+        assert "st.markdown(shown)" in src
+
+    def test_pdf_button_hides_the_raw_prompt(self) -> None:
+        src = self.APP.read_text(encoding="utf-8")
+        assert 'display_as="📄 Generate my itinerary PDF"' in src
+        # the model must STILL receive the explicit instruction
+        assert "generate_itinerary_pdf_tool with the real numbers" in src
+
+    def test_empty_guard_prefers_a_successful_tool_summary(self) -> None:
+        """A finished PDF must be reported as done, never apologised for."""
+        src = self.APP.read_text(encoding="utf-8")
+        assert 'out.get("summary") and out.get("download_url")' in src
+        # the success branch has to come BEFORE the apology
+        assert src.index("done_msg = str(out") < src.index("didn't get a reply out")

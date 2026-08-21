@@ -26,6 +26,11 @@ from reference_data_loader import (
 
 logger = logging.getLogger(__name__)
 
+# Hotel content fan-out budget: one description call per hotel, run wide and
+# time-boxed so a slow supplier can never stall a hotel search.
+_CONTENT_MAX_WORKERS = 12
+_CONTENT_DEADLINE_S = 6.0
+
 # How many live discovery hotel IDs to price per search. The supplier exposes
 # thousands; the availability call can't price them all, so we send a batch
 # (curated hotels first, then top star-matching discovery IDs).
@@ -59,28 +64,287 @@ def _hotel_ids_to_search(
     return out
 
 
+# Keywords worth pulling out of the supplier's long description, grouped so we
+# can tell a customer what the hotel actually HAS. The description is prose
+# ("an outdoor pool, a sauna, and a 24-hour fitness center"), so the agent could
+# not reliably state amenities from the search result — it had none at all.
+_AMENITY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "Pool": ("outdoor pool", "indoor pool", "swimming pool", "rooftop pool"),
+    "Gym": ("fitness cent", "fitness facilit", "gym"),
+    "Spa": ("spa ", "massage", "body treatment", "facial"),
+    "Sauna": ("sauna", "steam room"),
+    "Free WiFi": ("complimentary wireless", "free wifi", "free wi-fi", "complimentary wi-fi"),
+    "Restaurant": ("restaurant", "all day dining", "dining establishment"),
+    "Bar": ("bar/lounge", " bar,", "cocktail"),
+    "Breakfast available": ("breakfast",),
+    "Room service": ("room service",),
+    "Airport shuttle": ("airport shuttle", "airport transportation"),
+    "Parking": ("valet parking", "free parking", "self parking"),
+    "Business centre": ("business cent",),
+    "Laundry": ("dry cleaning", "laundry"),
+    "Family friendly": ("babysitting", "children's", "kids club"),
+    "Beach access": ("private beach", "beach access"),
+}
+
+
+def _extract_amenities(description: str) -> list[str]:
+    """Pull a clean amenity list out of the supplier's prose description."""
+    text = (description or "").lower()
+    if not text:
+        return []
+    return [label for label, keys in _AMENITY_KEYWORDS.items() if any(k in text for k in keys)]
+
+
+def _dining_summary(description: str) -> str:
+    """The food story: "3 restaurants and a coffee shop", named venues, breakfast.
+
+    Customers ask about food constantly and the search result carried nothing,
+    so the agent either stayed silent or guessed.
+    """
+    import re as _re
+
+    text = (description or "").strip()
+    if not text:
+        return ""
+    bits: list[str] = []
+    m = _re.search(r"(\d+)\s+restaurants?", text, _re.I)
+    if m:
+        bits.append(f"{m.group(1)} restaurants")
+    for venue in _re.findall(r"at ([A-Z][A-Za-z0-9'\- ]{3,34}?(?:Dining|Restaurant|Lounge|Cafe|Bar|Grill|Kitchen))", text):
+        bits.append(venue.strip())
+    if _re.search(r"coffee shop|caf[eé]", text, _re.I):
+        bits.append("coffee shop")
+    if _re.search(r"buffet breakfast", text, _re.I):
+        bits.append("buffet breakfast")
+    elif _re.search(r"breakfast", text, _re.I):
+        bits.append("breakfast available")
+    # de-dupe, keep order
+    seen: list[str] = []
+    for b in bits:
+        if b.lower() not in {x.lower() for x in seen}:
+            seen.append(b)
+    return " · ".join(seen[:4])
+
+
+def _enrich_with_content(option_dicts: list[dict[str, Any]], city_id: int) -> None:
+    """Attach amenities / dining / description to each hotel in the results.
+
+    Why here and not left to `get_hotel_description`: the agent almost never made
+    that extra call, so a whole conversation could go by without the customer
+    hearing one thing about the property beyond its price. Doing it here makes
+    the detail the default.
+
+    ONE HOTEL PER CALL: GetPropertyDescriptions returns an EMPTY list when given
+    several ids ([1350] -> 1 description, [1350, 1351] -> 0), and the response
+    does not echo `hotel_id` back, so batching loses the mapping entirely. We
+    therefore fan out one call per hotel and pair by position.
+
+    Best-effort and time-boxed: on failure or timeout the hotels simply keep
+    their price-only shape rather than the search failing.
+    """
+    import concurrent.futures as _cf
+
+    if not option_dicts:
+        return
+
+    def _one(o: dict[str, Any]) -> None:
+        hid = o.get("hotel_id")
+        if not hid:
+            return
+        try:
+            from booking_api import call_hotel_descriptions
+            from parsers import parse_hotel_descriptions_response
+
+            parsed = parse_hotel_descriptions_response(
+                call_hotel_descriptions(hotel_ids=[hid], city_id=city_id)
+            )
+        except Exception as e:  # noqa: BLE001 — content is a bonus, never fatal
+            logger.debug("hotel content fetch failed for %s: %s", hid, e)
+            return
+        if not parsed or not isinstance(parsed[0], dict):
+            return
+        desc = str(parsed[0].get("description") or "")
+        if not desc:
+            return
+        o["amenities"] = _extract_amenities(desc)
+        o["amenities_display"] = " · ".join(o["amenities"])
+        o["dining_display"] = _dining_summary(desc)
+        o["description_short"] = desc[:280].rsplit(" ", 1)[0] + ("…" if len(desc) > 280 else "")
+
+    ex = _cf.ThreadPoolExecutor(max_workers=min(_CONTENT_MAX_WORKERS, len(option_dicts)))
+    try:
+        futures = [ex.submit(_one, o) for o in option_dicts]
+        _cf.wait(futures, timeout=_CONTENT_DEADLINE_S)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+
+
+def _summarise_refundable(option: dict[str, Any], rooms: list[Any]) -> None:
+    """Record whether a refundable room exists, and what the cheapest one costs.
+
+    The search result carries ONE price per hotel — the cheapest offer — and its
+    policy. When that offer is non-refundable the agent reported the whole hotel
+    as non-refundable, which is wrong and was exactly the client's complaint:
+    they asked for refundable options and were told none existed.
+    """
+    free: list[tuple[float, str]] = []
+    total = 0
+    for rm in rooms or []:
+        if not isinstance(rm, dict):
+            continue
+        total += 1
+        terms = rm.get("cancellation_policy") or []
+        is_free = any(
+            isinstance(t, dict) and t.get("is_free_cancellation") for t in terms
+        )
+        if is_free:
+            try:
+                price = float(rm.get("price_inr") or 0.0)
+            except (TypeError, ValueError):
+                price = 0.0
+            if price > 0:
+                free.append((price, str(rm.get("room_type_name") or "")))
+
+    option["refundable_room_count"] = len(free)
+    option["room_options_count"] = total
+    if not free:
+        option["refundable_display"] = "No refundable rate at this hotel for these dates"
+        return
+    free.sort()
+    price, name = free[0]
+    from core import format_inr
+
+    shown = option.get("price_inr")
+    same = isinstance(shown, (int, float)) and abs(float(shown) - price) < 1.0
+    option["cheapest_refundable_inr"] = round(price, 2)
+    option["cheapest_refundable_room"] = name
+    option["refundable_display"] = (
+        "The rate shown is refundable"
+        if same
+        else f"Refundable rooms from {format_inr(round(price))} ({len(free)} of {total} rates)"
+    )
+
+
+def _clean_room_name(raw: str) -> str:
+    """Trim the supplier's duplicated bed text and the "- Non Refundable" suffix.
+
+    Raw: "Standard Double Room, 1 King Bed 1 King Bed- Non Refundable"
+    Out: "Standard Double Room, 1 King Bed"
+    The policy is shown in its own column, so repeating it in the name is noise.
+    """
+    import re as _re
+
+    name = str(raw or "").strip()
+    # Drop a trailing "- Non Refundable" / "- Non Refu" (the supplier truncates
+    # it) - the policy has its own column, so repeating it here is noise.
+    name = _re.sub(r"[-–]\s*non[\s-]*refu\w*\s*$", "", name, flags=_re.I).strip(" -–,")
+    # Collapse the duplicated bed phrase: "1 King Bed 1 King Bed" -> "1 King Bed".
+    # Use [\w ]+? not \w+ because the phrase is two words, e.g. "King Bed".
+    name = _re.sub(r"\b(\d+ [\w ]+?Beds?)\s+\1\b", r"\1", name, flags=_re.I)
+    return _re.sub(r"\s{2,}", " ", name).strip()
+
+
+def _room_policy_breakdown(rooms: list[Any], nights: int) -> list[dict[str, Any]]:
+    """Per-room cancellation table so the customer can CHOOSE.
+
+    The client's ask: show which rooms are refundable and which are not, side by
+    side, rather than one verdict for the hotel. Sorted cheapest-first within
+    refundable / non-refundable so the flexible options are easy to compare.
+
+    Each entry: {room, board, price_inr, price_display, refundable,
+    policy, free_until}.
+    """
+    from core import format_inr
+
+    out: list[dict[str, Any]] = []
+    for rm in rooms or []:
+        if not isinstance(rm, dict):
+            continue
+        try:
+            price = float(rm.get("price_inr") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if price <= 0:
+            continue
+        terms = rm.get("cancellation_policy") or []
+        term = terms[0] if terms and isinstance(terms[0], dict) else {}
+        is_free = any(
+            isinstance(t, dict) and t.get("is_free_cancellation") for t in terms
+        )
+        deadline = _human_date(str(term.get("to_date") or "").strip()) if is_free else ""
+        if is_free:
+            policy = f"Free cancellation until {deadline}" if deadline else "Free cancellation"
+        elif term.get("is_nrf"):
+            policy = "Non-refundable"
+        else:
+            fee = term.get("cancellation_price")
+            policy = (
+                f"Cancellation fee {format_inr(round(fee))}"
+                if isinstance(fee, (int, float)) and fee > 0
+                else "Non-refundable"
+            )
+        out.append(
+            {
+                "room": _clean_room_name(rm.get("room_type_name")),
+                "board": str(rm.get("meal_name") or "Room Only"),
+                "price_inr": round(price, 2),
+                "price_display": format_inr(round(price)),
+                "per_night_inr": round(price / nights, 2) if nights else None,
+                "refundable": is_free,
+                "policy": policy,
+                "free_until": deadline,
+            }
+        )
+    # Refundable first, then cheapest — the flexible options are what a customer
+    # asking about cancellation is scanning for.
+    out.sort(key=lambda r: (not r["refundable"], r["price_inr"]))
+    return out
+
+
+def _human_date(raw: str) -> str:
+    """MM-DD-YYYY (supplier format) -> "16 Sep 2026".
+
+    Relaying the raw string was actively misleading: "09-16-2026" reads as
+    16 September to a UK/Indian customer only by luck, and "10-09-2026" is
+    genuinely ambiguous. Spelling the month removes the doubt.
+    """
+    from datetime import datetime
+
+    for fmt in ("%m-%d-%Y", "%Y-%m-%d", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(raw, fmt).strftime("%d %b %Y")
+        except (ValueError, TypeError):
+            continue
+    return raw
+
+
 def _cancellation_display(option: dict[str, Any]) -> str:
     """One-line cancellation summary for the cheapest room.
 
-    "Free cancellation until 28-11-2026" / "Non-refundable" / "Free until
-    28-11-2026, then Rs 32,017". Empty string when the supplier told us nothing
-    — better to say nothing than to guess at a customer's refund rights.
+    "Free cancellation until 28 Nov 2026" / "Non-refundable" /
+    "Cancellation fee Rs 32,017 (from 28 Nov 2026)".
+
+    NEVER returns an empty string. Returning "" made the agent tell customers
+    there was no cancellation policy at all, which is a factual error — the
+    supplier always has terms, we just did not always parse them. When we truly
+    cannot read them we say so and ask to confirm, which is honest.
     """
+    _UNKNOWN = "Cancellation terms on request — confirm before booking"
     if option.get("has_free_cancellation"):
         base = "Free cancellation"
     else:
         base = ""
     rooms = option.get("rooms") or []
     if not isinstance(rooms, list) or not rooms:
-        return base or ""
+        return base or _UNKNOWN
     first = rooms[0] if isinstance(rooms[0], dict) else {}
     terms = first.get("cancellation_policy") or []
     if not isinstance(terms, list) or not terms:
-        return base or ""
+        return base or _UNKNOWN
     term = terms[0] if isinstance(terms[0], dict) else {}
     if term.get("is_nrf"):
         return "Non-refundable"
-    deadline = str(term.get("to_date") or "").strip()
+    deadline = _human_date(str(term.get("to_date") or "").strip())
     fee = term.get("cancellation_price")
     if term.get("is_free_cancellation"):
         return f"Free cancellation until {deadline}" if deadline else "Free cancellation"
@@ -89,8 +353,8 @@ def _cancellation_display(option: dict[str, Any]) -> str:
         from core import format_inr
 
         if deadline:
-            return f"Cancellation fee {format_inr(fee)} (from {deadline})"
-        return f"Cancellation fee {format_inr(fee)}"
+            return f"Cancellation fee {format_inr(round(fee))} (from {deadline})"
+        return f"Cancellation fee {format_inr(round(fee))}"
     return base or "Non-refundable"
 
 
@@ -449,11 +713,56 @@ def _impl(
         # for the ONE hotel a customer actually picks.
         for o in option_dicts:
             o["cancellation_display"] = _cancellation_display(o)
+            # Same tidy-up as the policy table: the supplier duplicates the
+            # bed phrase and leaves a dangling "- " where the suffix was.
+            if o.get("cheapest_room_type"):
+                o["cheapest_room_type"] = _clean_room_name(o["cheapest_room_type"])
             # NOT `rooms` — that is the caller's party composition, and it is
             # echoed back in search_params below. Rebinding it here reported the
             # LAST hotel's room inventory as the party the customer asked for.
             hotel_rooms = o.get("rooms") or []
             o["room_options_count"] = len(hotel_rooms)
+            # Refundable summary BEFORE the rooms are dropped for latency.
+            # We quote the CHEAPEST offer, which is very often non-refundable, so
+            # saying "Non-refundable" full stop told a customer the hotel had no
+            # flexible rate when it had four. Live: Social Hotel 4/10 refundable,
+            # Howard Johnson 5/10, Novotel 2/10 — all three shown as
+            # "Non-refundable" because only the cheapest row was inspected.
+            # Split the per-night figure into two explicitly-named fields. The
+            # parser's `per_night_inr` is price/nights with NO room division, so
+            # for a 2-room booking it is the whole-booking nightly cost. Calling
+            # it "per room" (as pricing_note did) made the agent publish a
+            # doubled per-room rate.
+            try:
+                _nights = int(nights or 0)
+                _rooms = max(1, int(room_count or 1))
+                _total = float(o.get("price_inr") or 0.0)
+            except (TypeError, ValueError):
+                _nights, _rooms, _total = 0, 1, 0.0
+            if _nights > 0 and _total > 0:
+                o["per_night_all_rooms_inr"] = round(_total / _nights, 2)
+                o["per_night_per_room_inr"] = round(_total / _nights / _rooms, 2)
+                o["rooms_booked"] = _rooms
+            _summarise_refundable(o, hotel_rooms)
+            # Per-room cancellation table so the customer can pick a flexible
+            # rate instead of being told the hotel is "non-refundable". Capped at
+            # 8 rows: enough to choose from without burying the reply.
+            # CONTEXT BUDGET. room_policies was 1,912 chars per hotel — 60% of
+            # the payload — and on a 5-hotel search that is ~9.5k chars of JSON
+            # competing with the formatting rules for the model's attention. The
+            # UI renders this table itself (_render_hotel), so the model only
+            # needs a compact digest, not the full matrix.
+            policies = _room_policy_breakdown(hotel_rooms, nights)
+            o["room_policies"] = [
+                {
+                    "room": p["room"],
+                    "total": p["price_display"],
+                    "cancel": p["policy"],
+                }
+                for p in policies[:5]
+            ]
+            # `amenities` duplicates `amenities_display`; keep the readable one.
+            o.pop("amenities", None)
             o.pop("rooms", None)
 
         # Coordinate enrichment: fetch lat/lng/address from the address endpoint
@@ -485,6 +794,10 @@ def _impl(
             # Sort hotels that match ALL requested amenities to the top.
             option_dicts.sort(key=lambda o: -len(o.get("amenities_matched", [])))
 
+        # Amenities / dining / a short description for every hotel on the page.
+        # One batched call, best-effort — see _enrich_with_content.
+        _enrich_with_content(option_dicts, city_id)
+
         return {
             "options": option_dicts,
             "cheapest_price_inr": options[0].price_inr if options else None,
@@ -494,9 +807,14 @@ def _impl(
             "total_results": len(options),
             **({"note": note} if note else {}),
             "pricing_note": (
-                f"Hotel prices are PER ROOM for the whole {nights}-night stay "
-                f"({room_count} room(s) booked), NOT per person. price_inr is the "
-                "room total; per_night_inr is per room per night. Do not divide by pax."
+                f"price_inr is the TOTAL for all {room_count} room(s) across the "
+                f"whole {nights}-night stay — not per person and not per room. "
+                f"`per_night_all_rooms_inr` is that total / {nights} nights; "
+                f"`per_night_per_room_inr` divides again by {room_count} room(s). "
+                f"Label whichever you show EXACTLY as its field name says — the "
+                f"old note wrongly called the all-rooms figure 'per room', and a "
+                f"column headed 'Per Night (Per Room)' published double the real "
+                f"per-room rate. Never divide by pax."
             ),
             # search_airport_transfer_dubai needs a hotel, so it cannot run in the
             # same parallel wave as this search. The agent kept ending the turn

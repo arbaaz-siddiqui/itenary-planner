@@ -53,8 +53,9 @@ class TestCancellationDisplay:
                 "rooms": [{"cancellation_policy": [base]}]}
 
     def test_free_with_deadline(self) -> None:
+        """Dates are spelled out: "11-25-2026" is ambiguous to an Indian reader."""
         assert _cancellation_display(self._option()) == (
-            "Free cancellation until 11-25-2026"
+            "Free cancellation until 25 Nov 2026"
         )
 
     def test_fee_with_date(self) -> None:
@@ -62,17 +63,25 @@ class TestCancellationDisplay:
             self._option(is_free_cancellation=False, cancellation_price=32016.94,
                          to_date="12-01-2026")
         )
-        assert "32,016" in out and "12-01-2026" in out
+        assert "32,017" in out and "01 Dec 2026" in out  # rounded to whole rupees
 
     def test_non_refundable_flag(self) -> None:
         out = _cancellation_display(self._option(is_free_cancellation=False, is_nrf=True))
         assert out == "Non-refundable"
 
     @pytest.mark.parametrize("rooms", [None, [], "x", [{}], [{"cancellation_policy": []}]])
-    def test_missing_policy_does_not_invent_terms(self, rooms: Any) -> None:
-        """Never guess at a customer's refund rights."""
+    def test_missing_policy_says_confirm_never_stays_silent(self, rooms: Any) -> None:
+        """Client-reported bug: the agent told customers there was NO policy.
+
+        Returning "" gave the model nothing to say, and it filled the gap by
+        denying the policy existed. We still never GUESS the terms — we say they
+        need confirming, which is honest and actionable.
+        """
         out = _cancellation_display({"has_free_cancellation": False, "rooms": rooms})
-        assert out == ""
+        assert out, "must never be empty — that is what caused the false denial"
+        assert "on request" in out.lower() or "confirm" in out.lower()
+        # And it must not fabricate a refund right.
+        assert "free cancellation" not in out.lower()
 
     def test_free_flag_without_policy_detail(self) -> None:
         out = _cancellation_display({"has_free_cancellation": True, "rooms": []})
