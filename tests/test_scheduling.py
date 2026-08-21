@@ -472,10 +472,32 @@ class TestComputedTripTotal:
         assert "verbatim" in note
         assert "never write your own total" in note
 
-    def test_missing_flight_and_hotel_is_disclosed(self) -> None:
-        """A partial total must say it is partial, not look complete."""
+    def test_flight_and_hotel_are_priced_without_being_passed(self) -> None:
+        """The tool prices the whole trip itself now.
+
+        Requiring the model to pass flight_total_inr / hotel_total_inr /
+        visa_per_adult_inr produced a tours-only total ("Flights & Hotel: to be
+        added") and then a follow-up that re-asked the customer for dates and
+        origin it already had.
+        """
+        out = self._plan(origin_city="Hyderabad", hotel_name="Howard Johnson")
+        b = out["cost_breakdown"]
+        assert b["flights"] > 0, "flights must be priced automatically"
+        assert b["hotel"] > 0, "hotel must be priced automatically"
+        assert b["visa"] > 0, "visa must be priced automatically"
+        assert out["total_inr"] == pytest.approx(sum(b.values()), abs=1.0)
+
+    def test_note_forbids_re_asking_the_customer(self) -> None:
+        """The worst failure was asking for dates/origin already given."""
         out = self._plan()
-        assert "only what is listed" in out["costing_note"]
+        note = out["costing_note"]
+        if "could not be priced" in note:
+            assert "NEVER ask the customer to repeat" in note
+
+    def test_explicit_values_still_win(self) -> None:
+        """A caller-supplied total must not be overwritten by a lookup."""
+        out = self._plan(flight_total_inr=999999.0, origin_city="Hyderabad")
+        assert out["cost_breakdown"]["flights"] == pytest.approx(999999.0, abs=1.0)
 
     def test_adults_defaults_safely(self) -> None:
         out = self._plan(adults=0)

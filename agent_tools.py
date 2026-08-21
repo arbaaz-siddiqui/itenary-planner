@@ -428,6 +428,17 @@ def build_trip_schedule_tool(days: list[dict[str, Any]]) -> dict[str, Any]:
 _LAST_PLAN: dict[str, Any] = {}
 
 
+def _end_date_for(start_date: str, nights: int) -> str:
+    """start_date + nights, ISO. Empty string when the input is unusable."""
+    from datetime import datetime, timedelta
+
+    try:
+        d = datetime.strptime(str(start_date), "%Y-%m-%d").date()
+        return (d + timedelta(days=max(1, int(nights or 1)))).isoformat()
+    except (ValueError, TypeError):
+        return ""
+
+
 @lru_cache(maxsize=8)
 def _tour_facts_index(travel_date: str) -> tuple[tuple[str, float, str, str], ...]:
     """(name_lower, price_per_adult, duration, timeslots_json) for the catalogue.
@@ -505,6 +516,8 @@ def plan_itinerary_tool(
     visa_per_adult_inr: float = 0.0,
     transfer_total_inr: float = 0.0,
     fill_days: bool = True,
+    origin_city: str = "",
+    destination_city: str = "Dubai",
 ) -> dict[str, Any]:
     """Build a VALIDATED day-by-day itinerary with real times.
 
@@ -675,6 +688,81 @@ def plan_itinerary_tool(
     # prompt already forbids estimates; a 26B model does not hold that rule
     # under a full context. So the arithmetic happens in code.
     pax = max(1, int(adults or 0))
+
+    # SELF-PRICE anything the caller left at 0. Depending on the model to pass
+    # these produced a tours-only total and a follow-up that asked the customer
+    # to repeat their dates. The searches are cached, so this is cheap.
+    _lookup_notes: list[str] = []
+    if not flight_total_inr and origin_city:
+        try:
+            from mcp_tools.search_flights import _impl as _sf
+
+            _f = _sf(
+                origin_city=origin_city,
+                destination_city=destination_city or "Dubai",
+                departure_date=start_date,
+                return_date=_end_date_for(start_date, nights),
+                adults=pax,
+                max_results=5,
+            )
+            _opts = [o for o in (_f.get("options") or []) if o.get("price_inr")]
+            if _opts:
+                flight_total_inr = min(float(o["price_inr"]) for o in _opts)
+                _lookup_notes.append("cheapest flight")
+        except Exception as e:  # noqa: BLE001 — a missing component is reported
+            logger.debug("flight lookup for total failed: %s", e)
+
+    if not hotel_total_inr:
+        try:
+            from mcp_tools.search_hotels import _impl as _sh
+
+            # 4 adults => 2 rooms. Getting this wrong put a one-room rate in a
+            # four-adult total.
+            _rooms = [{"adults": 2, "children": 0, "child_ages": []} for _ in range((pax + 1) // 2)]
+            _h = _sh(
+                destination_city=destination_city or "Dubai",
+                check_in=start_date,
+                check_out=_end_date_for(start_date, nights),
+                rooms=_rooms,
+            )
+            _cands = _h.get("options") or []
+            if hotel_name:
+                _want = hotel_name.strip().lower()
+                _match = [o for o in _cands if _want in str(o.get("hotel_name", "")).lower()]
+                _cands = _match or _cands
+            if _cands and _cands[0].get("price_inr"):
+                hotel_total_inr = float(_cands[0]["price_inr"])
+                _lookup_notes.append(f"hotel ({_cands[0].get('hotel_name')})")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("hotel lookup for total failed: %s", e)
+
+    if not visa_per_adult_inr:
+        try:
+            from mcp_tools.get_visa_info import _impl as _gv
+
+            _v = _gv(
+                destination_country="UAE",
+                nationality_country="India",
+                travel_date=start_date,
+            )
+            _vo = [o for o in (_v.get("options") or []) if o.get("price_per_person_inr")]
+            if _vo:
+                visa_per_adult_inr = min(float(o["price_per_person_inr"]) for o in _vo)
+                _lookup_notes.append("visa (30-day single)")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("visa lookup for total failed: %s", e)
+
+    if not transfer_total_inr and hotel_name:
+        try:
+            from mcp_tools.search_transfers import _impl as _st
+
+            _t = _st(arrival_date=start_date, hotel_name=hotel_name, adults=pax)
+            _to = [o for o in (_t.get("options") or []) if o.get("price_inr")]
+            if _to:
+                transfer_total_inr = min(float(o["price_inr"]) for o in _to)
+                _lookup_notes.append("airport transfer")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("transfer lookup for total failed: %s", e)
     scheduled: list[dict[str, Any]] = []
     seen: set[str] = set()
     for day in out.get("days") or []:
@@ -749,10 +837,17 @@ def plan_itinerary_tool(
             else f"All {len(priced)} scheduled tours are priced."
         )
         + (
+            f" Priced automatically: {', '.join(_lookup_notes)} — these are the "
+            f"cheapest available; say so and offer alternatives."
+            if _lookup_notes
+            else ""
+        )
+        + (
             ""
             if components["flights"] and components["hotel"]
-            else " Flight/hotel totals were not passed in, so the total covers "
-            "only what is listed — say so."
+            else " Flights and/or hotel could not be priced, so the total covers "
+            "only the listed lines — say which are missing. NEVER ask the "
+            "customer to repeat dates, origin or party size."
         )
     )
     return out
