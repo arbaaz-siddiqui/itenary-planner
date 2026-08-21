@@ -547,6 +547,17 @@ def plan_itinerary_tool(
         hotel_name: for the transfer line
         hotel_checkin_time: "HH:MM" if known; otherwise a 60min transfer is assumed
         departure_time: return flight "HH:MM", so the last day is kept clear
+        flight_total_inr: the TOTAL price of the flight you showed the customer,
+            for the whole party. Pass it whenever you have shown flights. Flight
+            fares change between searches, so if you omit this the tool has to
+            re-search and may bill a different fare than the one on screen --
+            that is how an "Emirates Rs 40,909" plan came to be billed at
+            Rs 64,792.
+        hotel_total_inr: total stay price of the hotel you showed, all rooms.
+        visa_per_adult_inr: per-adult visa price you quoted (tool multiplies).
+        transfer_total_inr: total transfer price you showed, if any.
+        origin_city: departure city, only needed as a fallback if you cannot
+            pass flight_total_inr.
 
     Returns:
         {days: [{day_number, date, label, items: [{start, end, title, kind,
@@ -708,7 +719,14 @@ def plan_itinerary_tool(
             _opts = [o for o in (_f.get("options") or []) if o.get("price_inr")]
             if _opts:
                 flight_total_inr = min(float(o["price_inr"]) for o in _opts)
-                _lookup_notes.append("cheapest flight")
+                # Say so loudly: this is a FRESH fare, not the one on screen.
+                _lookup_notes.append(
+                    "flights: re-searched because flight_total_inr was not "
+                    "passed — this is the cheapest fare available NOW and may "
+                    "differ from the one shown earlier. Tell the customer the "
+                    "flight figure needs reconfirming, or call again passing "
+                    "flight_total_inr from the fare you displayed"
+                )
         except Exception as e:  # noqa: BLE001 — a missing component is reported
             logger.debug("flight lookup for total failed: %s", e)
 

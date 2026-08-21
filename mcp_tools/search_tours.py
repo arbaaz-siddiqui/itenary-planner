@@ -273,7 +273,12 @@ def _impl(
                     "again with query=<their words> BEFORE replying — the catalogue "
                     "has ~270 tours and this page is only the cheapest few. Never say "
                     "you do not have a tour's details, and never ask permission to "
-                    "search: just search. "
+                    "search: just search. `slots_display` on each row IS the "
+                    "start-time list -- read the times from there. Do not call "
+                    "get_tour_timeslots to answer a slots question: it needs ids, "
+                    "and when those were guessed it returned nothing and Burj "
+                    "Khalifa was wrongly called 'flexible' while 33 real slots "
+                    "sat in this field. "
                 )
                 + (
                     f"These are filtered to {tf!r} tours only, so they are NOT the "

@@ -1224,6 +1224,10 @@ def _process_message(user_message: str, *, display_as: str | None = None) -> Non
         #
         # Never show an empty bubble: say what happened and, when tools DID run,
         # say what we found so the turn is not a dead loss.
+        # A [system] guidance marker is for the next turn, not the customer.
+        from agent import is_internal_marker
+        if is_internal_marker(assistant_text):
+            assistant_text = ""
         if not assistant_text.strip():
             calls = extract_tool_calls(result.response) or []
             tool_names = [tc.get("tool_name", "") for tc in calls]

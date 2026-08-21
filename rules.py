@@ -703,6 +703,28 @@ def resolve_party(
 
     infants = sum(1 for a in ages if a < 2)
     party_total = adults + children
+    # Rooms for the whole party, not just the adults. Supplier allows at most
+    # 2 children per room, so both the adult and child counts constrain this.
+    rooms_needed = max(1, -(-adults // 2), -(-children // 2) if children else 1)
+    # Spread adults and children across those rooms so the hotel search prices
+    # every traveller. Children ride with adults; ages drive the child tiers.
+    _room_plan: list[dict[str, object]] = [
+        {"adults": 0, "children": 0, "child_ages": []} for _ in range(rooms_needed)
+    ]
+    for i in range(adults):
+        _room_plan[i % rooms_needed]["adults"] += 1  # type: ignore[operator]
+    for i, _age in enumerate(sorted(ages)):
+        r = _room_plan[i % rooms_needed]
+        r["children"] += 1  # type: ignore[operator]
+        r["child_ages"].append(_age)  # type: ignore[union-attr]
+    # A room with children but no adult is not bookable — fold it into room 1.
+    for r in _room_plan:
+        if r["children"] and not r["adults"] and _room_plan[0] is not r:
+            _room_plan[0]["children"] += r["children"]  # type: ignore[operator]
+            _room_plan[0]["child_ages"].extend(r["child_ages"])  # type: ignore[union-attr]
+            r["children"], r["child_ages"] = 0, []
+    _room_plan = [r for r in _room_plan if r["adults"] or r["children"]]
+    rooms_needed = len(_room_plan) or 1
 
     # Human-readable confirmation line.
     parts = [f"{adults} adult" + ("s" if adults != 1 else "")]
@@ -723,6 +745,17 @@ def resolve_party(
         "child_ages": sorted(ages),
         "party_total": party_total,
         "billable_for_flights": adults + children,  # infants usually lap-priced separately
+        # Rooms the party needs, at the standard 2 adults per room. Without this
+        # the model guessed, and quoted 8 adults a 2-room stay.
+        "rooms_needed": rooms_needed,
+        "rooms": _room_plan,
+        "rooms_note": (
+            f"{rooms_needed} room(s) for {party_total} traveller(s) "
+            f"({adults} adult(s), {children} child(ren)). Pass the `rooms` list "
+            f"above straight to search_hotels -- it already splits adults and "
+            f"child ages per room. A hotel rate is PER ROOM, so one room's price "
+            f"is not the party's stay cost."
+        ),
         "summary": summary,
     }
 

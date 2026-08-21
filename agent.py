@@ -621,7 +621,77 @@ def invoke_and_log(
         latency_seconds=latency,
         turn_number=turn_number,
     )
+    _guard_empty_turn(response, surface=surface, thread_id=thread_id)
     return response
+
+
+# A turn that produced no assistant text AND no tool calls retrieved nothing.
+# Left alone it becomes a silent hole in the thread, and the model fills that
+# hole on the next turn by inventing data. Put an explicit marker in history so
+# the next turn can see that nothing was retrieved.
+# Prefix that marks a message as internal guidance, never shown to a customer.
+INTERNAL_MARKER_PREFIX = "[system]"
+
+
+def is_internal_marker(text: object) -> bool:
+    """True if this content is an internal guidance marker, not customer text."""
+    return isinstance(text, str) and text.lstrip().startswith(INTERNAL_MARKER_PREFIX)
+
+
+_NO_DATA_MARKER = (
+    "[system] The previous turn produced no reply and retrieved no data. "
+    "NOTHING has been searched yet in this conversation. Do not describe any "
+    "hotel, flight, tour or price until a tool has actually returned it — "
+    "call the search tools now and quote only what they return."
+)
+
+
+def _guard_empty_turn(response: dict[str, Any], *, surface: str, thread_id: str) -> None:
+    """Stamp a no-data marker onto a turn that returned neither text nor tools."""
+    import logging
+
+    logger = logging.getLogger("agent.turn")
+    msgs = (response or {}).get("messages") or []
+    text = ""
+    for m in reversed(msgs):
+        c = getattr(m, "content", None)
+        if isinstance(c, str) and c.strip() and m.__class__.__name__ == "AIMessage":
+            text = c
+            break
+    if text.strip():
+        return
+    calls = extract_tool_calls(response) or []
+    logger.warning(
+        "empty assistant reply surface=%s thread=%s tools=%s",
+        surface, thread_id, [c.get("tool_name") for c in calls],
+    )
+    if calls:
+        # Tools ran, prose is missing. Name what was retrieved so the next turn
+        # writes it up from history rather than re-searching or inventing.
+        got = sorted({str(c.get("tool_name") or "") for c in calls if c.get("tool_name")})
+        missing_hotels = not any("hotel" in n for n in got)
+        note = (
+            "[system] The previous turn called " + ", ".join(got) + " and their "
+            "results ARE in this conversation, but no reply was written. Write "
+            "that reply now from those results — do not re-search what you "
+            "already have, and quote only figures those results contain."
+        )
+        if missing_hotels:
+            note += (" Hotels were NOT searched — call search_hotels before "
+                     "mentioning any hotel, rate or cancellation policy.")
+        try:
+            from langchain_core.messages import AIMessage
+
+            msgs.append(AIMessage(content=note))
+        except Exception as e:  # noqa: BLE001 — a marker is best-effort
+            logger.debug("could not append salvage marker: %s", e)
+        return
+    try:
+        from langchain_core.messages import AIMessage
+
+        msgs.append(AIMessage(content=_NO_DATA_MARKER))
+    except Exception as e:  # noqa: BLE001 — a marker is best-effort
+        logger.debug("could not append no-data marker: %s", e)
 
 
 # =============================================================================
