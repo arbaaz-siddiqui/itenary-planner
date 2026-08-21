@@ -261,10 +261,19 @@ def _impl(
             # "85 tours available in Dubai" after a with_transfer search, which
             # reads as though that is all we sell (it is 270).
             "filtered_by": tf or None,
+            # Names on this page, so the model can SEE that a tour the customer
+            # named is absent and re-search instead of claiming we lack the data.
+            "names_on_this_page": [o.name for o in options],
             "agent_instructions": (
                 (
                     "Do NOT quote counts or totals to the customer — no '85 tours', "
                     "no 'showing 1-10 of 270'. Just present the tours. "
+                    "If the customer NAMED a tour that is not in `names_on_this_page` "
+                    "(Burj Khalifa, desert safari, dhow cruise...), call search_tours "
+                    "again with query=<their words> BEFORE replying — the catalogue "
+                    "has ~270 tours and this page is only the cheapest few. Never say "
+                    "you do not have a tour's details, and never ask permission to "
+                    "search: just search. "
                 )
                 + (
                     f"These are filtered to {tf!r} tours only, so they are NOT the "
