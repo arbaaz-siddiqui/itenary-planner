@@ -47,6 +47,7 @@ def _coerce_day_items(raw: Any) -> list[DayItem]:
             item = DayItem(
                 title=str(x.get("title") or x.get("name") or x.get("activity") or "").strip(),
                 start=str(x.get("start") or x.get("time") or x.get("start_time") or "").strip(),
+                end=str(x.get("end") or x.get("end_time") or x.get("finish") or "").strip(),
                 detail=str(x.get("detail") or x.get("description") or x.get("note") or "").strip(),
                 kind=str(x.get("kind") or x.get("type") or x.get("category") or "").strip(),
             )
@@ -135,8 +136,16 @@ class DayItem:
 
     title: str = ""
     start: str = ""      # "10:00" — blank when untimed
+    end: str = ""        # "12:00" — blank when open-ended
     detail: str = ""
     kind: str = ""       # transfer | tour | flight | hotel | meal ...
+
+    @property
+    def time_display(self) -> str:
+        """"09:45-11:45", or just the start when there is no end."""
+        if self.start and self.end and self.end != self.start:
+            return f"{self.start}-{self.end}"
+        return self.start
 
     @property
     def is_empty(self) -> bool:
@@ -507,7 +516,10 @@ def _day_table(pdf: _ItineraryPDF, items: list[DayItem]) -> None:
     """
     if not items:
         return
-    col_time = 20 if any(i.start for i in items) else 0
+    # Wide enough for "09:45-11:45", not just "09:45".
+    col_time = 0
+    if any(i.start for i in items):
+        col_time = 28 if any(i.end and i.end != i.start for i in items) else 20
     col_main = pdf.w - pdf.l_margin - pdf.r_margin - col_time
 
     pdf.set_font("Helvetica", "B", 9)
@@ -523,7 +535,9 @@ def _day_table(pdf: _ItineraryPDF, items: list[DayItem]) -> None:
         if col_time:
             pdf.set_font("Helvetica", "", 9)
             pdf.set_text_color(*MUTED)
-            pdf.cell(col_time, 6, "  " + _ascii(it.start), new_x=XPos.RIGHT, new_y=YPos.TOP)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(col_time, 6, "  " + _ascii(it.time_display),
+                     new_x=XPos.RIGHT, new_y=YPos.TOP)
             pdf.set_text_color(*INK)
         # Title carries the kind as a quiet suffix ("Arrival at DXB - transfer").
         heading = it.title or it.detail

@@ -1013,6 +1013,55 @@ def generate_itinerary_pdf_tool(
     """
     from itinerary_store import public_url_for, save_itinerary_pdf
 
+    # A customer who was just given a day-by-day plan in chat expects to see it
+    # in the document. The model kept writing a full 5-day schedule in the reply
+    # and then calling this with day_plans empty, producing a PDF with a price
+    # table and no itinerary. day_plans is optional, so nothing objected.
+    #
+    # Refuse rather than ship a hollow PDF: this returns an actionable error the
+    # model can immediately retry, instead of a link the customer will complain
+    # about. Only enforced for multi-night trips, where a schedule is the point.
+    if not (day_plans or []) and (nights or 0) >= 1:
+        # Reuse the plan we just built rather than bouncing the call. The model
+        # otherwise burns a full round-trip re-sending a schedule it already
+        # produced — which happened on every single PDF request.
+        cached = (_LAST_PLAN or {}).get("days") or []
+        _cached_start = str((_LAST_PLAN or {}).get("start_date") or "")
+        _asked_start = str(start_date or "")
+        # Same trip if the dates agree, or if the caller simply did not pass one
+        # (the common case) and the night count still matches.
+        _same_trip = bool(cached) and (
+            _cached_start == _asked_start
+            # No date passed: the only plan in play is the one just built.
+            or (not _asked_start
+                and int((_LAST_PLAN or {}).get("nights") or -1) == int(nights or -2))
+        )
+        if _same_trip:
+            day_plans = [
+                {"title": d.get("title") or f"Day {d.get('day_number')}",
+                 "items": d.get("items") or []}
+                for d in cached
+            ]
+            if not start_date:
+                start_date = _cached_start
+            if nights is None:
+                nights = (_LAST_PLAN or {}).get("nights")
+    if not (day_plans or []) and (nights or 0) >= 1:
+        return {
+            "error": True,
+            "error_type": "MissingDayPlans",
+            "message": (
+                f"day_plans is empty for a {nights}-night trip, so the PDF would "
+                "have no itinerary — only a price table. Retry this call with "
+                "day_plans filled in: one entry per day, each item a dict like "
+                '{"title": "Dubai Fountain Show", "start": "18:00", '
+                '"detail": "Burj Khalifa lake ride", "kind": "tour"}. Use the '
+                "day-by-day plan you already described to the customer — do not "
+                "invent new activities, and do not ask them to repeat it."
+            ),
+            "retry_with": {"day_plans": "[{title, items:[{title,start,detail,kind}]}, ...]"},
+        }
+
     data: dict[str, Any] = {
         "destination": destination,
         "origin_city": origin_city,
@@ -1032,41 +1081,6 @@ def generate_itinerary_pdf_tool(
         "payment_schedule": payment_schedule or [],
         "notes": notes or [],
     }
-    # A customer who was just given a day-by-day plan in chat expects to see it
-    # in the document. The model kept writing a full 5-day schedule in the reply
-    # and then calling this with day_plans empty, producing a PDF with a price
-    # table and no itinerary. day_plans is optional, so nothing objected.
-    #
-    # Refuse rather than ship a hollow PDF: this returns an actionable error the
-    # model can immediately retry, instead of a link the customer will complain
-    # about. Only enforced for multi-night trips, where a schedule is the point.
-    if not (day_plans or []) and (nights or 0) >= 1:
-        # Reuse the plan we just built rather than bouncing the call. The model
-        # otherwise burns a full round-trip re-sending a schedule it already
-        # produced — which happened on every single PDF request.
-        cached = (_LAST_PLAN or {}).get("days") or []
-        if cached and str(_LAST_PLAN.get("start_date") or "") == str(start_date or ""):
-            day_plans = [
-                {"title": d.get("title") or f"Day {d.get('day_number')}",
-                 "items": d.get("items") or []}
-                for d in cached
-            ]
-    if not (day_plans or []) and (nights or 0) >= 1:
-        return {
-            "error": True,
-            "error_type": "MissingDayPlans",
-            "message": (
-                f"day_plans is empty for a {nights}-night trip, so the PDF would "
-                "have no itinerary — only a price table. Retry this call with "
-                "day_plans filled in: one entry per day, each item a dict like "
-                '{"title": "Dubai Fountain Show", "start": "18:00", '
-                '"detail": "Burj Khalifa lake ride", "kind": "tour"}. Use the '
-                "day-by-day plan you already described to the customer — do not "
-                "invent new activities, and do not ask them to repeat it."
-            ),
-            "retry_with": {"day_plans": "[{title, items:[{title,start,detail,kind}]}, ...]"},
-        }
-
     try:
         itinerary_id, _path = save_itinerary_pdf(data)
     except Exception as e:  # never crash the turn over a PDF

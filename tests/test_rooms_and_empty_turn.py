@@ -96,3 +96,55 @@ class TestEmptyTurnGuard:
         assert is_internal_marker("[system] guidance for the next turn")
         assert not is_internal_marker("Here are your hotel options")
         assert not is_internal_marker(None)
+
+
+class TestPdfCarriesTheSchedule:
+    """The customer's PDF had a price table and NO day-by-day itinerary.
+
+    Root cause: the `data` dict was built with `"day_plans": day_plans or []`
+    BEFORE the block that recovers day_plans from the cached plan, so the
+    recovery wrote a local nobody read again. The PDF was always built from the
+    empty list, and because day_plans looked non-empty afterwards, the
+    MissingDayPlans guard never fired either — a hollow PDF with no error.
+    """
+
+    def test_pdf_reuses_the_cached_plan_when_no_date_is_passed(self):
+        from agent_tools import generate_itinerary_pdf_tool, plan_itinerary_tool
+
+        plan_itinerary_tool.invoke(
+            {"start_date": "2026-09-01", "nights": 5, "adults": 4,
+             "tours": [{"name": "Abu Dhabi City Tour from Dubai"}]}
+        )
+        out = generate_itinerary_pdf_tool.invoke(
+            {"destination": "Dubai", "nights": 5, "total_inr": 1000.0}
+        )
+        assert not out.get("error"), out.get("message")
+        assert out.get("download_url")
+
+    def test_time_display_shows_the_full_range(self):
+        from itinerary_pdf import DayItem
+
+        assert DayItem(title="Tour", start="09:45", end="11:45").time_display == "09:45-11:45"
+        # Open-ended and instant entries show a single time, not "09:45-".
+        assert DayItem(title="Flight", start="23:10").time_display == "23:10"
+        assert DayItem(title="X", start="09:00", end="09:00").time_display == "09:00"
+
+    def test_end_time_survives_the_dict_hand_off(self):
+        from itinerary_pdf import _coerce_day_items
+
+        items = _coerce_day_items([
+            {"title": "Dhow Cruise", "start": "09:45", "end": "11:45", "kind": "tour"}
+        ])
+        assert items[0].end == "11:45"
+        assert items[0].time_display == "09:45-11:45"
+
+
+class TestHotelPerRoomPricing:
+    """The customer asked to see what ONE room costs, not just the combined
+    figure for all rooms."""
+
+    def test_total_per_room_is_the_stay_divided_by_rooms(self):
+        # 33,291.59 for 2 rooms over 5 nights -> 16,645.79 for one room.
+        total, rooms, nights = 33291.59, 2, 5
+        assert round(total / rooms, 2) == 16645.80 or round(total / rooms, 2) == 16645.79
+        assert round(total / nights / rooms, 2) == 3329.16

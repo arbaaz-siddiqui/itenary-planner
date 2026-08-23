@@ -742,6 +742,8 @@ def _impl(
             if _nights > 0 and _total > 0:
                 o["per_night_all_rooms_inr"] = round(_total / _nights, 2)
                 o["per_night_per_room_inr"] = round(_total / _nights / _rooms, 2)
+                # Whole stay for ONE room, so a multi-room quote can show both.
+                o["total_per_room_inr"] = round(_total / _rooms, 2)
                 o["rooms_booked"] = _rooms
             _summarise_refundable(o, hotel_rooms)
             # Per-room cancellation table so the customer can pick a flexible
@@ -810,7 +812,15 @@ def _impl(
                 f"price_inr is the TOTAL for all {room_count} room(s) across the "
                 f"whole {nights}-night stay — not per person and not per room. "
                 f"`per_night_all_rooms_inr` is that total / {nights} nights; "
-                f"`per_night_per_room_inr` divides again by {room_count} room(s). "
+                f"`per_night_per_room_inr` divides again by {room_count} room(s); "
+                f"`total_per_room_inr` is the whole stay for ONE room. "
+                + (
+                    f"This party needs {room_count} rooms, so SHOW BOTH: a "
+                    f"'Total ({room_count} Rooms)' column and a 'Per Room' "
+                    f"column (and per-night if it fits). The customer cannot "
+                    f"tell what one room costs from the combined figure alone. "
+                    if room_count > 1 else ""
+                ) +
                 f"NEVER write an approximate price. Banned: '~', 'around', "
                 f"'about', 'roughly', 'starting from about', lakh/crore "
                 f"shorthand ('1.3L', '2.5 lakh'), and price RANGES "
