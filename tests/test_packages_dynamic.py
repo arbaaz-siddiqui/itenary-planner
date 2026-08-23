@@ -75,3 +75,45 @@ class TestPackageDefaults:
 
         # 5 hid every 5- and 6-night package behind the 3-night ones.
         assert inspect.signature(_impl).parameters["max_results"].default >= 25
+
+
+class TestPackagesCarryNoPricing:
+    """Package pricing is being settled with the supplier, so it must not reach
+    the customer at all — not as a figure, not as a "Rs 0", not as an
+    "On Request" column. What replaces it is the data the supplier already
+    sends and we were discarding: audience tags, inclusions, max pax."""
+
+    def _packages(self):
+        from mcp_tools.list_packages import _impl
+
+        return _impl(destination_city="Dubai", check_in="2026-09-15",
+                     check_out="2026-09-19", adults=2)
+
+    def test_no_price_key_survives_anywhere(self):
+        r = self._packages()
+        leaked = [k for k in r if "price" in k.lower() or "pricing" in k.lower()]
+        assert not leaked, f"price keys leaked at top level: {leaked}"
+        for row in r["options"]:
+            leaked = [k for k in row if "price" in k.lower() or "pricing" in k.lower()]
+            assert not leaked, f"price keys leaked in a package row: {leaked}"
+
+    def test_instructions_forbid_showing_a_price(self):
+        r = self._packages()
+        note = r["agent_instructions"].lower()
+        assert "do not show any price" in note
+        assert "never invent or estimate a package price" in note
+
+    def test_tags_and_inclusions_replace_the_price_column(self):
+        r = self._packages()
+        assert r["options"], "expected packages for these dates"
+        row = r["options"][0]
+        for field in ("package_type", "tags", "nights", "includes",
+                      "max_pax", "is_free_cancellation"):
+            assert field in row, f"{field} must be present to fill the table"
+
+    def test_dynamic_label_comes_from_the_supplier(self):
+        r = self._packages()
+        types = {row["package_type"] for row in r["options"]}
+        # The client's complaint: the list looked static-only. The supplier's
+        # own label says otherwise.
+        assert any("Dynamic" in t for t in types), types

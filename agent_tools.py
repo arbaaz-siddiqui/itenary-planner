@@ -1062,6 +1062,26 @@ def generate_itinerary_pdf_tool(
             "retry_with": {"day_plans": "[{title, items:[{title,start,detail,kind}]}, ...]"},
         }
 
+    # Backfill end times the model dropped. It sends `start` only, so without
+    # this the PDF shows "09:45" where the chat showed "09:45-11:45".
+    if day_plans and (_LAST_PLAN or {}).get("days"):
+        _ends: dict[tuple[str, str], str] = {}
+        for _d in _LAST_PLAN["days"]:
+            for _it in _d.get("items") or []:
+                _t = str(_it.get("title") or "").strip().lower()
+                _st = str(_it.get("start") or "").strip()
+                _en = str(_it.get("end") or "").strip()
+                if _t and _st and _en:
+                    _ends[(_t, _st)] = _en
+        for _d in day_plans:
+            for _it in (_d.get("items") or []) if isinstance(_d, dict) else []:
+                if not isinstance(_it, dict) or _it.get("end"):
+                    continue
+                _k = (str(_it.get("title") or "").strip().lower(),
+                      str(_it.get("start") or "").strip())
+                if _k in _ends:
+                    _it["end"] = _ends[_k]
+
     data: dict[str, Any] = {
         "destination": destination,
         "origin_city": origin_city,

@@ -123,37 +123,34 @@ def _impl(
             {"result": rate_results},
             max_results=max_results,
         )
+        # Package pricing is being settled with the supplier, so it must not
+        # reach the customer at all. A price_inr of 0 left in the row renders as
+        # "Rs 0" / "Free" the moment the model touches it.
+        _PRICE_KEYS = (
+            "price_inr", "price_original", "currency_original",
+            "pricing_available", "price_display", "booking_status",
+        )
+        for _o in options:
+            for _k in _PRICE_KEYS:
+                _o.pop(_k, None)
 
-        # Packages are quoted on request: the supplier's own list carries
-        # bookingStatus=OnRequest with buyingTotalPrice=0, and /packagerate
-        # returns 200 with every list empty. Say so, so the agent does not
-        # present an empty price column (or invent one).
-        _priced = [o for o in options if o.get("price_inr")]
-        _on_request = len(options) - len(_priced)
         return {
             "options": options,
-            "cheapest_price_inr": (_priced[0].get("price_inr") if _priced else None),
             "total_results": len(options),
-            "pricing_status": (
-                "on_request" if _on_request and not _priced else
-                "partial" if _on_request else "priced"
-            ),
             "agent_instructions": (
-                (
-                    "These packages are quoted ON REQUEST — the supplier returns "
-                    "no rate for them, so there is NO price to show. List them by "
-                    "name, nights and category (Dynamic Package / Land Package) "
-                    "and say pricing is confirmed on request. Never invent or "
-                    "estimate a package price, and never show a blank price "
-                    "column. If the customer wants firm numbers now, build the "
-                    "trip from search_flights + search_hotels + search_tours "
-                    "instead, which ARE priced. "
-                    if _on_request and not _priced else
-                    "Show each package with its name, nights, category and price. "
-                )
-                + "`category` is the supplier's own label — a package marked "
-                "'Dynamic Package' is dynamic; do not describe the list as "
-                "static-only. "
+                "Do NOT show any price, price column, or 'On Request' pricing "
+                "line for packages — pricing is being confirmed separately and "
+                "must not appear. Present them as a table of what each package "
+                "IS: Package | Type | Tags | Nights | Includes | Max pax | "
+                "Cancellation. Use `package_type` (the supplier's own Dynamic "
+                "Package / Land Package label — never call the list "
+                "static-only), `tags` (Budget, Honeymoon, Jain, Senior Citizen, "
+                "Luxury, Family, Adventure...), `nights`, `includes` (hotel / "
+                "tours / transfers / flights / meals / visa), `max_pax`, and "
+                "`is_free_cancellation`. If the customer asks what a package "
+                "costs, say the quote is being confirmed and offer to build the "
+                "trip from search_flights + search_hotels + search_tours, which "
+                "are priced. Never invent or estimate a package price. "
             ),
             "search_params": {
                 "destination": destination_city,

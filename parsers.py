@@ -1152,7 +1152,19 @@ def parse_package_response(
             {
                 "package_id": pid,
                 "name": str(p.get("packageName") or "").strip(),
+                # packageType is the supplier's own Dynamic/Land label;
+                # categoryNames is the audience tag (Budget, Honeymoon, Jain,
+                # Senior Citizen, Luxury...). Both were collapsing into one
+                # field, so the audience tags were invisible.
                 "category": str(p.get("packageType") or p.get("categoryNames") or ""),
+                "package_type": str(p.get("packageType") or ""),
+                "package_type_display": str(p.get("packageTypeDisplayName") or ""),
+                "tags": [
+                    t.strip()
+                    for t in str(p.get("categoryNames") or "").split(",")
+                    if t.strip()
+                ],
+                "max_pax": int(p.get("allowedPax") or 0),
                 "duration": str(p.get("duration") or ""),
                 "nights": int(p.get("noOfNights") or 0),
                 "city": str(p.get("cityListName") or p.get("cityName") or ""),

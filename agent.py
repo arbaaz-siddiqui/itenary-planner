@@ -587,6 +587,60 @@ def _is_from_cache(output: Any) -> bool:
     return False
 
 
+def _is_malformed_tool_args(exc: Exception) -> bool:
+    """True for the provider's 400 on a non-object tool `arguments`."""
+    text = str(exc)
+    return "arguments must be a JSON object" in text or (
+        "tool_calls" in text and "JSON object" in text
+    )
+
+
+def _repair_thread(agent: Any, config: dict[str, Any]) -> None:
+    """Drop malformed tool-call messages from a poisoned checkpoint.
+
+    A tool_calls entry whose args are not a dict makes the provider reject the
+    entire request, forever, because history is replayed each turn. We remove
+    those AIMessages and any ToolMessage left orphaned by their removal.
+    """
+    import logging
+
+    logger = logging.getLogger("agent.turn")
+    try:
+        state = agent.get_state(config)
+        msgs = list((state.values or {}).get("messages") or [])
+    except Exception as e:  # noqa: BLE001 — repair is best-effort
+        logger.warning("could not read state to repair thread: %s", e)
+        return
+
+    bad_ids: set[str] = set()
+    drop: list[Any] = []
+    for m in msgs:
+        calls = getattr(m, "tool_calls", None) or []
+        if calls and any(not isinstance(c.get("args"), dict) for c in calls):
+            drop.append(m)
+            for c in calls:
+                if c.get("id"):
+                    bad_ids.add(str(c["id"]))
+    # ToolMessages answering a dropped call would now be orphaned.
+    for m in msgs:
+        if getattr(m, "tool_call_id", None) and str(m.tool_call_id) in bad_ids:
+            drop.append(m)
+
+    if not drop:
+        logger.warning("malformed-tool-args 400 but no malformed message found")
+        return
+    try:
+        from langchain_core.messages import RemoveMessage
+
+        agent.update_state(
+            config,
+            {"messages": [RemoveMessage(id=m.id) for m in drop if getattr(m, "id", None)]},
+        )
+        logger.warning("repaired thread: dropped %d malformed message(s)", len(drop))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("thread repair failed: %s", e)
+
+
 def invoke_and_log(
     agent: Any,
     *,
@@ -605,7 +659,17 @@ def invoke_and_log(
     if surface == "voice":
         config["recursion_limit"] = 25
     start = time.perf_counter()
-    response = agent.invoke({"messages": [{"role": "user", "content": user_message}]}, config)
+    try:
+        response = agent.invoke(
+            {"messages": [{"role": "user", "content": user_message}]}, config
+        )
+    except Exception as e:  # noqa: BLE001 — we re-raise unless it is the known 400
+        if not _is_malformed_tool_args(e):
+            raise
+        _repair_thread(agent, config)
+        response = agent.invoke(
+            {"messages": [{"role": "user", "content": user_message}]}, config
+        )
     latency = time.perf_counter() - start
     # Colored per-turn timeline to the console: serving model, tools, [CACHED] tags.
     print_turn_timeline(
