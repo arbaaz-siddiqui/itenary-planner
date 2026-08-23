@@ -148,3 +148,41 @@ class TestHotelPerRoomPricing:
         total, rooms, nights = 33291.59, 2, 5
         assert round(total / rooms, 2) == 16645.80 or round(total / rooms, 2) == 16645.79
         assert round(total / nights / rooms, 2) == 3329.16
+
+
+class TestFlightsAreCached:
+    """ROOT CAUSE of "Emirates Rs 40,909 shown, Rs 64,792 billed".
+
+    search_hotels and search_tours wrapped their _impl in cache_impl;
+    search_flights never did. Every call went live, and the supplier is
+    non-deterministic -- three identical queries returned 1 option at
+    Rs 69,630, then 1 option, then 3 options at Rs 1,42,852. So the fare the
+    customer was shown had already changed by the time the trip was priced.
+    """
+
+    def test_search_flights_is_wrapped_in_the_cache(self):
+        from mcp_tools.search_flights import search_flights_tool
+
+        # cache_impl uses functools.wraps, so the marker is the wrapper closure,
+        # not the name. The tool must not be the bare _impl.
+        from mcp_tools import search_flights as mod
+
+        assert search_flights_tool.func is not mod._impl, (
+            "search_flights_tool must wrap _impl in cache_impl, or fares drift "
+            "between the quote and the total"
+        )
+
+    def test_flights_declare_force_refresh(self):
+        import inspect
+
+        from mcp_tools.search_flights import _impl
+
+        assert "force_refresh" in inspect.signature(_impl).parameters, (
+            "without force_refresh there is no way to re-check a fare before booking"
+        )
+
+    def test_flights_are_on_the_volatile_ttl_tier(self):
+        from mcp_tools.result_cache import _TOOL_TTL
+
+        assert "search_flights" in _TOOL_TTL, "flights need an explicit TTL tier"
+        assert _TOOL_TTL["search_flights"] == _TOOL_TTL["search_hotels"]

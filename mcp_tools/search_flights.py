@@ -270,6 +270,7 @@ def _impl(
     max_stops: int = 2,
     max_results: int = 5,
     airline_filter: str = "",
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
     """Search for flights across all airline providers simultaneously.
 
@@ -522,6 +523,12 @@ def _matches_airline(option: dict[str, Any], iata_code: str) -> bool:
     return False
 
 
-search_flights_tool = tool(_impl)
+# Cached like every other availability tool. Without this the supplier's
+# non-determinism leaked straight to the customer: the fare quoted in chat had
+# already changed by the time the itinerary was priced. `force_refresh=True`
+# bypasses the cache for a deliberate "check again" before booking.
+from mcp_tools.result_cache import cache_impl
+
+search_flights_tool = tool(cache_impl("search_flights")(_impl))
 search_flights_tool.name = "search_flights"
 mcp.tool(name="search_flights")(_impl)

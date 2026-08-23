@@ -36,6 +36,7 @@ _STATIC_TTL = 3600.0     # 1 hr — descriptions, reviews, visa, lookups
 _TOOL_TTL = {
     # volatile (availability + prices) — short TTL, re-check often
     "search_hotels": _VOLATILE_TTL,
+    "search_flights": _VOLATILE_TTL,
     "search_airport_transfer_dubai": _VOLATILE_TTL,
     "search_tours": _VOLATILE_TTL,
     "search_restaurants": _VOLATILE_TTL,
