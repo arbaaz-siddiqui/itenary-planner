@@ -21,6 +21,32 @@ _SLOT_MAX_WORKERS = 24
 _SLOT_FETCH_DEADLINE_S = 8.0
 
 
+def _tours_table(options: list) -> str:
+    """Render every option as one markdown row.
+
+    Built here rather than left to the model: asked for 13 rows in prose, it
+    still sent 5, which made our inventory look a third of its real size.
+    """
+    head = (
+        "| Tour | Price/adult | Type | Duration | Transfer | Cancellation"
+        " | Start times |" + chr(10) + "|---|---|---|---|---|---|---|"
+    )
+    rows = []
+    for o in options:
+        star = "⭐ " if getattr(o, "is_recommended", False) else ""
+        cells = [
+            f"{star}{getattr(o, 'name', '') or ''}",
+            getattr(o, "price_display", "") or "",
+            getattr(o, "category", "") or "",
+            getattr(o, "duration", "") or "-",
+            getattr(o, "sharing_display", "") or "",
+            getattr(o, "cancellation_display", "") or "",
+            getattr(o, "slots_display", "") or "",
+        ]
+        rows.append("| " + " | ".join(str(c).replace("|", "/") for c in cells) + " |")
+    return chr(10).join([head, *rows])
+
+
 def _recommended_first(options: list) -> list:
     """Supplier-recommended tours first, then cheapest.
 
@@ -215,7 +241,12 @@ def _impl(
         # Page the ranked list. Slicing AFTER ranking is what makes "show me
         # more" return genuinely new tours instead of repeating page one.
         start = max(0, int(offset or 0))
-        options = ranked[start : start + max_results]
+        # A named search returns its whole match set (up to a sane ceiling), so
+        # "desert safari" shows all 13 the way the website does, not 10 of 13.
+        page_size = max_results
+        if query.strip() and not offset and len(ranked) <= 20:
+            page_size = len(ranked)
+        options = ranked[start : start + page_size]
         shown_end = start + len(options)
         remaining = max(0, len(ranked) - shown_end)
 
@@ -264,10 +295,28 @@ def _impl(
             # Names on this page, so the model can SEE that a tour the customer
             # named is absent and re-search instead of claiming we lack the data.
             "names_on_this_page": [o.name for o in options],
+            # The table must have this many rows. A number is harder to skim
+            # past than a sentence.
+            "rows_to_render": len(options),
+            # Pre-built table. The model rendered 5 of 13 rows even when told
+            # the exact count, so the row count is no longer its decision.
+            "table_markdown": _tours_table(options),
             "agent_instructions": (
                 (
+                    f"`table_markdown` is the finished table for all "
+                    f"{len(options)} options — PASTE IT VERBATIM into your reply. "
+                    f"Do not rebuild it, shorten it, or drop rows from it. "
+                    f"BUILD A TABLE WITH EXACTLY {len(options)} ROWS — one per "
+                    f"entry in `options`, in order, none skipped. Count them "
+                    f"before you send: {len(options)} options in, "
+                    f"{len(options)} rows out. Trimming to a 'nice' few makes us "
+                    f"look like we hold less inventory than we do (the customer "
+                    f"saw 13 desert safaris on the website and 5 in chat). "
                     "Do NOT quote counts or totals to the customer — no '85 tours', "
                     "no 'showing 1-10 of 270'. Just present the tours. "
+                    "If `next_offset` is present there are MORE beyond this "
+                    "page: offer them, and call search_tours again with that "
+                    "offset if the customer wants to see more. "
                     "If the customer NAMED a tour that is not in `names_on_this_page` "
                     "(Burj Khalifa, desert safari, dhow cruise...), call search_tours "
                     "again with query=<their words> BEFORE replying — the catalogue "
