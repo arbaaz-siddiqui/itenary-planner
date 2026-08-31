@@ -100,3 +100,44 @@ AI to offer: *"let me pull fresh results — prices may have moved."*
 | Size of every request to the AI | ~24,400 tokens | **~19,200 (-21%)** |
 | Documented APIs verified live | — | **23 of 25 work** |
 | Automated tests passing | 741 | **750** |
+
+---
+
+## 7. Every tour has bookable variants — we were showing none of them
+
+**What the client saw:** Their website shows **12 option cards** for
+"Desert Safari Tours in Dubai" (Overnight · Shared vehicle, Evening · Private
+vehicle, Evening + quad bike, dune buggies...) and 12 for Burj Khalifa
+(At the Top Silver, Fast Track, Level 148, Fountain Boardwalk...). Asked
+*"what are the tour options for X"*, our chat replied with a paragraph of
+description instead of the list.
+
+**Why it happened:** A tour is not one product. The variants live in a separate
+API that we were calling only to read transfer prices — we read those and threw
+the variant names away.
+
+**What we did:** New `get_tour_options` tool. Ask about one tour and you now get
+a table of every bookable variant with its own price, transfer tiers, pax limits
+(and whether the rate is **per person or per vehicle** — a per-vehicle price
+covers the whole group), and whether it has fixed time slots. Verified live: all
+12 desert safari variants and all 12 Burj variants, cheapest first.
+
+Where the supplier returns no price for a variant we print **"On request"** —
+never a guessed number and never ₹0. Their own website shows blank grey bars in
+exactly those places, so the data genuinely isn't there.
+
+---
+
+## 8. Speed: 24 wasted API calls per tour search removed
+
+**What was happening:** Every tour search fired ~12 `options` + ~12 `optionRate`
+calls — one per tour — even though 13 of 15 tours are "ticket only" and can
+never have a shared/private split.
+
+**What we did:** Tours marked "Without Transfer" are skipped entirely.
+Measured on the same search: **12 calls → 2, and 12 → 2.** Same data, a fraction
+of the load on the supplier.
+
+**Exchange rate:** now fetched once and cached for **5 minutes**, then
+re-fetched. Concurrent lookups also used to each make their own call (we saw the
+same rate fetched twice in one second) — they now share one.

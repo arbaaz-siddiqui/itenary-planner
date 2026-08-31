@@ -73,6 +73,10 @@ def _attach_transfer_prices(options: list, travel_date: str, adults: int) -> Non
     def _one(o: Any) -> None:
         if not o.tour_id:
             return
+        # "Without Transfer" tours have no pickup and so no split to fetch.
+        # Skipping them removed ~12 of 15 calls per search.
+        if "without" in (getattr(o, "transfer_scenario", "") or "").strip().lower():
+            return
         try:
             raw = call_tour_options(tour_id=int(o.tour_id), travel_date=travel_date)
             opts = ((raw or {}).get("result") or {}).get("tourOptionlist") or []

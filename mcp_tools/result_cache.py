@@ -47,6 +47,8 @@ _TOOL_TTL = {
     "get_hotel_description": _STATIC_TTL,
     "get_hotel_reviews": _STATIC_TTL,
     "get_tour_details": _STATIC_TTL,
+    # Variant prices are live rates.
+    "get_tour_options": _VOLATILE_TTL,
     "get_transfer_details": _STATIC_TTL,
     "get_flight_details": _VOLATILE_TTL,
     "get_restaurant_details": _STATIC_TTL,

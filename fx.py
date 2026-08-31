@@ -39,7 +39,7 @@ def _live_disabled() -> bool:
 
 # Cache the live ROE for this many seconds. ROE is a daily-ish rate; this just
 # stops a burst of parses in one turn from each making a ~900ms network call.
-ROE_CACHE_TTL_SECS = 600.0
+ROE_CACHE_TTL_SECS = 300.0  # 5 min: rates drift intraday, so re-fetch after this
 
 _LOCK = threading.Lock()
 _cache: dict[str, tuple[float, float]] = {}  # currency -> (rate_inr, fetched_at)
@@ -185,17 +185,18 @@ def _roe_pair(target_currency: str) -> tuple[float | None, float | None]:
     Cached for ROE_CACHE_TTL_SECS — see the note above; this is a hot path.
     """
     code = (target_currency or "INR").strip().upper()
-    now = time.monotonic()
+    # Hold the lock across the fetch so N concurrent callers make ONE call.
+    # Releasing it first meant a 15-tour parallel search fetched ROE 15 times.
     with _ROE_PAIR_LOCK:
+        now = time.monotonic()
         hit = _ROE_PAIR_CACHE.get(code)
         if hit and (now - hit[1]) < ROE_CACHE_TTL_SECS:
             return hit[0]
-    pair = _fetch_roe_pair(code)
-    # Only cache a usable answer, so a transient failure retries next call.
-    if pair[0] or pair[1]:
-        with _ROE_PAIR_LOCK:
-            _ROE_PAIR_CACHE[code] = (pair, now)
-    return pair
+        pair = _fetch_roe_pair(code)
+        # Only cache a usable answer, so a transient failure retries next call.
+        if pair[0] or pair[1]:
+            _ROE_PAIR_CACHE[code] = (pair, time.monotonic())
+        return pair
 
 
 def _fetch_roe_pair(target_currency: str) -> tuple[float | None, float | None]:
