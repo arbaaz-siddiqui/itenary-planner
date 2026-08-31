@@ -264,11 +264,12 @@ class TestNeverInventATransferPrice:
         base.update(kw)
         return TourOption(**base)
 
-    def test_sharing_display_without_prices_defers_to_booking(self) -> None:
+    def test_sharing_display_without_prices_says_rates_unpublished(self) -> None:
         # "same tour price" was factually wrong (Burj private costs Rs 5,053
-        # extra); without real transfer_prices we defer, never claim parity.
+        # extra). When the supplier has no rate plan for the date (verified:
+        # nothing past 30 Oct 2026), say that — never claim price parity.
         out = self._tour(transfer_scenario="All Transfer").sharing_display
-        assert "confirmed at booking" in out.lower()
+        assert "not published for this date" in out.lower()
         assert "same tour price" not in out.lower()
 
     def test_sharing_display_quotes_no_number(self) -> None:

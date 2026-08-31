@@ -585,10 +585,10 @@ class TourOption(BaseModel):
             return self.transfer_price_display
         if self.transfer_options:
             names = ", ".join(self.transfer_options)
-            return f"Transfer options: {names} (transfer rates confirmed at booking)"
+            return f"Transfer options: {names} (rates not published for this date yet)"
         s = (self.transfer_scenario or "").strip().lower()
         if "all" in s:
-            return "Shared or private transfer available (transfer rates confirmed at booking)"
+            return "Shared or private transfer available (rates not published for this date yet)"
         if "private" in s:
             return "Private transfer included"
         if "shar" in s:
