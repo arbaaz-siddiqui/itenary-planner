@@ -121,7 +121,15 @@ def cached_or_call(
                 logger.info("[CACHE] HIT  %s (age %ds) — no API call", tool, int(now - stored))
                 out = dict(result)
                 out["from_cache"] = True
-                out["cached_age_secs"] = int(now - stored)
+                age = int(now - stored)
+                out["cached_age_secs"] = age
+                if ttl <= _VOLATILE_TTL:
+                    out["freshness_note"] = (
+                        f"These prices were fetched {age}s ago and can move. If "
+                        "the customer is deciding or asks whether they are "
+                        "current, say you will pull fresh results and call this "
+                        "tool again with force_refresh=True."
+                    )
                 return out
         logger.info("[CACHE] MISS %s — calling supplier", tool)
     result = producer()

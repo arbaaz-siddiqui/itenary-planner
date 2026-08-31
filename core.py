@@ -524,6 +524,10 @@ class TourOption(BaseModel):
     discount_value: float = 0.0
     duration: str = ""
     short_description: str = ""
+    # Filled by search_tours from /api/tours/optionRate -> initialTransferRates.
+    # Empty when the supplier publishes no per-transfer-type split.
+    transfer_prices: list[dict[str, Any]] = Field(default_factory=list)
+    transfer_price_display: str = ""
     full_description: str = ""
     inclusions: list[str] = Field(default_factory=list)
     exclusions: list[str] = Field(default_factory=list)
@@ -568,12 +572,17 @@ class TourOption(BaseModel):
         name those options exactly, because "Sharing Transfer, Private Transfer"
         is more useful than a category label.
 
-        Deliberately no PRICE here: the rates endpoint returns exactly ONE rate
-        per tour with no per-transfer-type breakdown, so any "private costs X"
-        figure would be invented. The agent previously did invent one
-        (multiplying the per-adult fare by the party size) — that is the
-        hallucination this property exists to prevent.
+        Prices ARE shown when we have them. toursearchlistrate returns one flat
+        rate per tour, which is why this used to say "same tour price" while the
+        client's own site showed Sharing Rs 1,790 vs Private Rs 11,548. The
+        split comes from the B2C option APIs and lands in `transfer_prices`;
+        when that is empty we fall back to naming the modes without a figure.
+        Never multiply the per-adult fare by party size to guess a transfer
+        price — that was the original hallucination.
         """
+        # Real prices win over any wording about them.
+        if self.transfer_price_display:
+            return self.transfer_price_display
         if self.transfer_options:
             names = ", ".join(self.transfer_options)
             return f"Transfer options: {names} (same tour price)"

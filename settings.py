@@ -50,7 +50,10 @@ class BookingApiSettings(BaseSettings):
     # Some tour endpoints (options, price calendar, option details) live on the
     # B2C host, not the main B2B api host. Separate base URL, same Bearer token.
     b2c_base_url: str = Field(
-        default="https://stagingb2c.gujjutours.com", validation_alias="BOOKING_B2C_BASE_URL"
+        # The Postman doc lists the tour-option APIs on stagingb2c, but that
+        # host 404s on every /api path; www.gujjutours.com serves them (verified
+        # 2026-08-31). Override with BOOKING_B2C_BASE_URL if staging is fixed.
+        default="https://www.gujjutours.com", validation_alias="BOOKING_B2C_BASE_URL"
     )
     token: str = Field(default="", validation_alias="BOOKING_TOKEN")
     # Flight search/details `Target` field: "test" (staging fares) or "production"

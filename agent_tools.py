@@ -955,28 +955,20 @@ def generate_itinerary_pdf_tool(
     payment_schedule: list[dict[str, Any]] | None = None,
     notes: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Generate the branded itinerary PDF. CALL THIS THE MOMENT IT IS ASKED FOR.
+    """Generate the branded itinerary PDF. CALL IT THE MOMENT IT IS ASKED FOR.
 
     Triggers: "send it", "make the pdf", "PDF bhej do", "share the itinerary",
-    "can I get this in writing", or the app's PDF button. Renders the Gujju
-    Tours letterhead, saves it, returns a download link.
+    the PDF button. Returns a download link.
 
-    NEVER refuse, defer, or ask a question first. There are NO preconditions.
-    The customer does not have to pick a flight or hotel — build the PDF around
-    the options you would recommend (cheapest, or best value) and name them in
-    your reply: "Built around the Emirates flight and Movenpick — say the word
-    and I'll swap either." A PDF is a PROPOSAL, not a booking; regenerating
-    costs nothing.
+    NEVER refuse, defer, or ask a question first — no preconditions. If they
+    have not picked a flight/hotel, build it around what you would recommend
+    and name those in your reply ("Built around the Emirates flight and
+    Movenpick — say the word and I'll swap either"). A PDF is a proposal, not a
+    booking. Searched nothing yet? Search in the SAME turn, then call this.
+    Asking "which flight would you like?" is our top customer complaint.
 
-    Refusing with "which flight and hotel would you like to go with?" is the
-    single most-reported complaint about this agent ("for generating a PDF you
-    have to try 2-3 times"). If you have searched anything at all, you have
-    enough. If you have searched nothing yet, search first IN THE SAME TURN,
-    then call this — still without asking.
-
-    Use ONLY real numbers you already obtained from search/pricing tools — never
-    invent figures here. Money fields are INR. Pass `amount_inr: null` for any
-    service that is On Request.
+    Use ONLY figures from search/pricing tools — never invent. INR;
+    `amount_inr: null` for On Request.
 
     Args:
         destination/origin_city/start_date/end_date/nights/party_summary: trip facts.

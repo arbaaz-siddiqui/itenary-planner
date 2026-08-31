@@ -46,7 +46,7 @@ from booking_api.headers import (
     hotel_static_headers,
     transfer_headers,
 )
-from booking_api.http_client import get_client
+from booking_api.http_client import get_b2c_client, get_client
 from core import (
     BookingApiError,
     CurrencyRoeFailed,
@@ -75,6 +75,11 @@ TOUR_LIST_PATH = "/api/v1/tourservices/TourSearch/toursearchlist"
 TOUR_RATE_PATH = "/api/v1/tourservices/TourSearch/toursearchlistrate"
 TOUR_DETAILS_PATH = "/api/v1/tourservices/TourSearch/Tourdetails"
 TOUR_TIMESLOT_PATH = "/api/v1/tourservices/TourSearch/Timeslot"
+# B2C tour-option endpoints. NOTE: the client's Postman doc lists these under
+# stagingb2c.gujjutours.com, but that host returns 404 for every /api path --
+# only www.gujjutours.com serves them (verified 2026-08-31).
+TOUR_OPTIONS_PATH = "/api/tours/options"
+TOUR_OPTION_RATE_PATH = "/api/tours/optionRate"
 TRANSFER_LIST_PATH = "/api/transferservices/TransferList"
 TRANSFER_DETAILS_PATH = "/api/transferservices/TransferDetail"
 RESTAURANT_LIST_PATH = "/api/restaurant/v1/restaurants"
@@ -1235,4 +1240,65 @@ def call_visa_countries() -> dict[str, Any]:
             raise
         raise VisaInfoFailed(
             f"Visa countries call failed: {e}", endpoint="/api/visa/v1/countries"
+        ) from e
+
+
+# =============================================================================
+# Tour options + per-transfer-type rates (B2C endpoints)
+# =============================================================================
+def call_tour_options(*, tour_id: int, travel_date: str, lang: str = "en") -> dict[str, Any]:
+    """Bookable options for one tour, each with its own transfer types.
+
+    `result.tourOptionlist[*]` carries optionId, optionName, supplierId and
+    `validateTourOption` (transferTypeId 1 = Sharing, 2 = Private, with
+    minPax/maxPax). Dubai Desert Safari returns 5 options.
+    """
+    try:
+        return get_b2c_client().post(
+            TOUR_OPTIONS_PATH,
+            json={"tourID": tour_id, "travelDate": travel_date, "lang": lang},
+            headers=base_headers(),
+        )
+    except Exception as e:
+        raise BookingApiError(
+            f"Tour options call failed: {e}", endpoint=TOUR_OPTIONS_PATH
+        ) from e
+
+
+def call_tour_option_rate(
+    *,
+    tour_id: int,
+    option_id: int | str,
+    supplier_id: int,
+    travel_date: str,
+    adults: int = 2,
+    transfer_id: int = 1,
+    lang: str = "en",
+) -> dict[str, Any]:
+    """Rate for one tour option, INCLUDING the per-transfer-type prices.
+
+    `result[0].initialTransferRates` is the field the flat toursearchlistrate
+    never had: one entry per transferTypeId with `startingFromRate`. A tour with
+    no pickup returns an empty list -- that is "Without Transfer", not an error.
+    """
+    payload = {
+        "tourID": tour_id,
+        "travelDate": travel_date,
+        "optionId": str(option_id),
+        "transferId": transfer_id,
+        "StartTime": "",
+        "guideId": 0,
+        "lang": lang,
+        "paxDetails": [{"label": "adult", "value": str(adults), "age": ""}],
+        "supplierId": supplier_id,
+        "timeSlotId": "",
+        "vehicleId": 0,
+    }
+    try:
+        return get_b2c_client().post(
+            TOUR_OPTION_RATE_PATH, json=payload, headers=base_headers()
+        )
+    except Exception as e:
+        raise BookingApiError(
+            f"Tour option rate call failed: {e}", endpoint=TOUR_OPTION_RATE_PATH
         ) from e

@@ -58,6 +58,76 @@ def _recommended_first(options: list) -> list:
     return sorted(options, key=lambda o: (not o.is_recommended, o.price_per_adult_inr))
 
 
+def _attach_transfer_prices(options: list, travel_date: str, adults: int) -> None:
+    """Fetch the REAL Sharing vs Private transfer price for each tour.
+
+    The client's site shows "Sharing Transfers +Rs 1,790.03" and "Private
+    Transfers +Rs 11,548.61" for Dubai Desert Safari, while we said "same tour
+    price" -- because toursearchlistrate returns ONE flat rate per tour with no
+    transfer split. The split lives in the B2C option APIs:
+    /api/tours/options -> optionId, then /api/tours/optionRate ->
+    `initialTransferRates`, one entry per transfer type.
+
+    Verified against the client's screenshot (tour 30647, 24 Sep, 4 adults):
+    Sharing 68.2 AED -> Rs 1,789.08 (site 1,790.03), Private 440 AED ->
+    Rs 11,542.43 (site 11,548.61) -- the ~0.05% is live ROE drift.
+
+    Two calls per tour, so this runs concurrently and best-effort: a tour whose
+    lookup fails keeps the flat `sharing_display` rather than failing the search.
+    A tour with no pickup returns an empty list -- that is "Without Transfer",
+    not an error.
+    """
+    import concurrent.futures as _cf
+
+    from booking_api.endpoints import call_tour_option_rate, call_tour_options
+    from fx import convert_supplier_price
+
+    def _one(o: Any) -> None:
+        if not o.tour_id:
+            return
+        try:
+            raw = call_tour_options(tour_id=int(o.tour_id), travel_date=travel_date)
+            opts = ((raw or {}).get("result") or {}).get("tourOptionlist") or []
+            if not opts:
+                return
+            first = opts[0]
+            rate_raw = call_tour_option_rate(
+                tour_id=int(o.tour_id),
+                option_id=first.get("optionId"),
+                supplier_id=int(first.get("supplierId") or o.supplier_id or 0),
+                travel_date=travel_date,
+                adults=max(1, int(adults or 1)),
+            )
+            rows = (rate_raw or {}).get("result") or []
+            if not rows:
+                return
+            tiers = rows[0].get("initialTransferRates") or []
+            priced: list[dict[str, Any]] = []
+            for t in tiers:
+                raw_rate = t.get("startingFromRate")
+                if raw_rate in (None, 0):
+                    continue
+                inr, _cur = convert_supplier_price(
+                    raw_rate, fare_currency=t.get("currencyCode") or "AED"
+                )
+                priced.append({
+                    "transfer_type": t.get("transferTypeName") or "",
+                    "price_inr": inr,
+                    "price_display": f"₹{inr:,.0f}",
+                })
+            if not priced:
+                return
+            o.transfer_prices = priced
+            o.transfer_price_display = " · ".join(
+                f"{p['transfer_type']}: {p['price_display']}" for p in priced
+            )
+        except Exception as e:  # noqa: BLE001 — best-effort enrichment
+            logger.debug("transfer price lookup failed for %s: %s", o.tour_id, e)
+
+    with _cf.ThreadPoolExecutor(max_workers=12) as ex:
+        list(ex.map(_one, options))
+
+
 def _attach_timeslots(options: list, travel_date: str, adults: int) -> None:
     """Fetch real start times for each tour on the page, in parallel.
 
@@ -252,6 +322,7 @@ def _impl(
 
         # Real start times for this page (parallel, best-effort).
         _attach_timeslots(options, travel_date, max(1, int(adults or 1)))
+        _attach_transfer_prices(options, travel_date, max(1, int(adults or 1)))
 
         # Presentation-ready fields so the agent RELAYS these rather than
         # deriving (or omitting) them. The client requires sharing/private and
@@ -261,6 +332,10 @@ def _impl(
         for o in options:
             d = o.model_dump()
             d["sharing_display"] = o.sharing_display
+            # Real per-transfer-type prices when the supplier has them.
+            if getattr(o, "transfer_prices", None):
+                d["transfer_prices"] = o.transfer_prices
+                d["transfer_price_display"] = o.transfer_price_display
             d["cancellation_display"] = o.cancellation_display
             d["price_display"] = o.price_display
             d["timeslots"] = getattr(o, "timeslots", [])

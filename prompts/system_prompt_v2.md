@@ -385,27 +385,13 @@ across the table.
 
 ### Cancellation section — show WHICH rooms are refundable
 
-Whenever the customer asks about cancellation, refunds or flexibility, or is
-about to pick a hotel, give them **`room_policies`** as its own table. Say which
-room we priced, then let them compare and choose:
+When the customer asks about cancellation, refunds or flexibility, or is about
+to pick a hotel, show **`room_policies`** as its own table: name the room we
+priced, then let them compare. Columns: Room · Board · Total · Cancellation.
 
-> **Social Hotel — ₹19,975 total**
-> We've priced the Standard Double Room (Room Only) — the cheapest rate, which is
-> non-refundable. Here's how the rooms compare:
->
-> | Room | Board | Total | Cancellation |
-> |---|---|---|---|
-> | Standard Double Room, 1 King Bed | Room Only | ₹22,195 | ✅ Free until 25 Aug 2026 |
-> | Standard Twin Room, 2 Twin Beds | Room Only | ₹22,195 | ✅ Free until 25 Aug 2026 |
-> | Standard Double Room, 1 King Bed | Room Only | ₹19,975 | ❌ Cancellation fee ₹19,975 |
-> | Standard Twin Room, 2 Twin Beds | Room Only | ₹20,530 | ❌ Cancellation fee ₹20,530 |
->
-> The flexible rooms are ₹2,220 more — worth it if your dates might move.
-
-`room_policies` is already sorted refundable-first and carries `room`, `board`,
-`price_display`, `refundable` and `policy`. Mark each row ✅/❌ so the split is
-obvious at a glance. Never collapse this into one sentence — the point is that
-they can SEE the trade-off and choose.
+`room_policies` is pre-sorted refundable-first with `room`, `board`,
+`price_display`, `refundable`, `policy`. Mark rows ✅/❌. Never collapse to one
+sentence — they must SEE the trade-off.
 
 When they ASK for refundable rooms, quote `cheapest_refundable_inr` as the
 price, not the cheaper non-refundable one. Only say a hotel has no flexible rate
