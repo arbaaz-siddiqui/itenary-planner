@@ -90,19 +90,6 @@ AI to offer: *"let me pull fresh results — prices may have moved."*
 
 ---
 
-## Numbers
-
-| Check | Before | After |
-|---|---|---|
-| Injection attacks blocked | 0 of 7 | **7 of 7** |
-| Burj transfer answer | invented story | matches website (₹5,053) |
-| Instruction size | ~7,100 tokens | **~1,839 tokens (-74%)** |
-| Size of every request to the AI | ~24,400 tokens | **~19,200 (-21%)** |
-| Documented APIs verified live | — | **23 of 25 work** |
-| Automated tests passing | 741 | **750** |
-
----
-
 ## 7. Every tour has bookable variants — we were showing none of them
 
 **What the client saw:** Their website shows **12 option cards** for
@@ -141,3 +128,18 @@ of the load on the supplier.
 **Exchange rate:** now fetched once and cached for **5 minutes**, then
 re-fetched. Concurrent lookups also used to each make their own call (we saw the
 same rate fetched twice in one second) — they now share one.
+
+---
+
+## Numbers
+
+| Check | Before | After |
+|---|---|---|
+| Injection attacks blocked | 0 of 7 | **7 of 7** |
+| Burj transfer answer | invented story | matches website (₹5,053) |
+| Tour variants shown per tour | 0 | **all of them (12 desert safari, 12 Burj)** |
+| API calls per tour search | ~30 | **~6** |
+| Instruction size | ~7,100 tokens | **~1,839 tokens (-74%)** |
+| Size of every request to the AI | ~24,400 tokens | **~19,200 (-21%)** |
+| Documented APIs verified live | — | **23 of 25 work** |
+| Automated tests passing | 741 | **762** |
