@@ -77,3 +77,24 @@ class TestPriceFreshness:
         note = second.get("freshness_note") or ""
         assert "force_refresh=True" in note
         assert "can move" in note
+
+
+class TestZeroRateTiersAreIncludedNotDropped:
+    """Burj Khalifa (tour 30614) publishes Without Rs 0 / Sharing Rs 0 /
+    Private 192.61 AED. Dropping the Rs 0 tiers left the model with only
+    'Private' and it invented 'sharing depends on your hotel distance'."""
+
+    def test_burj_shows_all_three_tiers(self):
+        from mcp_tools.search_tours import _impl
+
+        r = _impl(destination_city="Dubai", travel_date="2026-09-30",
+                  adults=1, query="burj khalifa tickets", force_refresh=True)
+        burj = [o for o in r["options"] if o["tour_id"] == 30614]
+        assert burj, "tour 30614 not in results"
+        tiers = burj[0].get("transfer_prices") or []
+        names = {t["transfer_type"] for t in tiers}
+        assert any("Sharing" in n for n in names), f"Sharing tier dropped: {names}"
+        assert any("Private" in n for n in names), names
+        sharing = next(t for t in tiers if "Sharing" in t["transfer_type"])
+        assert sharing["price_inr"] == 0
+        assert "Included" in sharing["price_display"] or "\u20b90" in sharing["price_display"]

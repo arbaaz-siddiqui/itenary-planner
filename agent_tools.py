@@ -1187,15 +1187,8 @@ ALL_TOOLS: list[BaseTool] = _build_all_tools()
 # =============================================================================
 # Per-surface tool sets
 # =============================================================================
-# Every surface used to receive all 35 tools — 9,773 tokens of schema on every
-# request. That matters twice over: context size is the dominant latency cost
-# (a turn with ZERO tool calls still takes ~6.5s on a 22k context), and a bigger
-# menu means more ways for the model to pick wrong. The Howard Johnson bug was
-# exactly that — the wrong tool out-attracting the right one.
-#
-# It also made prose bans unenforceable: system_prompt_voice.md says "Never call
-# display_options_tool (no screen)" while the tool was handed to voice anyway.
-# A tool the surface cannot use should not be on the menu at all.
+# Each surface gets only the tools it can use: fewer schema tokens per request,
+# and fewer ways for the model to pick the wrong tool.
 _UI_ONLY_TOOLS = frozenset({
     "display_options_tool",     # renders image cards — web only
     "build_trip_schedule_tool", # renders a calendar — web only

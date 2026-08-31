@@ -130,17 +130,9 @@ def _impl(
                 "error_type": "MissingReferenceData",
             }
 
-        # CRITICAL: the supplier matches transfer inventory on the DESTINATION
-        # NAME, not just coordinates. Empirically, toLocationName="Hotel" (the
-        # default when the LLM omits hotel_name) returns ~2 rows; the REAL hotel
-        # name returns 60+. So a usable, specific hotel_name is mandatory.
-        #
-        # The LLM is unreliable here — it often passes correct coords but NO name
-        # (or a generic "Hotel"). So we resolve a real name ourselves:
-        #   (a) if a specific name was given, use entity search to canonicalise it
-        #       and get authoritative coords;
-        #   (b) if the name is missing/generic, reverse-resolve the nearest hotel
-        #       from the coordinates via the city address data.
+        # The supplier matches on the destination NAME ("Hotel" → 2 rows, real
+        # name → 60+), so resolve a real hotel name ourselves: canonicalise a
+        # given name via entity search, else reverse-resolve from coords.
         _generic = (not hotel_name) or hotel_name.strip().lower() in ("", "hotel", "the hotel")
         try:
             from booking_api import call_entity_search

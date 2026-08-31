@@ -76,18 +76,8 @@ def _safe_to_inr(amount: Any, currency: str, rates: dict[str, float]) -> float |
 # =============================================================================
 # === flight
 # =============================================================================
-# Sanity floor for flight prices. The Technoheaven supplier API occasionally
-# returns INR-labeled fares that are clearly bogus:
-#   - DEL→BOM at ₹269 (Air India)
-#   - DEL→DXB at ₹3,967 (Saudi Arabian Airlines, "Nonstop 4h 20m")
-# These are likely admin/test fares, fare differences, or AED prices that the
-# supplier mislabeled as INR (4237 / 23 ≈ AED 184, plausible one-way only).
-# The realistic minimum for any India→Dubai roundtrip in low season is around
-# ₹10,000. Setting floor below that lets bogus fares pollute the cheapest
-# results and drags down the floor-check estimate.
-#
-# Tune this if running for non-Dubai routes — ₹8,000 catches the egregious
-# bogus pricing without filtering legitimate budget domestic fares.
+# Sanity floor: the supplier sometimes returns bogus INR fares (DEL→DXB ₹3,967).
+# ₹8,000 filters those without touching real budget fares; tune for other routes.
 FLIGHT_PRICE_INR_FLOOR: int = 8000
 
 # Bogus supplier fares are almost always INR-LABELED and implausibly low — e.g. a
@@ -476,16 +466,9 @@ def _parse_room(
 # =============================================================================
 # === tour
 # =============================================================================
-# Cancellation policy id -> name. Resolved live (2026-08-21) by calling
-# Tourdetails for one representative tour per id: the LIST response only carries
-# `cancellationPolicyID`, while the human-readable name lives in the detail
-# response. Mapping them here means every tour in a list can state its terms
-# without an extra API call per tour.
-#
-# The client's requirement is non-negotiable: a tour must never be presented
-# without its cancellation terms. Unknown ids fall back to "on request" rather
-# than to silence — the failure being fixed is the agent saying there is NO
-# policy when there plainly is one.
+# Cancellation policy id -> name (resolved live from Tourdetails, 2026-08-21).
+# Lets every list row state its terms without a per-tour call; unknown ids say
+# "on request", never silence.
 _TOUR_CANCELLATION_POLICIES: dict[int, str] = {
     1: "Free cancellation before 24 hours",
     2: "Free cancellation up to 24 hours prior",
@@ -856,19 +839,9 @@ def _parse_visa_option(
     if option_id is None:
         return None
 
-    # Pricing comes via `visaRates[*].fareInfo[*]` — one row per processing
-    # tier (Normal/Express) x pax type (Adult/Child). `fareInfo` is EMPTY
-    # unless the request used nationalityId/citizenId 245; see call_visa_info.
-    #
-    # Currency trap: `price` is AED even though the row is labelled
-    # `currency: "INR"`. The supplier's own INR figure is `priceWithoutROE`,
-    # and it is reproduced exactly (to the paisa, verified on all 10 UAE
-    # fares) by:
-    #
-    #     inr = (price - serviceFee) * (1 / buyingROE)
-    #
-    # NOT by `sellingROE`, which overquotes by ₹282–₹537 per visa. We compute
-    # via the ROE API and fall back to `priceWithoutROE` if that call fails.
+    # fareInfo is empty unless nationalityId/citizenId=245. `price` is AED even
+    # when labelled INR; real INR = (price - serviceFee) / buyingROE (verified
+    # to the paisa on all 10 UAE fares). Fallback: priceWithoutROE.
     price_original = 0.0
     currency_original = "AED"
     price_inr = 0.0

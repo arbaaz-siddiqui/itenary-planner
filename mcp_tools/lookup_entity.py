@@ -18,19 +18,9 @@ from mcp_tools.server import mcp
 
 logger = logging.getLogger(__name__)
 
-# Supported service types.
-#
-# "hotels" is deliberately EXCLUDED. This endpoint searches worldwide, so
-# querying "Howard Johnson" returned Bakersfield / Changsha / Yibin and the
-# agent told a customer the Dubai property does not exist. Prompt and docstring
-# warnings were added and the model still routed here — a tool whose first line
-# reads "look up a hotel by name" will always out-attract one that reads "search
-# hotels in the destination city".
-#
-# search_hotels(destination_city=..., hotel_name=...) is city-scoped and
-# resolves against bookable inventory (it calls call_entity_search directly, so
-# nothing is lost by closing this path). Making the wrong call IMPOSSIBLE beats
-# instructing against it.
+# "hotels" deliberately excluded: this endpoint is worldwide, so "Howard
+# Johnson" resolved to US/China properties. Hotels go via city-scoped
+# search_hotels(hotel_name=...) instead.
 _VALID_SERVICES = {"tours", "restaurants", "airlines"}
 _REDIRECTED_SERVICES = {
     # Deliberately free of "not found" / "does not exist" wording: a model

@@ -58,20 +58,8 @@ _TOOL_TTL = {
     "lookup_hotel_city": _STATIC_TTL,
 }
 
-# BUMP THIS whenever a tool's OUTPUT SHAPE OR SEMANTICS CHANGE.
-#
-# Why this exists: the key used to be sha1(tool_name + kwargs) with no notion of
-# code version. A fix to a tool therefore kept serving the PRE-FIX result for up
-# to the full TTL — an hour for the static tier. That is not hypothetical: a
-# customer was told "I couldn't find a Howard Johnson in Dubai. Most of the ones
-# I see are in the US or China" from a 20-minute-old cached lookup_entity result
-# created before the city-scoping fix shipped. The code was correct; the answer
-# was stale. It also made the bug unreproducible in a fresh process, which cost
-# a lot of debugging time.
-#
-# History:
-#   1 — initial
-#   2 — lookup_entity city scoping; hotel/flight payload slimming
+# BUMP whenever a tool's output shape/semantics change — otherwise a fixed tool
+# keeps serving the pre-fix cached result for up to a full TTL.
 CACHE_EPOCH = 3  # bumped 2026-08-21: result shape + pricing changed
 
 _LOCK = threading.Lock()

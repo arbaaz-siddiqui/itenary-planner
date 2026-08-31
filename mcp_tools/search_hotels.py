@@ -699,18 +699,9 @@ def _impl(
 
         option_dicts = [o.model_dump() for o in options]
 
-        # Flatten the cheapest room's cancellation terms. The full per-room
-        # policy (dates + fee) was already returned inside rooms[], but it
-        # collapsed to a has_free_cancellation boolean in the reply — so
-        # "free until 28 Nov, then Rs 32,017" was available and never said.
-        #
-        # Then DROP rooms[]. Measured: rooms is 1,713 of ~1,800 tokens per
-        # hotel — 95% of the payload — and nothing renders it. A 5-hotel result
-        # was 10,725 tokens; without rooms it is ~741. Context size is the
-        # dominant latency cost (a zero-tool turn still takes 6.5s on a 22k
-        # context), so this is the single biggest speed win available.
-        # Room-level detail stays reachable via get_hotel_info/get_hotel_description
-        # for the ONE hotel a customer actually picks.
+        # Flatten the cheapest room's cancellation terms, then DROP rooms[] —
+        # it is 95% of the payload (10,725 → ~741 tokens per 5-hotel result)
+        # and nothing renders it. Detail stays reachable via get_hotel_info.
         for o in option_dicts:
             o["cancellation_display"] = _cancellation_display(o)
             # Same tidy-up as the policy table: the supplier duplicates the
@@ -722,17 +713,9 @@ def _impl(
             # LAST hotel's room inventory as the party the customer asked for.
             hotel_rooms = o.get("rooms") or []
             o["room_options_count"] = len(hotel_rooms)
-            # Refundable summary BEFORE the rooms are dropped for latency.
-            # We quote the CHEAPEST offer, which is very often non-refundable, so
-            # saying "Non-refundable" full stop told a customer the hotel had no
-            # flexible rate when it had four. Live: Social Hotel 4/10 refundable,
-            # Howard Johnson 5/10, Novotel 2/10 — all three shown as
-            # "Non-refundable" because only the cheapest row was inspected.
-            # Split the per-night figure into two explicitly-named fields. The
-            # parser's `per_night_inr` is price/nights with NO room division, so
-            # for a 2-room booking it is the whole-booking nightly cost. Calling
-            # it "per room" (as pricing_note did) made the agent publish a
-            # doubled per-room rate.
+            # Refundable summary before rooms[] is dropped: the cheapest offer
+            # is usually non-refundable, but most hotels DO have flexible rates.
+            # per_night fields are split all-rooms vs per-room explicitly.
             try:
                 _nights = int(nights or 0)
                 _rooms = max(1, int(room_count or 1))

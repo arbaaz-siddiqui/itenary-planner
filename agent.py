@@ -88,13 +88,10 @@ def build_sqlite_checkpoint(db_path: str | None = None) -> BaseCheckpointSaver:
 # Prompt loader
 # =============================================================================
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
-# Which prompts/system_prompt_<version>.md to load.
-# v2 is the shipping default: same rules as v1 (all 47 behaviours verified
-# present) but restructured to lead with the booking flow and an exact tool
-# table, and ~27% smaller. Set SYSTEM_PROMPT_VERSION=v1 to fall back without a
-# redeploy if v2 ever misbehaves; the */saftey/development branches are pinned
-# to v1 as a full rollback.
-SYSTEM_PROMPT_VERSION = os.environ.get("SYSTEM_PROMPT_VERSION", "v2").strip() or "v2"
+# Which prompts/system_prompt_<version>.md to load. v3 is the default:
+# same rules as v2 at ~1.8k tokens (v2 ~7.1k). SYSTEM_PROMPT_VERSION=v2
+# falls back without a redeploy.
+SYSTEM_PROMPT_VERSION = os.environ.get("SYSTEM_PROMPT_VERSION", "v3").strip() or "v3"
 
 
 @lru_cache(maxsize=4)
@@ -649,6 +646,21 @@ def invoke_and_log(
     user_message: str,
     turn_number: int = 0,
 ) -> dict[str, Any]:
+    # Injection guard runs in code, not in the prompt: a matched message never
+    # reaches the model, never enters the checkpoint, and costs zero tokens.
+    from rules import detect_prompt_injection, injection_reply
+
+    category = detect_prompt_injection(user_message)
+    if category:
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        logging.getLogger("agent.turn").warning(
+            "injection blocked category=%s surface=%s thread=%s",
+            category, surface, thread_id,
+        )
+        return {"messages": [HumanMessage(content=user_message),
+                             AIMessage(content=injection_reply())]}
+
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
     # NOTE: we deliberately do NOT set a tight recursion_limit for voice. A low
     # limit cuts the agent off MID-tool-call (AIMessage with tool_calls but no
@@ -809,6 +821,24 @@ def stream_and_log(
         Populates `result` (a StreamResult) and logs the turn on completion.
     """
     holder = result if result is not None else StreamResult()
+
+    # Same code-level injection guard as invoke_and_log: Streamlit streams, so
+    # without this the model would already be leaking before any post-check.
+    from rules import detect_prompt_injection, injection_reply
+
+    if detect_prompt_injection(user_message):
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        reply = injection_reply()
+        holder.text = reply
+        holder.messages = [HumanMessage(content=user_message),
+                           AIMessage(content=reply)]
+        logging.getLogger("agent.turn").warning(
+            "injection blocked (stream) surface=%s thread=%s", surface, thread_id
+        )
+        yield reply
+        return
+
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
     if surface == "voice":
         config["recursion_limit"] = 25

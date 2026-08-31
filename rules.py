@@ -13,6 +13,7 @@ and configurable settings. See PricingSettings in settings.py for thresholds.
 
 from __future__ import annotations
 
+import re
 from datetime import date as _date
 from datetime import timedelta
 from typing import Final
@@ -921,3 +922,51 @@ def total_spent(selections: list[Selection]) -> float:
 
 def compute_remaining_budget(budget: BudgetState, selections: list[Selection]) -> float:
     return round(max(0.0, budget.total - total_spent(selections)), 2)
+
+
+# =============================================================================
+# === PROMPT-INJECTION GUARD — checked in code BEFORE the model is invoked
+# =============================================================================
+# Prompt rules alone do not hold on this model (the client demonstrated four
+# working attacks), so the guard runs in code: a match never reaches the model.
+_INJECTION_PATTERNS: list[tuple[str, str]] = [
+    # Prompt / instruction extraction
+    (r"\b(system|hidden|internal|secret|original)\s+(prompt|instructions?|rules?|message)", "extraction"),
+    (r"\b(print|reveal|show|repeat|output|display|tell)\b.{0,60}\byour\b.{0,30}\b(instructions?|prompt|restrictions?|guidelines)\b", "extraction"),
+    (r"\b(exact|verbatim|word[- ]for[- ]word|full)\b.{0,50}\b(text|copy|wording)\b.{0,40}\b(instructions?|prompt|restrictions?|rules?)\b", "extraction"),
+    (r"\brules?\s+(were|was)\s+you\s+given\b", "extraction"),
+    (r"\bgiven\s+(to\s+you\s+)?by\s+(the\s+)?developer", "extraction"),
+    (r"\bwhat\s+does\s+your\s+(system\s+)?prompt\b", "extraction"),
+    (r"\byour\s+(instructions?|system\s+prompt)\b", "extraction"),
+    # Instruction override
+    (r"\b(ignore|disregard|forget|override)\b.{0,30}\b(previous|prior|above|all|your)\b.{0,20}\b(instructions?|rules?)\b", "override"),
+    (r"\bpretend\b.{0,50}\b(developer|authoriz|admin|permission)", "override"),
+    (r"\bdeveloper\s+(mode|has\s+authoriz)", "override"),
+    (r"\bjailbreak\b|\bDAN\s+mode\b", "override"),
+    (r"\byou\s+are\s+no\s+longer\b", "override"),
+    # Off-topic work the client saw it perform (a full Next.js app)
+    (r"\b(next\.?js|react(js)?|python|javascript|typescript|node\.?js|c\+\+|golang|rust|sql|html|css)\b.{0,60}\b(app|application|code|script|component|program|website)\b", "offtopic"),
+    (r"\b(write|build|create|generate|implement)\b.{0,40}\b(code|script|program|a\s+web\s*(site|app))\b", "offtopic"),
+    (r"\bprogramming\s+questions?\b", "offtopic"),
+]
+
+_INJECTION_REPLY = (
+    "I'm the Gujju Tours trip planner, so that's outside what I can help "
+    "with — but I'd love to get you to Dubai! Tell me your dates and how "
+    "many of you are travelling, and I'll pull up flights, hotels and tours."
+)
+
+
+def detect_prompt_injection(text: str) -> str | None:
+    """Category of injection attempt, or None for a normal travel message."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    for pattern, category in _INJECTION_PATTERNS:
+        if re.search(pattern, t, re.IGNORECASE):
+            return category
+    return None
+
+
+def injection_reply() -> str:
+    return _INJECTION_REPLY

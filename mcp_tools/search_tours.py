@@ -59,23 +59,11 @@ def _recommended_first(options: list) -> list:
 
 
 def _attach_transfer_prices(options: list, travel_date: str, adults: int) -> None:
-    """Fetch the REAL Sharing vs Private transfer price for each tour.
+    """Fetch real Sharing/Private transfer prices per tour (B2C option APIs).
 
-    The client's site shows "Sharing Transfers +Rs 1,790.03" and "Private
-    Transfers +Rs 11,548.61" for Dubai Desert Safari, while we said "same tour
-    price" -- because toursearchlistrate returns ONE flat rate per tour with no
-    transfer split. The split lives in the B2C option APIs:
-    /api/tours/options -> optionId, then /api/tours/optionRate ->
-    `initialTransferRates`, one entry per transfer type.
-
-    Verified against the client's screenshot (tour 30647, 24 Sep, 4 adults):
-    Sharing 68.2 AED -> Rs 1,789.08 (site 1,790.03), Private 440 AED ->
-    Rs 11,542.43 (site 11,548.61) -- the ~0.05% is live ROE drift.
-
-    Two calls per tour, so this runs concurrently and best-effort: a tour whose
-    lookup fails keeps the flat `sharing_display` rather than failing the search.
-    A tour with no pickup returns an empty list -- that is "Without Transfer",
-    not an error.
+    toursearchlistrate has one flat rate; the split lives in /api/tours/options
+    + /api/tours/optionRate -> initialTransferRates. Concurrent, best-effort:
+    a failed lookup keeps the flat display; empty list = no pickup, not an error.
     """
     import concurrent.futures as _cf
 
@@ -105,7 +93,15 @@ def _attach_transfer_prices(options: list, travel_date: str, adults: int) -> Non
             priced: list[dict[str, Any]] = []
             for t in tiers:
                 raw_rate = t.get("startingFromRate")
-                if raw_rate in (None, 0):
+                if raw_rate is None:
+                    continue
+                # Rs 0 is real data (tier included in the ticket), not absence.
+                if float(raw_rate) == 0:
+                    priced.append({
+                        "transfer_type": t.get("transferTypeName") or "",
+                        "price_inr": 0,
+                        "price_display": "Included (₹0)",
+                    })
                     continue
                 inr, _cur = convert_supplier_price(
                     raw_rate, fare_currency=t.get("currencyCode") or "AED"
@@ -387,6 +383,14 @@ def _impl(
                     f"{len(options)} rows out. Trimming to a 'nice' few makes us "
                     f"look like we hold less inventory than we do (the customer "
                     f"saw 13 desert safaris on the website and 5 in chat). "
+                    "TOUR transfer prices come ONLY from `transfer_prices` on the "
+                    "row ('Included (₹0)' means it costs nothing extra). When "
+                    "asked about a tour's transfers, list EVERY entry in "
+                    "`transfer_prices` — all tiers including the ₹0 ones, and "
+                    "name the exact tour the row belongs to. Never explain a "
+                    "tour's shared/private price by hotel distance — that is how "
+                    "AIRPORT transfers work, not tours. If a row has no "
+                    "transfer_prices, say the split needs confirming. "
                     "Do NOT quote counts or totals to the customer — no '85 tours', "
                     "no 'showing 1-10 of 270'. Just present the tours. "
                     "If `next_offset` is present there are MORE beyond this "
