@@ -75,7 +75,11 @@ _AMENITY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "Sauna": ("sauna", "steam room"),
     "Free WiFi": ("complimentary wireless", "free wifi", "free wi-fi", "complimentary wi-fi"),
     "Restaurant": ("restaurant", "all day dining", "dining establishment"),
-    "Bar": ("bar/lounge", " bar,", "cocktail"),
+    # Plural "2 bars/lounges" is the supplier's usual phrasing and matched none
+    # of the old keys, so a bar-filtered search listed hotels with no Bar shown.
+    # Keys stay specific: bare "bar" would hit barber/barbecue.
+    "Bar": ("bar/lounge", "bars/lounge", " bar,", " bars ", " bar ", "cocktail",
+            "lounge", "pool bar", "rooftop bar"),
     "Breakfast available": ("breakfast",),
     "Room service": ("room service",),
     "Airport shuttle": ("airport shuttle", "airport transportation"),
@@ -85,6 +89,40 @@ _AMENITY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "Family friendly": ("babysitting", "children's", "kids club"),
     "Beach access": ("private beach", "beach access"),
 }
+
+
+def _match_amenities(wanted: list[str], description: str) -> list[str]:
+    """Which requested amenities the description really mentions.
+
+    Word-boundary matched: plain substring search made "bar" hit "minibars"
+    (an in-room fridge), so a bar-filtered search returned hotels without one.
+    Where the amenity is a known label we reuse its keyword list, which also
+    catches phrasings like "2 bars/lounges".
+    """
+    import re as _re
+
+    text = (description or "").lower()
+    if not text:
+        return []
+    by_label = {k.lower(): v for k, v in _AMENITY_KEYWORDS.items()}
+    out: list[str] = []
+    for w in wanted:
+        # A key written with trailing space in _AMENITY_KEYWORDS (" bar ") is a
+        # WHOLE WORD and gets both boundaries, so it cannot match minibar,
+        # barber or barbecue. Any other key is a prefix ("fitness cent") and
+        # gets a left boundary only. Plain substring search returned bar-less
+        # hotels; a bare word boundary matched barber.
+        raw_keys = [k for k in (by_label.get(w) or ()) if k.strip()]
+        hit = False
+        for k in [*raw_keys, f" {w} "]:
+            p = _re.escape(k.strip())
+            pattern = rf"\b{p}s?\b" if k.endswith(" ") else rf"\b{p}"
+            if _re.search(pattern, text):
+                hit = True
+                break
+        if hit:
+            out.append(w)
+    return out
 
 
 def _extract_amenities(description: str) -> list[str]:
@@ -767,6 +805,7 @@ def _impl(
         # (pool/bar/spa/...), fetch the REAL supplier descriptions for these
         # exact hotels and flag which requested amenities each one actually has.
         # This is the source of truth — the agent must not guess amenities.
+        amenity_note = ""
         if amenities:
             wanted = [a.strip().lower() for a in amenities if a and a.strip()]
             ids = [int(o["hotel_id"]) for o in option_dicts if str(o.get("hotel_id", "")).isdigit()]
@@ -774,10 +813,23 @@ def _impl(
             for o in option_dicts:
                 text = desc_by_id.get(str(o.get("hotel_id")), "")
                 o["amenities_text"] = text
-                low = text.lower()
-                o["amenities_matched"] = [w for w in wanted if w in low]
-            # Sort hotels that match ALL requested amenities to the top.
-            option_dicts.sort(key=lambda o: -len(o.get("amenities_matched", [])))
+                o["amenities_matched"] = _match_amenities(wanted, text)
+            # Only hotels that actually have every requested amenity. Sorting
+            # them to the top was not enough: a bar-filtered search still
+            # listed hotels with no bar, and the customer could not tell which
+            # rows genuinely matched.
+            strict = [o for o in option_dicts
+                      if len(o.get("amenities_matched", [])) == len(wanted)]
+            if strict:
+                option_dicts = strict
+            else:
+                option_dicts.sort(key=lambda o: -len(o.get("amenities_matched", [])))
+                amenity_note = (
+                    "No hotel on these dates lists every requested amenity "
+                    f"({', '.join(wanted)}). Showing the closest matches — say "
+                    "which amenities each one actually has, from "
+                    "`amenities_matched`, and do not claim the rest."
+                )
 
         # Amenities / dining / a short description for every hotel on the page.
         # One batched call, best-effort — see _enrich_with_content.
@@ -791,6 +843,7 @@ def _impl(
             "room_count": room_count,
             "total_results": len(options),
             **({"note": note} if note else {}),
+            **({"amenity_note": amenity_note} if amenity_note else {}),
             "pricing_note": (
                 f"price_inr is the TOTAL for all {room_count} room(s) across the "
                 f"whole {nights}-night stay — not per person and not per room. "

@@ -161,11 +161,23 @@ class ParallelToolNode(ToolNode):
         tool_call_id = tool_call.get("id", "")
         t = tools_by_name.get(tool_name)
         if t is None:
-            return ToolMessage(
-                content=f"Tool '{tool_name}' not found.",
-                tool_call_id=tool_call_id,
-                name=tool_name,
-            )
+            # The model sometimes emits a whole call as the NAME, e.g.
+            # `get_tour_options(tour_id:28488,...)<tool_call|>`. Recover the
+            # real tool rather than burning a round-trip on "not found".
+            base = re.split(r"[(\{<\s]", tool_name, 1)[0].strip()
+            t = tools_by_name.get(base)
+            if t is None:
+                return ToolMessage(
+                    content=(
+                        f"Tool '{tool_name}' not found. Call it as a proper tool "
+                        "with JSON arguments, not as text."
+                    ),
+                    tool_call_id=tool_call_id,
+                    name=tool_name,
+                )
+            logger_ = logging.getLogger("agent.turn")
+            logger_.warning("recovered malformed tool name %r -> %r", tool_name, base)
+            tool_name = base
         try:
             if asyncio.iscoroutinefunction(getattr(t, "ainvoke", None)):
                 result = await t.ainvoke(tool_args)
@@ -997,9 +1009,14 @@ _TOOL_NAMES_RE = re.compile(
     r"\b(search_flights|search_hotels|search_tours|search_restaurants|get_visa_info|"
     r"list_packages|get_exchange_rate|resolve_party_tool|check_floor_tool|"
     r"search_airport_transfer_dubai|enumerate_package_details|generate_itinerary_pdf"
-    r"|[a-z_]+_tool)\s*\{",
+    r"|get_tour_options|get_tour_timeslots|get_tour_details"
+    # Both call shapes leak: name{...} and name(arg:value). A live run emitted
+    # `get_tour_options(tour_id:28488,travel_date:<|"|>...)<tool_call|>`.
+    r"|[a-z_]+_tool)\s*[\{\(]",
     re.IGNORECASE,
 )
+# Chat-template control markers some models emit as plain text.
+_TOOL_MARKER_RE = re.compile(r"<\|?tool_call\|?>|<\|\"\|>|<\|im_(start|end)\|>")
 
 
 def _looks_like_tool_scaffolding(token: str) -> bool:
@@ -1007,7 +1024,8 @@ def _looks_like_tool_scaffolding(token: str) -> bool:
     t = token.strip()
     if not t:
         return False
-    return bool(_TOOL_NAMES_RE.search(t)) or t.startswith("//")
+    return (bool(_TOOL_NAMES_RE.search(t)) or bool(_TOOL_MARKER_RE.search(t))
+            or t.startswith("//"))
 
 
 def _token_text(msg_chunk: Any) -> str:

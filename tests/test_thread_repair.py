@@ -119,3 +119,39 @@ class TestEndTimesAreBackfilled:
         if not item.get("end"):
             item["end"] = ends[("dubai frame", "09:45")]
         assert item["end"] == "10:30"
+
+
+class TestMalformedToolNameRecovery:
+    """A live run showed the model emitting a whole call as the tool NAME:
+    `get_tour_options(tour_id:28488,travel_date:<|"|>...)<tool_call|>`. That
+    resolved to "tool not found" and burned a round-trip."""
+
+    def _base(self, name: str) -> str:
+        import re
+        return re.split(r"[(\{<\s]", name, 1)[0].strip()
+
+    def test_call_syntax_in_name_resolves_to_the_tool(self):
+        assert self._base(
+            'get_tour_options(tour_id:28488,travel_date:<|"|>2026-10-30<|"|>)<tool_call|>'
+        ) == "get_tour_options"
+
+    def test_brace_syntax_resolves(self):
+        assert self._base('search_hotels{"destination_city": "Dubai"}') == "search_hotels"
+
+    def test_clean_names_are_untouched(self):
+        for n in ("get_tour_options", "plan_itinerary_tool", "search_flights"):
+            assert self._base(n) == n
+
+    def test_scaffolding_filter_catches_both_shapes(self):
+        from agent import _looks_like_tool_scaffolding as leak
+
+        assert leak("get_tour_options(tour_id:28488)")
+        assert leak('search_hotels{"a":1}')
+        assert leak("<|tool_call|>")
+        assert not leak("Here are the Burj Khalifa options:")
+        assert not leak("| Level 124 | Rs 1,783 |")
+
+    def test_normalize_strips_control_markers(self):
+        from rules import normalize_reply
+
+        assert "<|tool_call|>" not in normalize_reply("Options <|tool_call|> here")

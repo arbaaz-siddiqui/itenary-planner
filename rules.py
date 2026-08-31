@@ -979,4 +979,6 @@ def normalize_reply(text: str) -> str:
     if not text:
         return text
     text = text.replace("$\\rightarrow$", "→").replace("\\rightarrow", "→")
-    return re.sub(r"[~≈]\s*(₹|Rs\.?\s)", r"\1", text)
+    # Chat-template control markers the model sometimes emits as plain text.
+    text = re.sub(r"<\|?tool_call\|?>|<\|\"\|>|<\|im_(?:start|end)\|>", "", text)
+    return re.sub(r"[~≈]\s*(₹|Rs\.?\s)", r"\1", text).strip()

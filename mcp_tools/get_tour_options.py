@@ -154,6 +154,18 @@ def _impl(
     options.sort(key=lambda r: (r.get("price_inr") is None, r.get("price_inr") or 0))
 
     priced = sum(1 for o in options if o.get("price_inr"))
+    # Some tours price every variant identically (Burj: 14 x Rs 1,783). Say so,
+    # so the reply can lead with the one price instead of repeating it 14 times
+    # — a wall of identical rows is what the model started trimming.
+    distinct = {o.get("price_inr") for o in options if o.get("price_inr")}
+    same_price_note = ""
+    if len(distinct) == 1 and priced == len(options) and len(options) > 3:
+        only = next(iter(distinct))
+        same_price_note = (
+            f" All {len(options)} variants are the same price (₹{only:,.0f}), so "
+            "state that once and list the variant names — do not repeat the "
+            "price on every row."
+        )
     return {
         "tour_id": int(tour_id),
         "options": options,
@@ -170,6 +182,7 @@ def _impl(
             "or per VEHICLE — say which, because a per-vehicle price is for the "
             "whole group. For a variant with `has_timeslots`, call "
             "get_tour_timeslots with its option_id for real start times."
+            + same_price_note
             + ("" if priced else " NOTE: the supplier returned no prices for any "
                "variant on this date — list them by name and say pricing is "
                "confirmed on request.")
