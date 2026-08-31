@@ -697,7 +697,57 @@ def invoke_and_log(
         latency_seconds=latency,
         turn_number=turn_number,
     )
+    response = _recover_empty_turn(agent, response, config,
+                                   surface=surface, thread_id=thread_id)
     _guard_empty_turn(response, surface=surface, thread_id=thread_id)
+    return response
+
+
+def _turn_is_dead(response: dict[str, Any]) -> bool:
+    """No assistant text AND no tool calls — the model emitted nothing."""
+    msgs = (response or {}).get("messages") or []
+    for m in reversed(msgs):
+        c = getattr(m, "content", None)
+        if isinstance(c, str) and c.strip() and m.__class__.__name__ == "AIMessage":
+            return False
+    return not (extract_tool_calls(response) or [])
+
+
+def _has_prose(response: dict[str, Any]) -> bool:
+    for m in reversed((response or {}).get("messages") or []):
+        c = getattr(m, "content", None)
+        if (isinstance(c, str) and c.strip() and m.__class__.__name__ == "AIMessage"
+                and not getattr(m, "tool_calls", None) and not is_internal_marker(c)):
+            return True
+    return False
+
+
+_WRITE_UP_MARKER = (
+    "[system] The search results ARE in this conversation but no reply was "
+    "written. Write the customer's reply now from those results — do not "
+    "re-search, and quote only figures the results contain."
+)
+
+
+def _recover_empty_turn(agent: Any, response: dict[str, Any], config: dict[str, Any],
+                        *, surface: str, thread_id: str) -> dict[str, Any]:
+    """Retry up to twice when the model emitted no usable reply.
+
+    Certain phrasings ("2 adults 2 kids ages 6 and 9...") reproducibly make the
+    model return an empty completion; a nudge recovers it. Stage 1 nudges it to
+    search, stage 2 to write up results it already has.
+    """
+    log = logging.getLogger("agent.turn")
+    for _ in range(2):
+        if _has_prose(response):
+            return response
+        nudge = _NO_DATA_MARKER if _turn_is_dead(response) else _WRITE_UP_MARKER
+        log.warning("empty turn — nudge retry surface=%s thread=%s", surface, thread_id)
+        try:
+            retry = agent.invoke({"messages": [{"role": "user", "content": nudge}]}, config)
+        except Exception:  # noqa: BLE001 — keep what we have on retry failure
+            return response
+        response = retry
     return response
 
 
@@ -903,6 +953,30 @@ def stream_and_log(
                 yield from _process_chunk(mode, chunk)
         else:
             raise
+
+    # Same empty-turn recovery as invoke_and_log — some phrasings make the
+    # model emit nothing; retry once with a nudge instead of an empty bubble.
+    if _turn_is_dead(holder.response):
+        logging.getLogger("agent.turn").warning(
+            "empty turn (stream) — retrying once thread=%s", thread_id
+        )
+        try:
+            retry = agent.invoke(
+                {"messages": [{"role": "user", "content": _NO_DATA_MARKER}]}, config
+            )
+            if not _turn_is_dead(retry):
+                holder.messages = list(retry.get("messages") or [])
+                for m in reversed(holder.messages):
+                    c = getattr(m, "content", None)
+                    if (isinstance(c, str) and c.strip()
+                            and m.__class__.__name__ == "AIMessage"
+                            and not getattr(m, "tool_calls", None)
+                            and not is_internal_marker(c)):
+                        holder.text = c
+                        yield c
+                        break
+        except Exception:  # noqa: BLE001 — the surface fallback handles it
+            pass
 
     holder.latency_seconds = time.perf_counter() - start
     log_turn(

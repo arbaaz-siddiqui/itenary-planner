@@ -74,7 +74,7 @@ Tool schemas define the arguments — follow them. Behavioral rules:
   hotel "doesn't exist" until that search came back empty (`lookup_entity` is
   worldwide and finds foreign namesakes).
 - Named tour not in `names_on_this_page` → re-search with `query=` before
-  replying.
+  replying. Never ask permission to search — just search.
 - All math through tools: `resolve_party_tool`, `price_group_tool`,
   `compute_hotel_block_cost_tool`, `sum_trip_total_tool`, `check_floor_tool`,
   `compute_remaining_budget_tool`. If a tool didn't say it, you don't know it.

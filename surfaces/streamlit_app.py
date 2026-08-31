@@ -1228,6 +1228,8 @@ def _process_message(user_message: str, *, display_as: str | None = None) -> Non
         from agent import is_internal_marker
         if is_internal_marker(assistant_text):
             assistant_text = ""
+        from rules import normalize_reply
+        assistant_text = normalize_reply(assistant_text)
         if not assistant_text.strip():
             calls = extract_tool_calls(result.response) or []
             tool_names = [tc.get("tool_name", "") for tc in calls]

@@ -102,6 +102,11 @@ def check_floor_tool(
     gap = round(budget_inr - floor, 2)  # signed: positive = headroom, negative = over budget
     is_over = gap < 0
     return {
+        "agent_instructions": (
+            "Quote floor_display and headroom/over_by EXACTLY — never write "
+            "'approximately', 'about' or '~' before them. They are computed "
+            "figures, not estimates."
+        ),
         "budget_inr": round(budget_inr, 2),
         "budget_scope": budget_scope,
         "floor_inr": floor,

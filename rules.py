@@ -970,3 +970,13 @@ def detect_prompt_injection(text: str) -> str | None:
 
 def injection_reply() -> str:
     return _INJECTION_REPLY
+
+
+def normalize_reply(text: str) -> str:
+    """Deterministic cleanup of model output the prompt cannot fully prevent:
+    LaTeX arrows leak as raw text off-web, and "~" before an exact figure
+    violates the no-approximation rule."""
+    if not text:
+        return text
+    text = text.replace("$\\rightarrow$", "→").replace("\\rightarrow", "→")
+    return re.sub(r"[~≈]\s*(₹|Rs\.?\s)", r"\1", text)

@@ -90,6 +90,10 @@ def _attach_transfer_prices(options: list, travel_date: str, adults: int) -> Non
             if not rows:
                 return
             tiers = rows[0].get("initialTransferRates") or []
+            # All-zero tiers = rates not loaded for this date (their own
+            # calendar returns no rows), NOT "included" — attach nothing.
+            if not any(float(t.get("startingFromRate") or 0) > 0 for t in tiers):
+                return
             priced: list[dict[str, Any]] = []
             for t in tiers:
                 raw_rate = t.get("startingFromRate")
@@ -120,8 +124,14 @@ def _attach_transfer_prices(options: list, travel_date: str, adults: int) -> Non
         except Exception as e:  # noqa: BLE001 — best-effort enrichment
             logger.debug("transfer price lookup failed for %s: %s", o.tour_id, e)
 
-    with _cf.ThreadPoolExecutor(max_workers=12) as ex:
-        list(ex.map(_one, options))
+    # Hard deadline, like _attach_timeslots: a slow supplier must never stall
+    # the search — tours past the deadline just keep the flat display.
+    ex = _cf.ThreadPoolExecutor(max_workers=min(12, len(options)))
+    try:
+        futures = [ex.submit(_one, o) for o in options]
+        _cf.wait(futures, timeout=10)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
 
 
 def _attach_timeslots(options: list, travel_date: str, adults: int) -> None:

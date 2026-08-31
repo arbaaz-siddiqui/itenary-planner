@@ -179,7 +179,8 @@ async def receive(
             thread_id=thread_id,
             user_message=Body,
         )
-        formatted = format_for_whatsapp(extract_assistant_text(response))
+        from rules import normalize_reply
+        formatted = format_for_whatsapp(normalize_reply(extract_assistant_text(response)))
 
         # If the agent generated an itinerary PDF this turn, attach it as media.
         media_url = None

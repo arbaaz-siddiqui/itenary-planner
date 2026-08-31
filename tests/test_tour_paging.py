@@ -264,9 +264,12 @@ class TestNeverInventATransferPrice:
         base.update(kw)
         return TourOption(**base)
 
-    def test_sharing_display_states_price_is_the_same(self) -> None:
+    def test_sharing_display_without_prices_defers_to_booking(self) -> None:
+        # "same tour price" was factually wrong (Burj private costs Rs 5,053
+        # extra); without real transfer_prices we defer, never claim parity.
         out = self._tour(transfer_scenario="All Transfer").sharing_display
-        assert "same tour price" in out.lower()
+        assert "confirmed at booking" in out.lower()
+        assert "same tour price" not in out.lower()
 
     def test_sharing_display_quotes_no_number(self) -> None:
         """No digits — a number here would read as a private-vehicle quote."""
