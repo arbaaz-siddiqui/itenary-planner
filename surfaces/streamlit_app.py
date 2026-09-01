@@ -496,6 +496,8 @@ _API_BACKED_TOOLS = {
     "search_flights",
     "search_hotels",
     "search_tours",
+    "get_tour_options",
+    "get_tour_timeslots",
     "search_airport_transfer_dubai",  # registered name; "search_transfers" never existed
     "search_restaurants",
     "get_visa_info",
@@ -512,6 +514,44 @@ _API_BACKED_TOOLS = {
     "get_hotel_reviews",
     "get_exchange_rate",
 }
+
+
+# URL fragments each tool's HTTP requests contain. Used to attribute every
+# request to the tool that made it — one tool can fire many (search_tours does
+# toursearchlist + rates + one Timeslot per tour + options + optionRate).
+_TOOL_URL_MARKERS: dict[str, tuple[str, ...]] = {
+    "search_flights": ("/api/Flight/search",),
+    "get_flight_details": ("/api/Flight/getflightdetails",),
+    "search_hotels": (
+        "/Availabilitywithcancellation", "/GetCitiesWithHotel", "/GetStaticDataByCity",
+        "/GetPropertyDescriptions", "/gethotelstaticdatalistsuboptimize",
+    ),
+    "get_hotel_info": ("/GetHotelStaticDataOptimize", "/gethotelstaticdatalistsuboptimize"),
+    "get_hotel_description": ("/GetPropertyDescriptions",),
+    "get_hotel_reviews": ("/GetHotelGuestReview",),
+    "lookup_hotel_city": ("/GetCitiesWithHotel",),
+    "list_city_hotels": ("/GetStaticDataByCity",),
+    "search_tours": (
+        "/toursearchlist", "/toursearchlistrate", "/TourSearch/Timeslot",
+        "/api/tours/options", "/api/tours/optionRate",
+    ),
+    "get_tour_options": ("/api/tours/options", "/api/tours/optionRate"),
+    "get_tour_timeslots": ("/TourSearch/Timeslot",),
+    "get_tour_details": ("/TourSearch/Tourdetails",),
+    "search_airport_transfer_dubai": ("/TransferList",),
+    "get_transfer_details": ("/TransferDetail",),
+    "search_restaurants": ("/api/restaurant/v1/restaurants",),
+    "get_restaurant_details": ("/api/restaurant/v1/restaurants/",),
+    "get_visa_info": ("/api/visa/v1/visas",),
+    "list_packages": ("/staticpackage/packagelist", "/staticpackage/packagerate"),
+    "get_package_details": ("/staticpackage/packagestaticdata",),
+    "get_exchange_rate": ("/api/Currency/ROE",),
+}
+
+
+def _http_belongs_to(tool_name: str, url: str) -> bool:
+    """True if this HTTP request was made by `tool_name`."""
+    return any(m in url for m in _TOOL_URL_MARKERS.get(tool_name, ()))
 
 
 def _call_status(call: dict[str, Any]) -> tuple[str, str]:
@@ -546,6 +586,24 @@ def _status_code_emoji(status_code: int | None, error: str | None) -> str:
     return "🟡"
 
 
+def _raw_payload_downloads(http_rec: dict[str, Any], *, key: str) -> None:
+    """Copy/download the exact JSON sent and received, for pasting into Postman."""
+    for label, body, tag in (
+        ("request", http_rec.get("request_body"), "req"),
+        ("response", http_rec.get("response_body"), "resp"),
+    ):
+        if body in (None, ""):
+            continue
+        raw = json.dumps(body, indent=2, ensure_ascii=False, default=str)
+        with st.popover(f"📋 raw {label} JSON ({len(raw) / 1024:.1f} KB)",
+                        use_container_width=True):
+            st.code(raw, language="json")
+        st.download_button(
+            f"⬇️ {label}.json", data=raw, file_name=f"{tag}_{key}.json",
+            mime="application/json", use_container_width=True, key=f"dl_{tag}_{key}",
+        )
+
+
 def _render_call_record(call: dict[str, Any], idx: int) -> None:
     """Render one tool call: name, status, the actual API URL, inputs, output."""
     emoji, label = _call_status(call)
@@ -554,15 +612,32 @@ def _render_call_record(call: dict[str, Any], idx: int) -> None:
     with st.expander(f"{emoji} `{name}` · {label}", expanded=False):
         st.caption(f"{api_badge} · turn {call.get('turn', '?')}")
 
-        # The actual HTTP endpoint that was hit — the ground truth for "which API".
-        http = call.get("http")
-        if http:
-            sc = http.get("status_code")
-            sc_emoji = _status_code_emoji(sc, http.get("error"))
-            st.markdown("**Actual API call:**")
-            st.code(f"{http.get('method', '?')} {http.get('url', '?')}", language="http")
-            status_txt = http.get("error") or (f"HTTP {sc}" if sc is not None else "no status")
-            st.caption(f"{sc_emoji} {status_txt} · {http.get('duration_ms', '?')} ms")
+        # Every HTTP request this tool made, with the exact payload sent and
+        # the exact response received — the ground truth for any price dispute.
+        https = call.get("http_all") or ([call["http"]] if call.get("http") else [])
+        if https:
+            st.markdown(f"**Actual API calls ({len(https)}):**")
+            for j, h in enumerate(https, 1):
+                sc = h.get("status_code")
+                sc_emoji = _status_code_emoji(sc, h.get("error"))
+                status_txt = h.get("error") or (f"HTTP {sc}" if sc is not None else "no status")
+                st.code(f"{h.get('method', '?')} {h.get('url', '?')}", language="http")
+                st.caption(f"{sc_emoji} {status_txt} · {h.get('duration_ms', '?')} ms")
+                req, resp = h.get("request_body"), h.get("response_body")
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.caption("→ request body sent")
+                    if req in (None, ""):
+                        st.caption("_(none — GET)_")
+                    else:
+                        st.json(req, expanded=False)
+                with c2:
+                    st.caption("← response body received")
+                    if resp in (None, ""):
+                        st.caption("_(empty)_")
+                    else:
+                        st.json(resp, expanded=False)
+                _raw_payload_downloads(h, key=f"{call.get('turn', 0)}_{idx}_{j}")
         elif name in _API_BACKED_TOOLS:
             st.warning(
                 "No HTTP request was recorded for this API-backed tool — it may "
@@ -736,15 +811,33 @@ def _render_debug_inspector() -> None:
         [h for h in http_calls if h.get("turn") == current_turn] if current_only else http_calls
     )
     if visible_http:
-        st.markdown("**🌐 Raw HTTP requests (actual endpoints called):**")
-        for h in reversed(visible_http):
+        st.markdown(
+            f"**🌐 Raw HTTP requests ({len(visible_http)}) — every supplier call, "
+            "with the exact payload sent and received:**"
+        )
+        for n, h in enumerate(reversed(visible_http), 1):
             sc = h.get("status_code")
-            st.code(f"{h.get('method', '?')} {h.get('url', '?')}", language="http")
-            st.caption(
+            head = (
                 f"{_status_code_emoji(sc, h.get('error'))} "
-                f"{h.get('error') or ('HTTP ' + str(sc) if sc is not None else 'no status')} · "
+                f"{h.get('method', '?')} {str(h.get('url', '?')).split('/api', 1)[-1][:56]} · "
                 f"{h.get('duration_ms', '?')} ms · turn {h.get('turn', '?')}"
             )
+            with st.expander(head, expanded=False):
+                st.code(f"{h.get('method', '?')} {h.get('url', '?')}", language="http")
+                st.caption(
+                    h.get("error")
+                    or (f"HTTP {sc}" if sc is not None else "no status")
+                )
+                d1, d2 = st.columns(2)
+                with d1:
+                    st.caption("→ request body sent")
+                    req = h.get("request_body")
+                    st.json(req, expanded=False) if req not in (None, "") else st.caption("_(none — GET)_")
+                with d2:
+                    st.caption("← response body received")
+                    resp = h.get("response_body")
+                    st.json(resp, expanded=False) if resp not in (None, "") else st.caption("_(empty)_")
+                _raw_payload_downloads(h, key=f"raw_{h.get('turn', 0)}_{n}")
 
 
 # =============================================================================
@@ -1349,16 +1442,23 @@ def _process_message(user_message: str, *, display_as: str | None = None) -> Non
 def _record_debug_calls(
     turn: int, tool_calls: list[dict[str, Any]], http_for_turn: list[dict[str, Any]]
 ) -> None:
-    """Store one rich debug record per tool call, attaching the real HTTP request(s).
+    """Store one rich debug record per tool call with ALL its HTTP requests.
 
-    Tool calls and HTTP requests fire in the same order within a turn, so we
-    match API-backed tools to the turn's HTTP records positionally. Local
-    (compute-only) tools get no HTTP record — which is itself useful signal.
+    Matching is by URL path, not position: one tool can fire many requests
+    (search_tours does toursearchlist + rates + a Timeslot call per tour +
+    options + optionRate), so taking one record positionally both hid ~19 calls
+    and shifted every later tool onto the wrong URL.
     """
-    http_iter = iter(http_for_turn)
+    claimed: set[int] = set()
     for tc in tool_calls:
         name = tc.get("tool_name", "?")
-        http_rec = next(http_iter, None) if name in _API_BACKED_TOOLS else None
+        matches: list[dict[str, Any]] = []
+        for i, rec in enumerate(http_for_turn):
+            if i in claimed:
+                continue
+            if _http_belongs_to(name, str(rec.get("url") or "")):
+                matches.append(rec)
+                claimed.add(i)
         st.session_state.debug_calls.append(
             {
                 "turn": turn,
@@ -1366,7 +1466,22 @@ def _record_debug_calls(
                 "input": tc.get("input") or {},
                 "output": _coerce_output(tc.get("output")),
                 "summary": _summarize_tc(tc),
-                "http": http_rec,
+                "http": matches[0] if matches else None,
+                "http_all": matches,
+            }
+        )
+    # Anything unclaimed still happened — show it rather than silently dropping.
+    orphans = [r for i, r in enumerate(http_for_turn) if i not in claimed]
+    if orphans:
+        st.session_state.debug_calls.append(
+            {
+                "turn": turn,
+                "tool_name": "(other API calls this turn)",
+                "input": {},
+                "output": None,
+                "summary": f"{len(orphans)} request(s) not tied to one tool",
+                "http": orphans[0],
+                "http_all": orphans,
             }
         )
 
