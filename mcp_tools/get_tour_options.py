@@ -112,19 +112,43 @@ def _impl(
             "supplier": str(option.get("supplierName") or ""),
             "has_timeslots": bool(option.get("isTimeslot")),
             "pax_limits": _pax_limits(option),
+            # Add-ons are extras bought ON TOP of a main variant, not a tour
+            # you book alone. The supplier flags them only in the name.
+            "is_addon": "add-on" in str(option.get("optionName") or "").lower(),
+            # Who CANNOT book this variant (drinks packages exclude Child and
+            # Infant) and which transfer tiers are barred for it.
+            "not_available_for": [
+                str(r.get("name") or "") for r in option.get("restrictedRateType") or []
+                if r.get("name")
+            ],
+            "transfer_not_available": [
+                str(r.get("transferTypeName") or r.get("name") or "")
+                for r in option.get("tourRestrictedTransferType") or []
+            ],
         }
-        try:
-            rate_raw = call_tour_option_rate(
-                tour_id=int(tour_id),
-                option_id=option.get("optionId"),
-                supplier_id=int(option.get("supplierId") or 0),
-                travel_date=travel_date,
-                adults=max(1, int(adults or 1)),
-            )
-            rows = (rate_raw or {}).get("result") or []
-        except Exception as e:  # noqa: BLE001 — a variant without a rate still lists
-            logger.debug("option rate failed for %s: %s", option.get("optionId"), e)
-            rows = []
+        # The rate call is keyed on transferId. A variant only answers on the
+        # tiers it supports: add-ons ("2 Drinks Package") are Without-Transfers
+        # only, so a hardcoded transferId=1 got result:null and the variant read
+        # "On request" while the website priced it. Try the variant's own tiers
+        # first, then the standard three.
+        own = [v.get("transferTypeId") for v in option.get("validateTourOption") or []]
+        rows: list[dict[str, Any]] = []
+        for tid in [*dict.fromkeys(t for t in own if t), 1, 3, 2]:
+            try:
+                rate_raw = call_tour_option_rate(
+                    tour_id=int(tour_id),
+                    option_id=option.get("optionId"),
+                    supplier_id=int(option.get("supplierId") or 0),
+                    travel_date=travel_date,
+                    adults=max(1, int(adults or 1)),
+                    transfer_id=int(tid),
+                )
+                rows = (rate_raw or {}).get("result") or []
+            except Exception as e:  # noqa: BLE001 — a variant without a rate still lists
+                logger.debug("option rate failed for %s: %s", option.get("optionId"), e)
+                rows = []
+            if rows and rows[0].get("rate"):
+                break
         if rows:
             rate = rows[0].get("rate")
             if rate:
@@ -133,7 +157,16 @@ def _impl(
                 )
                 row["price_inr"] = inr
                 row["price_display"] = f"₹{inr:,.0f}"
-            tiers = _tier_rows(rows[0])
+            # `initialTransferRates` lists the TOUR's tiers, not this variant's.
+            # An add-on supports only the tiers in its own validateTourOption,
+            # so showing "Private Transfers ₹11,542" on a drinks package is
+            # wrong — that is the main tour's transfer, not the add-on's.
+            allowed = {v.get("transferTypeName") for v in
+                       option.get("validateTourOption") or [] if v.get("transferTypeName")}
+            tiers = [] if row["is_addon"] else [
+                t for t in _tier_rows(rows[0])
+                if not allowed or t["transfer_type"] in allowed
+            ]
             if tiers:
                 row["transfer_prices"] = tiers
                 row["transfer_price_display"] = " · ".join(
@@ -181,7 +214,17 @@ def _impl(
             "`pax_limits` gives min/max pax and whether the rate is per PERSON "
             "or per VEHICLE — say which, because a per-vehicle price is for the "
             "whole group. For a variant with `has_timeslots`, call "
-            "get_tour_timeslots with its option_id for real start times."
+            "get_tour_timeslots with its option_id for real start times. "
+            "Rows marked `is_addon` are EXTRAS bought on top of a main variant "
+            "(drinks package, private majlis), never booked alone — list them "
+            "under the main options and ASK whether they want any add-ons, with "
+            "each add-on's own price. The Notes column carries the booking "
+            "rules: an add-on needs a main option chosen first, "
+            "`not_available_for` lists pax types that CANNOT take that variant "
+            "(e.g. a drinks package excludes Child and Infant), and "
+            "`transfer_not_available` lists transfer tiers barred for it. "
+            "Relay those constraints — do not offer a variant to a party it "
+            "excludes."
             + same_price_note
             + ("" if priced else " NOTE: the supplier returned no prices for any "
                "variant on this date — list them by name and say pricing is "
@@ -190,15 +233,28 @@ def _impl(
     }
 
 
+def _notes_cell(o: dict[str, Any]) -> str:
+    """Booking constraints: add-on status, who cannot book, barred transfers."""
+    bits: list[str] = []
+    if o.get("is_addon"):
+        bits.append("add-on — needs a main option")
+    if o.get("not_available_for"):
+        bits.append("not for " + "/".join(o["not_available_for"]))
+    if o.get("transfer_not_available"):
+        bits.append("no " + "/".join(o["transfer_not_available"]))
+    return "; ".join(bits) or "-"
+
+
 def _options_table(options: list[dict[str, Any]]) -> str:
     """One markdown row per variant — built here so no row can be dropped."""
     head = (
-        "| Option | Price | Transfer | Pax | Timeslots |"
+        "| Option | Price | Transfer | Pax | Timeslots | Notes |"
         + chr(10)
-        + "|---|---|---|---|---|"
+        + "|---|---|---|---|---|---|"
     )
     rows = []
-    for o in options:
+    # Main variants first, add-ons after — an add-on is bought on top of one.
+    for o in sorted(options, key=lambda r: bool(r.get("is_addon"))):
         limits = o.get("pax_limits") or {}
         pax_bits = []
         for name, lim in limits.items():
@@ -208,11 +264,12 @@ def _options_table(options: list[dict[str, Any]]) -> str:
             basis = f" per {raw.lower()}" if raw in {"PERSON", "VEHICLE"} else ""
             pax_bits.append(f"{name}: {lim.get('min_pax')}-{lim.get('max_pax')}{basis}")
         cells = [
-            str(o.get("name") or ""),
+            ("(add-on) " if o.get("is_addon") else "") + str(o.get("name") or ""),
             str(o.get("price_display") or ""),
             str(o.get("transfer_price_display") or "-"),
             "; ".join(pax_bits) or "-",
             "Yes" if o.get("has_timeslots") else "-",
+            _notes_cell(o),
         ]
         rows.append("| " + " | ".join(c.replace("|", "/") for c in cells) + " |")
     return chr(10).join([head, *rows])

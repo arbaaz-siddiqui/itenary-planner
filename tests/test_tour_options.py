@@ -125,3 +125,93 @@ class TestTransferProbeSkipsTicketOnlyTours:
         # A "Without Transfer" tour short-circuits before any network call.
         st._attach_transfer_prices([Opt()], "2026-09-30", 2)
         assert probed == []
+
+
+class TestAddonsArePricedAndFlagged:
+    """The website priced "2 Drinks Package - Per Person (Add-on)" while we said
+    "On request". Cause: the rate call is keyed on transferId and we hardcoded 1;
+    add-ons only answer on transferId 3 (Without Transfers), returning
+    result:null for 1."""
+
+    @pytest.fixture(scope="class")
+    def desert(self):
+        from mcp_tools.get_tour_options import _impl
+
+        return _impl(tour_id=30647, travel_date="2026-09-25", adults=2)
+
+    def test_no_variant_is_on_request(self, desert):
+        unpriced = [o["name"] for o in desert["options"] if not o.get("price_inr")]
+        assert not unpriced, f"still On request: {unpriced}"
+
+    def test_addons_are_flagged(self, desert):
+        addons = [o for o in desert["options"] if o.get("is_addon")]
+        assert addons, "no add-on detected"
+        assert all("add-on" in o["name"].lower() for o in addons)
+
+    def test_addons_carry_no_transfer_prices(self, desert):
+        # initialTransferRates is the TOUR's transfer, not the add-on's — showing
+        # "Private Transfers Rs 11,509" on a drinks package is wrong.
+        for o in desert["options"]:
+            if o.get("is_addon"):
+                assert not o.get("transfer_prices")
+
+    def test_main_variants_keep_transfer_prices(self, desert):
+        mains = [o for o in desert["options"] if not o.get("is_addon")]
+        assert any(o.get("transfer_prices") for o in mains)
+
+    def test_addons_sort_after_main_variants(self, desert):
+        body = [ln for ln in desert["table_markdown"].splitlines()[2:]]
+        first_addon = next(i for i, ln in enumerate(body) if "(add-on)" in ln)
+        assert all("(add-on)" not in ln for ln in body[:first_addon])
+
+    def test_instructions_tell_agent_to_offer_addons(self, desert):
+        note = desert["agent_instructions"].lower()
+        assert "is_addon" in note
+        assert "ask whether they want any add-ons" in note
+
+
+class TestBookingConstraintsAreSurfaced:
+    """Variants carry rules: an add-on needs a main option, and
+    restrictedRateType lists pax types that cannot take it (the drinks package
+    excludes Child and Infant)."""
+
+    @pytest.fixture(scope="class")
+    def desert(self):
+        from mcp_tools.get_tour_options import _impl
+
+        return _impl(tour_id=30647, travel_date="2026-09-25", adults=2)
+
+    def test_restricted_pax_types_are_listed(self, desert):
+        drinks = next(o for o in desert["options"] if "drinks" in o["name"].lower())
+        assert "Child" in drinks["not_available_for"]
+        assert "Infant" in drinks["not_available_for"]
+
+    def test_unrestricted_variants_list_nothing(self, desert):
+        main = next(o for o in desert["options"] if o["name"] == "Dubai Desert Safari")
+        assert main["not_available_for"] == []
+
+    def test_notes_column_states_the_rules(self, desert):
+        table = desert["table_markdown"]
+        assert "add-on — needs a main option" in table
+        assert "not for Child/Infant" in table
+
+    def test_notes_cell_is_dash_when_unconstrained(self):
+        from mcp_tools.get_tour_options import _notes_cell
+
+        assert _notes_cell({"is_addon": False}) == "-"
+
+    def test_notes_cell_combines_constraints(self):
+        from mcp_tools.get_tour_options import _notes_cell
+
+        cell = _notes_cell({
+            "is_addon": True,
+            "not_available_for": ["Child"],
+            "transfer_not_available": ["Private Transfers"],
+        })
+        assert "add-on" in cell and "not for Child" in cell
+        assert "no Private Transfers" in cell
+
+    def test_instructions_cover_the_dependency_rules(self, desert):
+        note = desert["agent_instructions"]
+        assert "not_available_for" in note
+        assert "transfer_not_available" in note
