@@ -216,3 +216,57 @@ class TestBookingConstraintsAreSurfaced:
         note = desert["agent_instructions"]
         assert "not_available_for" in note
         assert "transfer_not_available" in note
+
+
+class TestLookupEntityPointsAtRealTools:
+    """Asked for desert safari add-ons, the agent said "no add-ons listed"
+    while the supplier had a drinks package and two Majlis options.
+
+    lookup_entity's usage_hint was built as f"search_{svc[:-1]}" — "search_tour",
+    "search_restaurant" — tools that do not exist. The model hit a dead end and
+    answered from memory instead of fetching.
+    """
+
+    def test_tour_lookup_sends_the_agent_to_get_tour_options(self):
+        from mcp_tools.lookup_entity import _impl
+
+        hint = _impl(service="tours", query="Dubai Desert Safari",
+                     city="Dubai")["usage_hint"]
+        assert "get_tour_options" in hint
+        assert "add-ons" in hint
+        # The tool that never existed must not be named.
+        assert "search_tour(" not in hint and "search_tour call" not in hint
+
+    def test_restaurant_lookup_sends_the_agent_to_details(self):
+        from mcp_tools.lookup_entity import _impl
+
+        hint = _impl(service="restaurants", query="Rangoli",
+                     city="Dubai")["usage_hint"]
+        assert "get_restaurant_details" in hint
+        assert "search_restaurant call" not in hint
+
+    def test_every_hint_names_a_registered_tool(self):
+        from agent_tools import ALL_TOOLS
+        from mcp_tools.lookup_entity import _DEFAULT_NEXT_STEP, _NEXT_STEP
+
+        import re
+
+        registered = {t.name for t in ALL_TOOLS}
+        for svc, hint in _NEXT_STEP.items():
+            # Names can be followed by "(query=" or punctuation, so match the
+            # identifier itself rather than splitting on whitespace.
+            named = set(re.findall(r"\b(?:get|search)_[a-z_]+", hint))
+            unknown = {n for n in named if n not in registered}
+            assert not unknown, f"{svc} hint names non-existent tool(s): {unknown}"
+        assert _DEFAULT_NEXT_STEP  # generic fallback names no specific tool
+
+    def test_addons_are_reachable_for_the_reported_tour(self):
+        # tour 30647 publishes a drinks package and two Majlis options.
+        from mcp_tools.get_tour_options import _impl
+
+        names = " ".join(
+            o["name"].lower()
+            for o in _impl(tour_id=30647, travel_date="2026-09-11", adults=2)["options"]
+        )
+        assert "drinks package" in names
+        assert "majlis" in names

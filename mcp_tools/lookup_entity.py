@@ -38,6 +38,31 @@ _REDIRECTED_SERVICES = {
 }
 
 
+# What to do with the id this lookup returns. The hint used to be built as
+# f"search_{svc[:-1]}" — "search_tour", "search_restaurant" — tools that do not
+# exist, so the model hit a dead end and answered from memory instead of
+# fetching. Asked about desert safari add-ons it reported "no add-ons listed"
+# while the supplier had a drinks package and two Majlis options.
+_NEXT_STEP: dict[str, str] = {
+    "tours": (
+        "Pass results[0]['id'] as tour_id to get_tour_options for this tour's "
+        "bookable variants and add-ons (drinks packages, VIP Majlis, upgrades), "
+        "each with its own price. Use get_tour_details only for prose, and "
+        "search_tours(query=...) to list other tours. NEVER say a tour has no "
+        "add-ons without calling get_tour_options first."
+    ),
+    "restaurants": (
+        "Pass results[0]['id'] as restaurant_id to get_restaurant_details for "
+        "the rating, per-meal timings and dishes."
+    ),
+    "airlines": "Use results[0]['name'] as airline_filter in search_flights.",
+}
+_DEFAULT_NEXT_STEP = (
+    "Use results[0]['id'] / results[0]['name'] in the matching search or "
+    "detail tool — do not answer from memory."
+)
+
+
 def _impl(
     service: str,
     query: str,
@@ -194,7 +219,7 @@ def _impl(
             "Also capture results[0]['latitude'] and results[0]['longitude'] — "
             "you will need these as hotel_lat/hotel_lng for search_airport_transfer_dubai."
             if svc == "hotels" else
-            f"Pass results[0]['id'] as the {svc[:-1]}_id parameter in your next search_{svc[:-1]} call."
+            _NEXT_STEP.get(svc, _DEFAULT_NEXT_STEP)
         ),
     }
 
