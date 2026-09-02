@@ -208,6 +208,7 @@ def _impl(
     offset: int = 0,
     adults: int = 1,
     transfer_type: str = "",
+    assume_missing: bool = False,
 ) -> dict[str, Any]:
     """Search tours/activities. Calls both /toursearchlist and /toursearchlistrate.
 
@@ -241,6 +242,15 @@ def _impl(
             "only 3 tours have transfers" when there are 86.
     """
     _ = force_refresh  # consumed by the cache layer; ignored here
+
+    # Tour inventory and prices are date-specific (transfer rate plans end
+    # 30 Oct 2026), so a guessed date shows the wrong catalogue as fact.
+    from rules import missing_search_fields, needs_input_error
+
+    missing = missing_search_fields(travel_date=travel_date)
+    if missing and not assume_missing:
+        return needs_input_error(missing)
+
     try:
         city = resolve_city(destination_city)
         if city is None or not city.get("city_id"):

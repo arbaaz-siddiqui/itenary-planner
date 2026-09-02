@@ -14,6 +14,7 @@ and configurable settings. See PricingSettings in settings.py for thresholds.
 from __future__ import annotations
 
 import re
+from contextvars import ContextVar
 from datetime import date as _date
 from datetime import timedelta
 from typing import Final
@@ -982,3 +983,66 @@ def normalize_reply(text: str) -> str:
     # Chat-template control markers the model sometimes emits as plain text.
     text = re.sub(r"<\|?tool_call\|?>|<\|\"\|>|<\|im_(?:start|end)\|>", "", text)
     return re.sub(r"[~≈]\s*(₹|Rs\.?\s)", r"\1", text).strip()
+
+_FIELD_PROMPTS: dict[str, str] = {
+    "origin_city": "which city they are flying from",
+    "departure_date": "the departure date",
+    "check_in": "the check-in date",
+    "check_out": "the check-out date",
+    "travel_date": "the travel date",
+    "adults": "how many adults are travelling",
+}
+
+
+# What the customer has actually typed this conversation, set once per turn by
+# the agent layer. The tools need it to tell an invented departure city from a
+# real one: the value the model passes looks valid either way.
+_CONVERSATION_TEXT: ContextVar[str] = ContextVar("conversation_text", default="")
+
+
+def set_conversation_text(text: str) -> None:
+    _CONVERSATION_TEXT.set((text or "").lower())
+
+
+def customer_said(value: str) -> bool:
+    """True if the customer's own words contain `value`.
+
+    Matches on the first word so "Delhi" still matches "New Delhi". Returns
+    True when we have no conversation text, so nothing is ever blocked by a
+    missing context (fail open).
+    """
+    said = _CONVERSATION_TEXT.get()
+    if not said or not value:
+        return True
+    return value.strip().lower().split()[0] in said
+
+
+def missing_search_fields(**fields: object) -> list[str]:
+    """Names of mandatory fields the caller left blank.
+
+    A falsy value counts as missing: the model passes "" or 0 as readily as it
+    invents a city, and both mean it does not actually know.
+    """
+    return [name for name, value in fields.items() if not value]
+
+
+def needs_input_error(missing: list[str], *, assumed_ok: bool = False) -> dict[str, object]:
+    """The refusal a search tool returns when a mandatory field is missing."""
+    asks = [_FIELD_PROMPTS.get(m, m) for m in missing]
+    joined = asks[0] if len(asks) == 1 else ", ".join(asks[:-1]) + f" and {asks[-1]}"
+    return {
+        "error": True,
+        "error_type": "NeedsCustomerInput",
+        "missing_fields": missing,
+        "message": (
+            f"Cannot search accurately without {joined}. Ask the customer for "
+            f"{'it' if len(asks) == 1 else 'these'} in ONE short question, then "
+            "call this tool again. Do NOT guess a value, and do NOT present any "
+            "result for a value the customer did not give — a trip with no "
+            "departure city was once searched as Mumbai and the fares shown as "
+            "fact. If the customer declines to say or tells you to search "
+            "anyway, call again with assume_missing=True and state plainly which "
+            "value you assumed."
+        ),
+        "retry_with": {m: "<value from the customer>" for m in missing},
+    }

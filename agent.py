@@ -660,7 +660,11 @@ def invoke_and_log(
 ) -> dict[str, Any]:
     # Injection guard runs in code, not in the prompt: a matched message never
     # reaches the model, never enters the checkpoint, and costs zero tokens.
-    from rules import detect_prompt_injection, injection_reply
+    from rules import detect_prompt_injection, injection_reply, set_conversation_text
+
+    # Tools need the customer's own words to tell an invented departure
+    # city from a real one.
+    set_conversation_text(user_message)
 
     category = detect_prompt_injection(user_message)
     if category:
@@ -886,7 +890,9 @@ def stream_and_log(
 
     # Same code-level injection guard as invoke_and_log: Streamlit streams, so
     # without this the model would already be leaking before any post-check.
-    from rules import detect_prompt_injection, injection_reply
+    from rules import detect_prompt_injection, injection_reply, set_conversation_text
+
+    set_conversation_text(user_message)
 
     if detect_prompt_injection(user_message):
         from langchain_core.messages import AIMessage, HumanMessage

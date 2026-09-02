@@ -587,8 +587,12 @@ def _impl(
     amenities: list[str] | None = None,
     hotel_name: str | None = None,
     force_refresh: bool = False,
+    assume_missing: bool = False,
 ) -> dict[str, Any]:
     """Search hotels in the destination city. Returns options + per-night pricing.
+
+    `assume_missing`: only True when the customer was asked for a mandatory
+    field (dates, party size) and declined or told you to search anyway.
 
     `hotel_name`: when the customer asks for a SPECIFIC hotel by name (e.g.
     "Howard Johnson", "Marriott", "Burj Al Arab"), pass the name here. The tool
@@ -615,6 +619,19 @@ def _impl(
       confirm the room split with the customer before searching — never guess
       how many rooms 4+ guests want.
     """
+    from rules import missing_search_fields, needs_input_error
+
+    # `adults` defaults to 2 in the signature, so a party size the customer
+    # never gave looks identical to one they did. `rooms` carries its own count,
+    # so only demand `adults` when rooms is absent.
+    missing = missing_search_fields(
+        check_in=check_in,
+        check_out=check_out,
+        **({} if rooms else {"adults": adults}),
+    )
+    if missing and not assume_missing:
+        return needs_input_error(missing)
+
     try:
         city = resolve_city(destination_city)
         if city is None or not city.get("city_id"):

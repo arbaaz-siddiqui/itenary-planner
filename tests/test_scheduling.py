@@ -12,9 +12,13 @@ reason must be quotable back to them.
 
 from __future__ import annotations
 
-from datetime import time
+from datetime import date, time, timedelta
 
 import pytest
+
+# A hardcoded date goes stale: "2026-09-01" started failing on 2026-09-02
+# because the supplier returns nothing for a past departure.
+_SOON = (date.today() + timedelta(days=30)).isoformat()
 
 from scheduling import (
     SchedulePolicy,
@@ -424,7 +428,7 @@ class TestComputedTripTotal:
         from agent_tools import plan_itinerary_tool
 
         args = {
-            "start_date": "2026-09-01",
+            "start_date": _SOON,
             "nights": 5,
             "adults": 4,
             "tours": self.TOURS,
@@ -521,7 +525,7 @@ class TestSpreadAndFill:
 
     def _plan(self, **kw: object) -> dict:
         args = {
-            "start_date": "2026-09-01",
+            "start_date": _SOON,
             "nights": 5,
             "tours": self.THREE,
             "arrival_time": "10:25",
@@ -613,7 +617,7 @@ class TestAutoFillDays:
         from agent_tools import plan_itinerary_tool
 
         args = {
-            "start_date": "2026-09-01",
+            "start_date": _SOON,
             "nights": 5,
             "adults": 4,
             "tours": self.THIN,
@@ -719,7 +723,7 @@ class TestNoFreeDaysEver:
         from agent_tools import plan_itinerary_tool
 
         args = {
-            "start_date": "2026-09-01",
+            "start_date": _SOON,
             "nights": nights,
             "adults": 4,
             "tours": self.ONE_TOUR,
@@ -801,7 +805,7 @@ class TestPdfReusesThePlan:
 
         plan_itinerary_tool.invoke(
             {
-                "start_date": "2026-09-01",
+                "start_date": _SOON,
                 "nights": 5,
                 "adults": 4,
                 "tours": [{"name": "Abu Dhabi City Tour from Dubai"}],
@@ -811,7 +815,7 @@ class TestPdfReusesThePlan:
         out = generate_itinerary_pdf_tool.invoke(
             {
                 "destination": "Dubai",
-                "start_date": "2026-09-01",
+                "start_date": _SOON,
                 "end_date": "2026-09-06",
                 "nights": 5,
                 "party_summary": "4 adults",
@@ -848,7 +852,7 @@ class TestPdfReusesThePlan:
         from agent_tools import generate_itinerary_pdf_tool, plan_itinerary_tool
 
         plan_itinerary_tool.invoke(
-            {"start_date": "2026-09-01", "nights": 5, "adults": 4,
+            {"start_date": _SOON, "nights": 5, "adults": 4,
              "tours": [{"name": "Abu Dhabi City Tour from Dubai"}]}
         )
         out = generate_itinerary_pdf_tool.invoke(

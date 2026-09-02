@@ -713,6 +713,8 @@ def plan_itinerary_tool(
         try:
             from mcp_tools.search_flights import _impl as _sf
 
+            # origin_city was passed to THIS tool, not invented by the model
+            # mid-search, so the unstated-origin guard does not apply here.
             _f = _sf(
                 origin_city=origin_city,
                 destination_city=destination_city or "Dubai",
@@ -720,6 +722,7 @@ def plan_itinerary_tool(
                 return_date=_end_date_for(start_date, nights),
                 adults=pax,
                 max_results=5,
+                assume_missing=True,
             )
             _opts = [o for o in (_f.get("options") or []) if o.get("price_inr")]
             if _opts:

@@ -271,11 +271,16 @@ def _impl(
     max_results: int = 5,
     airline_filter: str = "",
     force_refresh: bool = False,
+    assume_missing: bool = False,
 ) -> dict[str, Any]:
     """Search for flights across all airline providers simultaneously.
 
     Args:
-        origin_city:     Indian source city (e.g. "Delhi", "Mumbai").
+        origin_city:     The departure city THE CUSTOMER NAMED. Never infer or
+                         default one — if they have not said where they are
+                         flying from, pass "" and ask them. Passing a plausible
+                         city (Mumbai) for a customer who never named one showed
+                         invented fares as fact.
         destination_city: Destination (typically "Dubai").
         departure_date:  ISO yyyy-mm-dd — outbound date.
         return_date:     ISO yyyy-mm-dd — return date for round-trip. Omit for one-way.
@@ -302,7 +307,22 @@ def _impl(
     TRIP TYPE NOTE:
         One-way:    pass departure_date only (no return_date)
         Round-trip: pass both departure_date AND return_date
+        assume_missing: only True when the customer was asked for a mandatory
+            field and declined or told you to search anyway. Never set it to
+            skip asking.
     """
+    from rules import customer_said, missing_search_fields, needs_input_error
+
+    # A departure city the customer never named is treated as missing: the model
+    # fills the gap with a plausible one and a trip with no stated origin was
+    # quoted BOM->DXB fares as fact.
+    stated_origin = origin_city if customer_said(origin_city) else ""
+    missing = missing_search_fields(
+        origin_city=stated_origin, departure_date=departure_date, adults=adults
+    )
+    if missing and not assume_missing:
+        return needs_input_error(missing)
+
     try:
         # Defense-in-depth: small models sometimes pass a PAST year (e.g. llama
         # defaulting "3 aug" to 2023) → the supplier returns 0 flights. If a date
