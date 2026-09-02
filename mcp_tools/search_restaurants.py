@@ -40,8 +40,29 @@ def _impl(
             children=children,
         )
         options = parse_restaurant_response(raw, max_results=max_results)
+
+        def _row(o: Any) -> dict[str, Any]:
+            # model_dump() drops @property values, so the display strings the
+            # agent is told to quote have to be attached explicitly.
+            d = o.model_dump()
+            d["price_display"] = o.price_display
+            d["rating_display"] = o.rating_display
+            d["meal_timings_display"] = o.meal_timings_display
+            return d
+
         return {
-            "options": [o.model_dump() for o in options],
+            "agent_instructions": (
+                "Show `rating_display` for every restaurant — it carries the "
+                "supplier's own verdict alongside the number (\"4.4 (Very "
+                "Good)\"); never quote the number alone when a label exists. "
+                "`meal_timings_display` gives the Breakfast / Lunch / Dinner "
+                "service windows: show it whenever the customer asks about "
+                "timings, meals or when a place is open. It is only populated "
+                "by get_restaurant_details, so call that for a restaurant they "
+                "are interested in rather than saying the hours are unknown. "
+                "Never invent an hour or a rating."
+            ),
+            "options": [_row(o) for o in options],
             "cheapest_price_inr": (options[0].price_per_adult_inr if options else None),
             "total_results": len(options),
             "search_params": {

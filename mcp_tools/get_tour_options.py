@@ -157,16 +157,11 @@ def _impl(
                 )
                 row["price_inr"] = inr
                 row["price_display"] = f"₹{inr:,.0f}"
-            # `initialTransferRates` lists the TOUR's tiers, not this variant's.
-            # An add-on supports only the tiers in its own validateTourOption,
-            # so showing "Private Transfers ₹11,542" on a drinks package is
-            # wrong — that is the main tour's transfer, not the add-on's.
-            allowed = {v.get("transferTypeName") for v in
-                       option.get("validateTourOption") or [] if v.get("transferTypeName")}
-            tiers = [] if row["is_addon"] else [
-                t for t in _tier_rows(rows[0])
-                if not allowed or t["transfer_type"] in allowed
-            ]
+            # Every variant, add-ons included, carries its own transfer tiers —
+            # verified against the website to the paisa (add-on 113117: Sharing
+            # 62 AED = Rs 1,619.06, Private 400 AED = Rs 10,445.52). Show them
+            # all; suppressing them on add-ons hid real, bookable prices.
+            tiers = _tier_rows(rows[0])
             if tiers:
                 row["transfer_prices"] = tiers
                 row["transfer_price_display"] = " · ".join(

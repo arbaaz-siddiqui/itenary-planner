@@ -660,6 +660,12 @@ class RestaurantOption(BaseModel):
     closing_time: str = ""
     seating_capacity: int = 0
     rating: float = 0.0
+    # Supplier's own verdict from `review.reviewCount` ("Very Good"), which
+    # arrives HTML-wrapped. Named for what it is, not what the key suggests.
+    review_label: str = ""
+    # Per-meal service windows from `restaurantMealTiming`: Breakfast, Lunch,
+    # Dinner, each with its own days and hours.
+    meal_timings: list[dict[str, Any]] = Field(default_factory=list)
     description: str = ""
     image_url: str = ""
     image_urls: list[str] = Field(default_factory=list)
@@ -669,6 +675,25 @@ class RestaurantOption(BaseModel):
     @property
     def price_display(self) -> str:
         return format_inr(self.price_per_adult_inr)
+
+    @property
+    def rating_display(self) -> str:
+        """"4.4 (Very Good)" — the number plus the supplier's own label."""
+        if not self.rating:
+            return ""
+        return f"{self.rating:g}" + (f" ({self.review_label})" if self.review_label else "")
+
+    @property
+    def meal_timings_display(self) -> str:
+        """"Breakfast 08:00 AM-11:30 AM · Lunch 11:30 AM-03:30 PM" — one entry
+        per meal the restaurant serves, so a customer can plan around it."""
+        parts: list[str] = []
+        for meal in self.meal_timings:
+            name = str(meal.get("meal_type") or "").strip()
+            hours = str(meal.get("hours") or "").strip()
+            if name and hours:
+                parts.append(f"{name} {hours}")
+        return " · ".join(parts)
 
 
 # =============================================================================

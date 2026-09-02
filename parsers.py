@@ -742,6 +742,31 @@ def _parse_restaurant(
     longitude = _try_float(coords.get("longitude")) if isinstance(coords, dict) else None
     # Rating: top-level field is the primary; review sub-object is a fallback
     rating = _try_float(r.get("rating")) or _try_float(review.get("rating")) or 0.0
+    # `review.reviewCount` is not a count — it is an HTML verdict, e.g.
+    # "<p>Very Good</p>". Strip the markup and show it beside the number.
+    review_label = _strip_html(review.get("reviewCount"))
+    # Per-meal windows from `restaurantMealTiming`. Each mealType carries one
+    # openingTiming row per weekday; identical hours across days collapse to a
+    # single range, and closed days are dropped.
+    meal_timings: list[dict[str, Any]] = []
+    for meal in r.get("restaurantMealTiming") or []:
+        if not isinstance(meal, dict):
+            continue
+        open_days = [
+            d for d in (meal.get("openingTiming") or [])
+            if isinstance(d, dict) and not d.get("isClosed")
+        ]
+        if not open_days:
+            continue
+        ranges = {
+            f"{str(d.get('openingTime') or '').strip()}-{str(d.get('closingTime') or '').strip()}"
+            for d in open_days
+        }
+        meal_timings.append({
+            "meal_type": str(meal.get("mealType") or "").strip(),
+            "hours": " / ".join(sorted(r for r in ranges if r != "-")),
+            "days": [str(d.get("weekDayName") or "").strip() for d in open_days],
+        })
     # Images: imageInfoList has full list; restaurantImagePath is primary thumbnail
     primary_img = _resolve_image_url(r.get("restaurantImagePath"), image_base_url)
     image_urls: list[str] = []
@@ -768,6 +793,8 @@ def _parse_restaurant(
         closing_time=str(hours.get("closingTime") or ""),
         seating_capacity=int(r.get("seatingCapacity") or 0),
         rating=rating,
+        review_label=review_label,
+        meal_timings=meal_timings,
         description=_strip_html(r.get("description")),
         image_url=primary_img,
         image_urls=image_urls,

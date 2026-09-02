@@ -42,7 +42,15 @@ def _impl(
             children=children,
         )
         options = parse_restaurant_response(raw)
-        restaurant = options[0].model_dump() if options else None
+        restaurant = None
+        if options:
+            # model_dump() drops @property values; attach the display strings
+            # the agent quotes (rating + supplier verdict, per-meal hours).
+            first = options[0]
+            restaurant = first.model_dump()
+            restaurant["price_display"] = first.price_display
+            restaurant["rating_display"] = first.rating_display
+            restaurant["meal_timings_display"] = first.meal_timings_display
         # Also extract dish rates with INR prices for easy agent access
         dishes: list[dict] = []
         result = raw.get("result") or {}
@@ -83,6 +91,15 @@ def _impl(
                 "images": dish_images,
             })
         return {
+            "agent_instructions": (
+                "Quote `rating_display` (number + the supplier's verdict) and "
+                "`meal_timings_display` verbatim. The meal windows are per meal "
+                "— Breakfast / Lunch / Dinner, each with its own hours — so show "
+                "them as separate lines or a small table when the customer asks "
+                "about timings. `meal_timings` has the weekdays each window "
+                "applies to. An empty value means the supplier published none: "
+                "say so, never guess an hour."
+            ),
             "restaurant": restaurant,
             "dishes": dishes,
             "restaurant_id": restaurant_id,

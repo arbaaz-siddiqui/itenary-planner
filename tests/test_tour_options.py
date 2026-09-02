@@ -148,12 +148,13 @@ class TestAddonsArePricedAndFlagged:
         assert addons, "no add-on detected"
         assert all("add-on" in o["name"].lower() for o in addons)
 
-    def test_addons_carry_no_transfer_prices(self, desert):
-        # initialTransferRates is the TOUR's transfer, not the add-on's — showing
-        # "Private Transfers Rs 11,509" on a drinks package is wrong.
-        for o in desert["options"]:
-            if o.get("is_addon"):
-                assert not o.get("transfer_prices")
+    def test_addons_carry_their_own_transfer_prices(self, desert):
+        # The website shows Sharing/Private on an add-on too, and the API backs
+        # it: add-on 113117 returns Sharing 62 AED / Private 400 AED, which is
+        # Rs 1,619.06 / Rs 10,445.52 — the site's figures to the paisa.
+        addons = [o for o in desert["options"] if o.get("is_addon")]
+        assert addons
+        assert any(o.get("transfer_prices") for o in addons)
 
     def test_main_variants_keep_transfer_prices(self, desert):
         mains = [o for o in desert["options"] if not o.get("is_addon")]

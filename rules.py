@@ -980,8 +980,18 @@ def normalize_reply(text: str) -> str:
     if not text:
         return text
     text = text.replace("$\\rightarrow$", "→").replace("\\rightarrow", "→")
-    # Chat-template control markers the model sometimes emits as plain text.
-    text = re.sub(r"<\|?tool_call\|?>|<\|\"\|>|<\|im_(?:start|end)\|>", "", text)
+    # Chat-template control markers the model sometimes emits as plain text,
+    # together with the label glued to them:
+    # `<|channel>thought<|channel>thought <channel|>` reached a customer.
+    # The label is only removed when it directly follows a marker, so ordinary
+    # prose ("Final price is...", "Thoughts on...") is untouched.
+    text = re.sub(
+        r"(?:<\|?/?(?:tool_call|channel|im_start|im_end|message|end)\|?>|<channel\|>|<\|\"\|>)"
+        r"\s*(?:thought|analysis|final|commentary)?\s*",
+        "",
+        text,
+        flags=re.I,
+    )
     return re.sub(r"[~≈]\s*(₹|Rs\.?\s)", r"\1", text).strip()
 
 _FIELD_PROMPTS: dict[str, str] = {

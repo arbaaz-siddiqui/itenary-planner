@@ -867,6 +867,11 @@ def _impl(
                 f"`per_night_all_rooms_inr` is that total / {nights} nights; "
                 f"`per_night_per_room_inr` divides again by {room_count} room(s); "
                 f"`total_per_room_inr` is the whole stay for ONE room. "
+                "The supplier publishes NO room-occupancy figure, so never "
+                "state how many people a room holds as fact — the bed layout in "
+                "`cheapest_room_type` is all we know. Say the room sleeps 2 "
+                "'based on the bed configuration' and offer to confirm, or "
+                "search the party as separate rooms and quote that. "
                 + (
                     f"This party needs {room_count} rooms, so SHOW BOTH: a "
                     f"'Total ({room_count} Rooms)' column and a 'Per Room' "
