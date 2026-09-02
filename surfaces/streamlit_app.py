@@ -586,140 +586,118 @@ def _status_code_emoji(status_code: int | None, error: str | None) -> str:
     return "🟡"
 
 
-def _raw_payload_downloads(http_rec: dict[str, Any], *, key: str) -> None:
-    """Copy/download the exact JSON sent and received, for pasting into Postman."""
-    for label, body, tag in (
-        ("request", http_rec.get("request_body"), "req"),
-        ("response", http_rec.get("response_body"), "resp"),
-    ):
-        if body in (None, ""):
-            continue
-        raw = json.dumps(body, indent=2, ensure_ascii=False, default=str)
-        with st.popover(f"📋 raw {label} JSON ({len(raw) / 1024:.1f} KB)",
-                        use_container_width=True):
-            st.code(raw, language="json")
-        st.download_button(
-            f"⬇️ {label}.json", data=raw, file_name=f"{tag}_{key}.json",
-            mime="application/json", use_container_width=True, key=f"dl_{tag}_{key}",
-        )
+def _size_kb(obj: Any) -> float:
+    """Serialized size, without keeping the string around."""
+    if obj in (None, ""):
+        return 0.0
+    try:
+        return len(json.dumps(obj, default=str)) / 1024
+    except Exception:  # noqa: BLE001 — sizing is cosmetic
+        return 0.0
+
+
+def _json_when_opened(label: str, body: Any, *, key: str) -> None:
+    """Render a payload inside its own expander, so Streamlit only builds the
+    JSON tree when the user opens it.
+
+    A tour search records ~265 KB across 23 calls; rendering every payload
+    eagerly (and twice, once per section) is what made this tab lag. Nothing
+    here is serialized until the expander is open.
+    """
+    if body in (None, ""):
+        st.caption(f"{label}: _(none)_")
+        return
+    with st.expander(f"{label} · {_size_kb(body):.0f} KB", expanded=False):
+        st.json(body, expanded=False)
 
 
 def _render_call_record(call: dict[str, Any], idx: int) -> None:
-    """Render one tool call: name, status, the actual API URL, inputs, output."""
+    """One tool call: which API, what went in, what came back."""
     emoji, label = _call_status(call)
     name = call.get("tool_name", "?")
-    api_badge = "🌐 API" if name in _API_BACKED_TOOLS else "⚙️ local"
-    with st.expander(f"{emoji} `{name}` · {label}", expanded=False):
-        st.caption(f"{api_badge} · turn {call.get('turn', '?')}")
+    https = call.get("http_all") or ([call["http"]] if call.get("http") else [])
+    title = f"{emoji} `{name}` · {label}"
+    if https:
+        title += f" · {len(https)} API call(s)"
 
-        # Every HTTP request this tool made, with the exact payload sent and
-        # the exact response received — the ground truth for any price dispute.
-        https = call.get("http_all") or ([call["http"]] if call.get("http") else [])
+    with st.expander(title, expanded=False):
+        st.caption(f"turn {call.get('turn', '?')}")
+
+        st.markdown("**Input the agent passed:**")
+        st.json(call.get("input") or {}, expanded=False)
+
         if https:
-            st.markdown(f"**Actual API calls ({len(https)}):**")
             for j, h in enumerate(https, 1):
                 sc = h.get("status_code")
-                sc_emoji = _status_code_emoji(sc, h.get("error"))
-                status_txt = h.get("error") or (f"HTTP {sc}" if sc is not None else "no status")
-                st.code(f"{h.get('method', '?')} {h.get('url', '?')}", language="http")
-                st.caption(f"{sc_emoji} {status_txt} · {h.get('duration_ms', '?')} ms")
-                req, resp = h.get("request_body"), h.get("response_body")
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.caption("→ request body sent")
-                    if req in (None, ""):
-                        st.caption("_(none — GET)_")
-                    else:
-                        st.json(req, expanded=False)
-                with c2:
-                    st.caption("← response body received")
-                    if resp in (None, ""):
-                        st.caption("_(empty)_")
-                    else:
-                        st.json(resp, expanded=False)
-                _raw_payload_downloads(h, key=f"{call.get('turn', 0)}_{idx}_{j}")
+                status = h.get("error") or (f"HTTP {sc}" if sc is not None else "no status")
+                st.markdown(
+                    f"**{_status_code_emoji(sc, h.get('error'))} "
+                    f"{h.get('method', '?')} "
+                    f"`{str(h.get('url', '?')).split('/api', 1)[-1]}`** · "
+                    f"{status} · {h.get('duration_ms', '?')} ms"
+                )
+                k = f"{call.get('turn', 0)}_{idx}_{j}"
+                _json_when_opened("→ sent", h.get("request_body"), key=f"req_{k}")
+                _json_when_opened("← received", h.get("response_body"), key=f"resp_{k}")
         elif name in _API_BACKED_TOOLS:
-            st.warning(
-                "No HTTP request was recorded for this API-backed tool — it may "
-                "have used cached data, or the call never reached the network.",
-                icon="⚠️",
-            )
+            st.caption("⚠️ No HTTP recorded — served from cache, or never reached the network.")
         else:
-            st.caption("⚙️ Local tool — no network request (pure computation).")
+            st.caption("⚙️ Local tool — no network request.")
 
-        st.markdown("**Input (args the agent passed):**")
-        agent_input = call.get("input") or {}
-        if agent_input:
-            st.json(agent_input, expanded=True)
-        else:
-            st.caption("_(no arguments)_")
-
-        st.markdown("**Output (what the tool returned):**")
-        _render_output(call.get("output"), key=f"out_{call.get('turn', 0)}_{idx}")
+        st.markdown("**Output the tool returned:**")
+        out = call.get("output")
+        if isinstance(out, dict):
+            for line in _output_summary(out):
+                st.caption(f"• {line}")
+        _json_when_opened("full output", out, key=f"out_{call.get('turn', 0)}_{idx}")
 
 
 def _output_summary(output: dict[str, Any]) -> list[str]:
-    """One-line highlights for a (possibly huge) tool output, so the key facts
-    are visible without expanding the full JSON."""
+    """One-line highlights so the key facts are visible without opening JSON."""
     lines: list[str] = []
     if output.get("error"):
-        lines.append(f"❌ error: {output.get('message') or output.get('error_type')}")
+        lines.append(f"❌ {output.get('error_type')}: {output.get('message', '')[:120]}")
         return lines
     opts = output.get("options")
     if isinstance(opts, list):
-        lines.append(f"{len(opts)} option(s) returned")
+        lines.append(f"{len(opts)} option(s)")
         if opts and isinstance(opts[0], dict):
             first = opts[0]
-            name = first.get("airline") or first.get("hotel_name") or first.get("name") or "—"
+            nm = first.get("airline") or first.get("hotel_name") or first.get("name") or "—"
             price = (
                 first.get("price_inr")
                 or first.get("price_per_adult_inr")
                 or first.get("price_total_inr")
             )
-            lines.append(f"cheapest: {name}" + (f" · ₹{price:,.0f}" if price else ""))
-    for k in ("rate", "source", "total_results", "status"):
+            lines.append(f"first: {nm}" + (f" · ₹{price:,.0f}" if price else ""))
+    for k in ("rate", "source", "total_results", "from_cache"):
         if k in output:
             lines.append(f"{k}: {output[k]}")
     return lines
 
 
-def _render_output(output: Any, *, key: str) -> None:
-    """Render a tool output so even LARGE responses are usable.
+# How many recent turns keep their full request/response bodies. Older turns
+# keep the URL, status and timing — the payloads are what cost megabytes.
+_PAYLOAD_TURNS = 3
 
-    Short/None outputs render inline. Dict/list outputs get a highlights summary
-    plus the full JSON in a scrollable, expandable widget, with a Copy/Download
-    of the raw JSON so nothing is hidden behind a collapsed `{...}`.
-    """
-    if output in (None, ""):
-        st.caption("_(empty response)_")
+
+def _trim_debug_payloads() -> None:
+    """Strip payloads from turns older than the most recent few."""
+    turn = st.session_state.get("turn_number", 0)
+    cutoff = turn - _PAYLOAD_TURNS
+    if cutoff <= 0:
         return
-    if not isinstance(output, (dict, list)):
-        st.code(str(output))
-        return
-
-    raw = json.dumps(output, indent=2, ensure_ascii=False, default=str)
-    size_kb = len(raw) / 1024
-    is_large = size_kb > 2.0
-
-    if isinstance(output, dict):
-        for line in _output_summary(output):
-            st.caption(f"• {line}")
-
-    # Expand small payloads by default; keep large ones collapsed but explorable.
-    st.json(output, expanded=not is_large)
-    st.caption(f"{size_kb:.1f} KB · full JSON below if the tree is hard to read")
-    # st.code gives a built-in copy button; a text_area is reliably scrollable
-    # for very long responses where the JSON tree is awkward in a narrow sidebar.
-    with st.popover("📋 View / copy raw JSON", use_container_width=True):
-        st.code(raw, language="json")
-    st.download_button(
-        "⬇️ Download JSON",
-        data=raw,
-        file_name=f"{key}.json",
-        mime="application/json",
-        use_container_width=True,
-        key=f"dl_{key}",
-    )
+    for rec in st.session_state.get("http_calls", []):
+        if rec.get("turn", 0) <= cutoff:
+            rec.pop("request_body", None)
+            rec.pop("response_body", None)
+    for call in st.session_state.get("debug_calls", []):
+        if call.get("turn", 0) > cutoff:
+            continue
+        call["output"] = None
+        for h in (call.get("http_all") or []):
+            h.pop("request_body", None)
+            h.pop("response_body", None)
 
 
 def _last_api_turn(turn_log: list[dict[str, Any]], before_turn: int) -> int | None:
@@ -792,9 +770,9 @@ def _render_debug_inspector() -> None:
         st.session_state.http_calls = []
         st.session_state.turn_log = []
         st.rerun()
-    # Default ON: the whole session's history is visible, so reused numbers can
-    # always be traced back to the turn whose API call produced them.
-    current_only = cc2.toggle("Current turn only", value=False)
+    # Default to the latest turn: rendering every turn's calls is what made this
+    # tab lag. Untick to trace a reused number back to the turn that fetched it.
+    current_only = cc2.toggle("Latest turn only", value=True)
 
     current_turn = st.session_state.get("turn_number", 0)
     meta_by_turn = {t["turn"]: t for t in turn_log}
@@ -811,33 +789,19 @@ def _render_debug_inspector() -> None:
         [h for h in http_calls if h.get("turn") == current_turn] if current_only else http_calls
     )
     if visible_http:
-        st.markdown(
-            f"**🌐 Raw HTTP requests ({len(visible_http)}) — every supplier call, "
-            "with the exact payload sent and received:**"
-        )
-        for n, h in enumerate(reversed(visible_http), 1):
-            sc = h.get("status_code")
-            head = (
-                f"{_status_code_emoji(sc, h.get('error'))} "
-                f"{h.get('method', '?')} {str(h.get('url', '?')).split('/api', 1)[-1][:56]} · "
-                f"{h.get('duration_ms', '?')} ms · turn {h.get('turn', '?')}"
-            )
-            with st.expander(head, expanded=False):
-                st.code(f"{h.get('method', '?')} {h.get('url', '?')}", language="http")
+        # A one-line index only. The payloads live under each tool call above;
+        # rendering them twice is what made this tab lag (a tour search records
+        # ~265 KB across 23 calls).
+        with st.expander(f"🌐 All {len(visible_http)} supplier calls", expanded=False):
+            for h in reversed(visible_http):
+                sc = h.get("status_code")
                 st.caption(
-                    h.get("error")
-                    or (f"HTTP {sc}" if sc is not None else "no status")
+                    f"{_status_code_emoji(sc, h.get('error'))} "
+                    f"`{h.get('method', '?')} "
+                    f"{str(h.get('url', '?')).split('/api', 1)[-1]}` · "
+                    f"{h.get('error') or ('HTTP ' + str(sc) if sc is not None else '?')} · "
+                    f"{h.get('duration_ms', '?')} ms · turn {h.get('turn', '?')}"
                 )
-                d1, d2 = st.columns(2)
-                with d1:
-                    st.caption("→ request body sent")
-                    req = h.get("request_body")
-                    st.json(req, expanded=False) if req not in (None, "") else st.caption("_(none — GET)_")
-                with d2:
-                    st.caption("← response body received")
-                    resp = h.get("response_body")
-                    st.json(resp, expanded=False) if resp not in (None, "") else st.caption("_(empty)_")
-                _raw_payload_downloads(h, key=f"raw_{h.get('turn', 0)}_{n}")
 
 
 # =============================================================================
@@ -1371,6 +1335,10 @@ def _process_message(user_message: str, *, display_as: str | None = None) -> Non
         http_for_turn = http_requests_since(http_cursor)
         for rec in http_for_turn:
             st.session_state.http_calls.append({"turn": turn, **rec})
+        # Session state is re-serialized on every rerun, and one tour search
+        # records ~265 KB of bodies. Keep the recent turns explorable and drop
+        # the payloads from older ones so the tab stays responsive.
+        _trim_debug_payloads()
 
         tool_calls = extract_tool_calls(result.response)
         _record_debug_calls(turn, tool_calls, http_for_turn)

@@ -78,3 +78,41 @@ class TestNewToolsAreTrackedAsApiBacked:
         block = re.search(r"_API_BACKED_TOOLS = \{(.*?)\}", src, re.S).group(1)
         assert '"get_tour_options"' in block
         assert '"get_tour_timeslots"' in block
+
+
+class TestDebugTabStaysLight:
+    """One tour search records ~265 KB of bodies across 23 calls. The tab
+    rendered every payload eagerly, twice (per-tool section AND a raw HTTP
+    section), plus a full raw-JSON popover and a download button per body —
+    all rebuilt on every Streamlit rerun. That is what made the UI lag."""
+
+    def test_payloads_render_inside_an_expander(self):
+        src = APP.read_text(encoding="utf-8")
+        assert "def _json_when_opened(" in src, "lazy payload renderer missing"
+        # Nothing is serialized until the expander is opened.
+        block = src[src.index("def _json_when_opened("):]
+        block = block[: block.index("\ndef ")]
+        assert "st.expander(" in block and "st.json(" in block
+
+    def test_raw_http_section_no_longer_duplicates_payloads(self):
+        src = APP.read_text(encoding="utf-8")
+        tail = src[src.index("All {len(visible_http)} supplier calls"):]
+        tail = tail[:1200]
+        # The index shows URL/status/timing only — bodies live under the tool.
+        assert "request_body" not in tail
+        assert "response_body" not in tail
+
+    def test_old_turns_have_their_payloads_trimmed(self):
+        src = APP.read_text(encoding="utf-8")
+        assert "def _trim_debug_payloads(" in src
+        assert "_PAYLOAD_TURNS" in src
+
+    def test_heavy_widgets_are_not_created_per_payload(self):
+        src = APP.read_text(encoding="utf-8")
+        # These were rendered once per request AND once per response body.
+        assert "_raw_payload_downloads" not in src
+        assert 'st.popover("📋 View / copy raw JSON"' not in src
+
+    def test_latest_turn_only_is_the_default(self):
+        src = APP.read_text(encoding="utf-8")
+        assert 'toggle("Latest turn only", value=True)' in src
