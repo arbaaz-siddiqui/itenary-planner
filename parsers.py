@@ -740,8 +740,10 @@ def _parse_restaurant(
     coords = r.get("coordinates") or {}
     latitude = _try_float(coords.get("latitude")) if isinstance(coords, dict) else None
     longitude = _try_float(coords.get("longitude")) if isinstance(coords, dict) else None
-    # Rating: top-level field is the primary; review sub-object is a fallback
-    rating = _try_float(r.get("rating")) or _try_float(review.get("rating")) or 0.0
+    # `review.rating` is the real score and takes precedence: the supplier also
+    # sends a coarser top-level `rating` (4.0 where review says 4.4), and
+    # preferring it showed "4" for a restaurant rated 4.4.
+    rating = _try_float(review.get("rating")) or _try_float(r.get("rating")) or 0.0
     # `review.reviewCount` is not a count — it is an HTML verdict, e.g.
     # "<p>Very Good</p>". Strip the markup and show it beside the number.
     review_label = _strip_html(review.get("reviewCount"))

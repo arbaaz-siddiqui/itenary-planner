@@ -60,7 +60,11 @@ def _impl(
                 "timings, meals or when a place is open. It is only populated "
                 "by get_restaurant_details, so call that for a restaurant they "
                 "are interested in rather than saying the hours are unknown. "
-                "Never invent an hour or a rating."
+                "Never invent an hour or a rating, and never answer a rating or "
+                "timing question from an earlier reply — pass that row's "
+                "`restaurant_id` to get_restaurant_details and quote what comes "
+                "back. Answering from recall reported a restaurant as 4 when the "
+                "supplier says 4.4."
             ),
             "options": [_row(o) for o in options],
             "cheapest_price_inr": (options[0].price_per_adult_inr if options else None),

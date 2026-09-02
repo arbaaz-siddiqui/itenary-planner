@@ -125,3 +125,56 @@ class TestToolsExposeTheDisplayStrings:
                      adults=2)["agent_instructions"]
         assert "rating_display" in note and "meal_timings_display" in note
         assert "Never invent" in note
+
+
+class TestReviewRatingWinsOverTopLevel:
+    """Postman showed review.rating 4.4 for Rangoli; the chat said 4.
+
+    The supplier sends BOTH a coarse top-level `rating` ("4.0") and the real
+    `review.rating` ("4.4"). The parser preferred the top-level one.
+    """
+
+    def test_review_rating_takes_precedence(self):
+        raw = {"result": {"list": [{
+            "restaurantId": 3,
+            "restaurantName": "Rangoli Restaurant",
+            "priceStarts": {"perPersonPrice": 20, "currency": "AED"},
+            "rating": "4.0",
+            "review": {"rating": "4.4", "reviewCount": "<p>Very Good</p>"},
+        }]}}
+        r = parse_restaurant_response(raw)[0]
+        assert r.rating == 4.4
+        assert r.rating_display == "4.4 (Very Good)"
+
+    def test_top_level_used_when_review_has_no_rating(self):
+        raw = {"result": {"list": [{
+            "restaurantId": 9, "restaurantName": "X",
+            "priceStarts": {"perPersonPrice": 10, "currency": "AED"},
+            "rating": "4.1", "review": {"reviewCount": "<p>Good</p>"},
+        }]}}
+        assert parse_restaurant_response(raw)[0].rating == 4.1
+
+    def test_live_rangoli_reports_the_review_rating(self):
+        # The exact case the client checked in Postman.
+        from mcp_tools.get_restaurant_details import _impl
+
+        out = _impl(restaurant_id=3, destination_city="Dubai",
+                    search_date="2026-10-01", adults=1)
+        assert (out.get("restaurant") or {}).get("rating") == 4.4
+
+
+class TestFactsAreNotAnsweredFromMemory:
+    def test_search_tells_the_agent_to_refetch_for_ratings(self):
+        from mcp_tools.search_restaurants import _impl
+
+        note = _impl(destination_city="Dubai", search_date="2026-10-01",
+                     adults=1)["agent_instructions"]
+        assert "restaurant_id" in note
+        assert "get_restaurant_details" in note
+
+    def test_prompt_forbids_answering_inventory_facts_from_recall(self):
+        from pathlib import Path
+
+        p = Path(__file__).resolve().parents[1] / "prompts" / "system_prompt_v3.md"
+        text = p.read_text(encoding="utf-8")
+        assert "never answer a factual question about inventory from memory" in text.lower()
