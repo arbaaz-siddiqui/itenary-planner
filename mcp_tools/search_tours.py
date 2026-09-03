@@ -19,6 +19,12 @@ logger = logging.getLogger(__name__)
 # per tour on the page) and cap total wait: a page of 10 costs ~5-7s, not 50s.
 _SLOT_MAX_WORKERS = 24
 _SLOT_FETCH_DEADLINE_S = 8.0
+# Two supplier calls per tour at ~2.5s each. A transfer-bearing tour that
+# misses this deadline shows no price at all, so the budget is generous and
+# the pool is wide enough that every candidate starts in the first wave.
+_TRANSFER_MAX_WORKERS = 24
+_TRANSFER_DEADLINE_S = 14.0
+
 
 
 def _tours_table(options: list) -> str:
@@ -27,9 +33,16 @@ def _tours_table(options: list) -> str:
     Built here rather than left to the model: asked for 13 rows in prose, it
     still sent 5, which made our inventory look a third of its real size.
     """
+    # Extras is only worth a column when some row has one, otherwise every
+    # tour carries a dash. Customers were never told add-ons existed at all.
+    show_extras = any(getattr(o, "addon_names", None) for o in options)
+    cols = ["Tour", "Price/adult", "Type", "Duration", "Transfer", "Cancellation"]
+    if show_extras:
+        cols.append("Extras")
+    cols.append("Start times")
     head = (
-        "| Tour | Price/adult | Type | Duration | Transfer | Cancellation"
-        " | Start times |" + chr(10) + "|---|---|---|---|---|---|---|"
+        "| " + " | ".join(cols) + " |" + chr(10)
+        + "|" + "|".join("---" for _ in cols) + "|"
     )
     rows = []
     for o in options:
@@ -41,8 +54,11 @@ def _tours_table(options: list) -> str:
             getattr(o, "duration", "") or "-",
             getattr(o, "sharing_display", "") or "",
             getattr(o, "cancellation_display", "") or "",
-            getattr(o, "slots_display", "") or "",
         ]
+        if show_extras:
+            names = getattr(o, "addon_names", None) or []
+            cells.append(", ".join(n.replace(" (Add-on)", "") for n in names) or "-")
+        cells.append(getattr(o, "slots_display", "") or "")
         rows.append("| " + " | ".join(str(c).replace("|", "/") for c in cells) + " |")
     return chr(10).join([head, *rows])
 
@@ -71,26 +87,61 @@ def _attach_transfer_prices(options: list, travel_date: str, adults: int) -> Non
     from fx import convert_supplier_price
 
     def _one(o: Any) -> None:
-        if not o.tour_id:
-            return
-        # "Without Transfer" tours have no pickup and so no split to fetch.
-        # Skipping them removed ~12 of 15 calls per search.
-        if "without" in (getattr(o, "transfer_scenario", "") or "").strip().lower():
-            return
         try:
             raw = call_tour_options(tour_id=int(o.tour_id), travel_date=travel_date)
             opts = ((raw or {}).get("result") or {}).get("tourOptionlist") or []
             if not opts:
                 return
+            # This response already lists every bookable variant, add-ons
+            # included, and we were discarding it. Recording it here costs no
+            # extra call and is what lets a row advertise its own add-ons:
+            # asked "what add ons are available" a turn after the search, the
+            # model had nothing on the row to go on, so it asked the customer
+            # "which tour?" instead of calling get_tour_options.
+            o.variant_count = len(opts)
+            o.addon_names = [
+                str(v.get("optionName") or "").strip()
+                for v in opts
+                if "add-on" in str(v.get("optionName") or "").lower()
+            ]
             first = opts[0]
-            rate_raw = call_tour_option_rate(
-                tour_id=int(o.tour_id),
-                option_id=first.get("optionId"),
-                supplier_id=int(first.get("supplierId") or o.supplier_id or 0),
-                travel_date=travel_date,
-                adults=max(1, int(adults or 1)),
-            )
-            rows = (rate_raw or {}).get("result") or []
+            # optionRate is keyed on transferId and a variant only answers on
+            # the tiers it supports, so a single hardcoded id reported "no
+            # rates" for tours the supplier prices. Probe the variant's own
+            # tiers first (3 leads the literals: it prices most variants,
+            # add-ons included), and record a supplier fault separately —
+            # tour 30580 returns HTTP 500 on every id, which is not the same
+            # as having no published rate.
+            own = [v.get("transferTypeId") for v in first.get("validateTourOption") or []]
+            rows: list[dict[str, Any]] = []
+            failures = 0
+            # Capped at two tiers. Each probe costs a full round trip, and a
+            # third put slow tours past the fan-out deadline — which showed as
+            # no price at all, strictly worse than one fewer probe.
+            probes = list(dict.fromkeys([*(t for t in own if t), 3, 1]))[:2]
+            for tid in probes:
+                try:
+                    rate_raw = call_tour_option_rate(
+                        tour_id=int(o.tour_id),
+                        option_id=first.get("optionId"),
+                        supplier_id=int(first.get("supplierId") or o.supplier_id or 0),
+                        travel_date=travel_date,
+                        adults=max(1, int(adults or 1)),
+                        transfer_id=int(tid),
+                    )
+                    rows = (rate_raw or {}).get("result") or []
+                except Exception as e:  # noqa: BLE001 — a 500 is per-tour
+                    failures += 1
+                    logger.debug("optionRate tid=%s failed for %s: %s", tid, o.tour_id, e)
+                    rows = []
+                    # optionRate 500s for the whole tour (30580 fails on every
+                    # tier), so another tier only buys another timeout.
+                    break
+                if rows and rows[0].get("initialTransferRates"):
+                    break
+            if failures:
+                o.transfer_lookup_failed = True
+                return
             if not rows:
                 return
             tiers = rows[0].get("initialTransferRates") or []
@@ -127,13 +178,31 @@ def _attach_transfer_prices(options: list, travel_date: str, adults: int) -> Non
             )
         except Exception as e:  # noqa: BLE001 — best-effort enrichment
             logger.debug("transfer price lookup failed for %s: %s", o.tour_id, e)
+        finally:
+            # The lookup ran to a conclusion, whatever it concluded. A tour left
+            # False was cut off by the deadline, and must NOT be described as
+            # having no published rates — that states a supplier fact we never
+            # checked. sharing_display reads this.
+            o.transfer_lookup_done = True
 
-    # Hard deadline, like _attach_timeslots: a slow supplier must never stall
-    # the search — tours past the deadline just keep the flat display.
-    ex = _cf.ThreadPoolExecutor(max_workers=min(12, len(options)))
+    # "Without Transfer" tours have no pickup and so no split to fetch.
+    # Skipping them removed ~12 of 15 calls per search — and, because they never
+    # enter the pool, the deadline below is spent only on tours that can answer.
+    pending = [
+        o for o in options
+        if o.tour_id
+        and "without" not in (getattr(o, "transfer_scenario", "") or "").strip().lower()
+    ]
+    if not pending:
+        return
+    # One worker per candidate: a second wave would start after the deadline had
+    # already begun, so its tours came back priceless and read as "rates not
+    # published" — a supplier fact we had not checked. min(N, 0) is 0, which
+    # ThreadPoolExecutor rejects, hence the max(1, ...).
+    ex = _cf.ThreadPoolExecutor(max_workers=max(1, min(_TRANSFER_MAX_WORKERS, len(pending))))
     try:
-        futures = [ex.submit(_one, o) for o in options]
-        _cf.wait(futures, timeout=10)
+        futures = [ex.submit(_one, o) for o in pending]
+        _cf.wait(futures, timeout=_TRANSFER_DEADLINE_S)
     finally:
         ex.shutdown(wait=False, cancel_futures=True)
 
@@ -348,6 +417,10 @@ def _impl(
         # deriving (or omitting) them. The client requires sharing/private and
         # cancellation on EVERY tour — computing them here makes that the
         # default rather than something the model has to remember.
+        # Rows that actually carry extras. Used to name the single unambiguous
+        # target for a follow-up add-ons question.
+        addon_rows = [o for o in options if getattr(o, "addon_names", None)]
+
         option_dicts = []
         for o in options:
             d = o.model_dump()
@@ -356,6 +429,13 @@ def _impl(
             if getattr(o, "transfer_prices", None):
                 d["transfer_prices"] = o.transfer_prices
                 d["transfer_price_display"] = o.transfer_price_display
+            # Named so a follow-up ("does it have add ons?") can be answered
+            # from the row the customer is already looking at.
+            addons = getattr(o, "addon_names", []) or []
+            d["addon_names"] = addons
+            d["addons_display"] = (
+                f"{len(addons)} add-on(s): " + ", ".join(addons) if addons else ""
+            )
             d["cancellation_display"] = o.cancellation_display
             d["price_display"] = o.price_display
             d["timeslots"] = getattr(o, "timeslots", [])
@@ -423,6 +503,28 @@ def _impl(
                     "ticket types, add-ons or what is included — call "
                     "get_tour_options with that row's `tour_id` before replying. "
                     "These rows are product lines, not the bookable variants. "
+                    "A row with `addon_names` HAS extras: name them from "
+                    "`addons_display` when you present it. If the customer then "
+                    "asks about add-ons, extras, upgrades or 'what else can I "
+                    "add', call get_tour_options with the `tour_id` of the tour "
+                    "under discussion — do NOT ask them which tour, and never "
+                    "answer that a tour has no add-ons without calling "
+                    "get_tour_options for it first. "
+                )
+                + (
+                    # Naming the ONE row that has extras, with its id, removes
+                    # the ambiguity that made the model ask "which tour?" on a
+                    # follow-up: on a 15-row page it could not tell which row
+                    # "it" meant, so it asked instead of calling the tool.
+                    f"Only ONE tour on this page has add-ons: "
+                    f"{addon_rows[0].name!r}, tour_id={addon_rows[0].tour_id}. "
+                    f"Any add-on / extras / upgrade question about this page is "
+                    f"about that tour — call "
+                    f"get_tour_options(tour_id={addon_rows[0].tour_id}, "
+                    f"travel_date={travel_date!r}) and answer from it. "
+                    if len(addon_rows) == 1 else ""
+                )
+                + (
                     "Do NOT quote counts or totals to the customer — no '85 tours', "
                     "no 'showing 1-10 of 270'. Just present the tours. "
                     "If `next_offset` is present there are MORE beyond this "
@@ -454,7 +556,8 @@ def _impl(
                     # the table columns were last changed.
                     "Table columns, in this order: Tour | Price/adult (`price_display`) "
                     "| Type (`category`) | Duration | Transfer (`sharing_display`) "
-                    "| Cancellation (`cancellation_display`); add Start times "
+                    "| Cancellation (`cancellation_display`); add Extras "
+                    "(`addon_names`) when any row has add-ons, then Start times "
                     "(`slots_display`) when any row has real times. Mark "
                     "`is_recommended` rows with a star. Never move these into a "
                     "footnote. "

@@ -268,9 +268,25 @@ class TestNeverInventATransferPrice:
         # "same tour price" was factually wrong (Burj private costs Rs 5,053
         # extra). When the supplier has no rate plan for the date (verified:
         # nothing past 30 Oct 2026), say that — never claim price parity.
-        out = self._tour(transfer_scenario="All Transfer").sharing_display
+        out = self._tour(transfer_scenario="All Transfer",
+                         transfer_lookup_done=True).sharing_display
         assert "not published for this date" in out.lower()
         assert "same tour price" not in out.lower()
+
+    def test_an_unfinished_lookup_does_not_blame_the_supplier(self) -> None:
+        # Only the supplier can tell us rates are unpublished. A tour cut off by
+        # the fan-out deadline used to carry the same wording, stating a
+        # supplier fact we never checked.
+        out = self._tour(transfer_scenario="All Transfer").sharing_display
+        assert "not retrieved" in out.lower()
+        assert "not published" not in out.lower()
+
+    def test_a_supplier_fault_is_named_as_one(self) -> None:
+        # Tour 30580 answers HTTP 500 on every transfer id — not an absence of
+        # rates.
+        out = self._tour(transfer_scenario="All Transfer", transfer_lookup_done=True,
+                         transfer_lookup_failed=True).sharing_display
+        assert "unavailable from the supplier" in out.lower()
 
     def test_sharing_display_quotes_no_number(self) -> None:
         """No digits — a number here would read as a private-vehicle quote."""

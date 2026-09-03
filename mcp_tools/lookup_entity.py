@@ -9,6 +9,7 @@ tour_id / restaurant_id used everywhere else in the system.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from langchain_core.tools import tool
@@ -45,21 +46,24 @@ _REDIRECTED_SERVICES = {
 # while the supplier had a drinks package and two Majlis options.
 _NEXT_STEP: dict[str, str] = {
     "tours": (
-        "Pass results[0]['id'] as tour_id to get_tour_options for this tour's "
-        "bookable variants and add-ons (drinks packages, VIP Majlis, upgrades), "
-        "each with its own price. Use get_tour_details only for prose, and "
-        "search_tours(query=...) to list other tours. NEVER say a tour has no "
-        "add-ons without calling get_tour_options first."
+        "Call get_tour_options(tour_id=best_match_id, travel_date=...) NOW for "
+        "this tour's bookable variants and add-ons (drinks packages, VIP Majlis, "
+        "upgrades), each with its own price. `best_match_id` IS the tour they "
+        "meant — the other rows are near-duplicates, so do not weigh them up "
+        "and never reply without calling the tool. Use get_tour_details only "
+        "for prose, and search_tours(query=...) to list other tours. NEVER say "
+        "a tour has no add-ons without calling get_tour_options first."
     ),
     "restaurants": (
-        "Pass results[0]['id'] as restaurant_id to get_restaurant_details for "
-        "the rating, per-meal timings and dishes."
+        "Call get_restaurant_details(restaurant_id=best_match_id) NOW for the "
+        "rating, per-meal timings and dishes. `best_match_id` is the one they "
+        "meant."
     ),
-    "airlines": "Use results[0]['name'] as airline_filter in search_flights.",
+    "airlines": "Use best_match_name as airline_filter in search_flights.",
 }
 _DEFAULT_NEXT_STEP = (
-    "Use results[0]['id'] / results[0]['name'] in the matching search or "
-    "detail tool — do not answer from memory."
+    "Use best_match_id / best_match_name in the matching search or detail "
+    "tool — do not weigh up the other rows, and do not answer from memory."
 )
 
 
@@ -187,6 +191,36 @@ def _impl(
             # Rank in-city first; keep the rest so the agent can still see them.
             hotel_results = in_city + [r for r in hotel_results if r not in in_city]
 
+    # Name relevance. The supplier orders results its own way, so for "burj
+    # khalifa" results[0] was "Sky Views Edge Walk" while two genuine Burj
+    # entries sat below it. Every hint says to use results[0], and faced with
+    # three near-identical candidates and no signal which was meant, the model
+    # stalled and returned an EMPTY reply to the customer. Rank the rows that
+    # actually contain the query words first.
+    terms = [w for w in re.split(r"\W+", query.lower()) if len(w) > 2]
+    if terms and hotel_results:
+        def _relevance(pair: tuple[int, dict[str, Any]]) -> tuple[int, int, int]:
+            i, row = pair
+            name = str(row.get("name", "")).lower()
+            hits = sum(1 for w in terms if w in name)
+            # City first: sorting on name alone put Abu Dhabi desert safaris
+            # above Dubai ones, undoing the scoping directly above.
+            off_city = (
+                0 if not city_filter
+                else (0 if city_filter in str(row.get("city", "")).lower() else 1)
+            )
+            # Then the supplier's own order, which is a BETTER signal than the
+            # name: this response cannot tell a bookable tour from an empty one
+            # (totalAvailableServices reads 2 for both), and preferring the
+            # shortest exact name promoted "Burj Khalifa Tickets" (28482, zero
+            # variants) over "At The Top, Burj Khalifa" (28488, 14 priced
+            # variants). Only demote rows that do not match the query at all.
+            return (off_city, 0 if hits else 1, i)
+
+        hotel_results = [
+            row for _i, row in sorted(enumerate(hotel_results), key=_relevance)
+        ]
+
     scoped_note = ""
     if city_filter:
         if out_of_city and hotel_results and city_filter in str(hotel_results[0].get("city", "")).lower():
@@ -202,10 +236,21 @@ def _impl(
                 f"which resolves the property against local inventory."
             )
 
+    # The resolved target, stated once. Handing over five rows and a hint to
+    # "pass results[0]['id']" is not a decision: asked for Burj Khalifa the
+    # supplier returns three near-identical Burj rows, and the model deliberated
+    # instead of acting, emitting an EMPTY message to the customer (5 empty
+    # turns in 5 runs; 0 when the same call returned a single row). Naming the
+    # top-ranked row removes the choice.
+    best = hotel_results[0] if hotel_results else None
+
     return {
         "results": hotel_results,
-        "all_results": results,       # includes city suggestions if caller needs them
         "total": len(hotel_results),
+        # Ready to pass straight into the next tool — no picking required.
+        "best_match": best,
+        "best_match_id": (best or {}).get("id"),
+        "best_match_name": (best or {}).get("name"),
         "service": svc,
         "query": query.strip(),
         "city_filter": city or "",
@@ -214,9 +259,9 @@ def _impl(
             "This search is GLOBAL — always check each result's 'city' before showing it. "
             "For a named hotel in a known destination, prefer "
             "search_hotels(destination_city=..., hotel_name=...) which is city-scoped. "
-            "Otherwise: pass results[0]['id'] as hotel_ids=[id] in get_hotel_info, "
-            "or results[0]['name'] as hotel_name in search_hotels. "
-            "Also capture results[0]['latitude'] and results[0]['longitude'] — "
+            "Otherwise: pass best_match_id as hotel_ids=[id] in get_hotel_info, "
+            "or best_match_name as hotel_name in search_hotels. "
+            "Also capture best_match['latitude'] and best_match['longitude'] — "
             "you will need these as hotel_lat/hotel_lng for search_airport_transfer_dubai."
             if svc == "hotels" else
             _NEXT_STEP.get(svc, _DEFAULT_NEXT_STEP)

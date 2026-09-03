@@ -596,12 +596,27 @@ def _is_from_cache(output: Any) -> bool:
     return False
 
 
+# The provider rejects a turn when it cannot parse the tool call the model
+# emitted, and words it differently each time: "arguments must be a JSON
+# object", and the json module's own parse errors verbatim ("Extra data: line 1
+# column 85", "Expecting value"). Matching one wording let the others escape as
+# a raw traceback in front of the customer, so match the family.
+_MALFORMED_ARGS_SIGNS = (
+    "arguments must be a json object",
+    "extra data: line",
+    "expecting value: line",
+    "expecting ',' delimiter",
+    "expecting property name",
+    "unterminated string starting at",
+)
+
+
 def _is_malformed_tool_args(exc: Exception) -> bool:
-    """True for the provider's 400 on a non-object tool `arguments`."""
-    text = str(exc)
-    return "arguments must be a JSON object" in text or (
-        "tool_calls" in text and "JSON object" in text
-    )
+    """True for the provider's 400 on a tool call it could not parse."""
+    text = str(exc).lower()
+    if any(sign in text for sign in _MALFORMED_ARGS_SIGNS):
+        return True
+    return "tool_calls" in text and "json object" in text
 
 
 def _repair_thread(agent: Any, config: dict[str, Any]) -> None:
@@ -625,9 +640,14 @@ def _repair_thread(agent: Any, config: dict[str, Any]) -> None:
     drop: list[Any] = []
     for m in msgs:
         calls = getattr(m, "tool_calls", None) or []
-        if calls and any(not isinstance(c.get("args"), dict) for c in calls):
+        # A call the provider could not even JSON-decode ("Extra data: line 1
+        # column 85") lands in invalid_tool_calls, not tool_calls, so checking
+        # only tool_calls found nothing to drop, left the thread untouched, and
+        # the retry re-sent the same poisoned history and failed identically.
+        invalid = getattr(m, "invalid_tool_calls", None) or []
+        if invalid or (calls and any(not isinstance(c.get("args"), dict) for c in calls)):
             drop.append(m)
-            for c in calls:
+            for c in [*calls, *invalid]:
                 if c.get("id"):
                     bad_ids.add(str(c["id"]))
     # ToolMessages answering a dropped call would now be orphaned.
@@ -958,19 +978,24 @@ def stream_and_log(
         ):
             yield from _process_chunk(mode, chunk)
     except ValueError as _ve:
-        if "tool_calls" in str(_ve) and "ToolMessage" in str(_ve):
-            # Corrupted checkpoint — clear thread and retry once from scratch
-            _clear_thread()
-            holder.text = ""
-            holder.messages = []
-            for mode, chunk in agent.stream(
-                {"messages": [{"role": "user", "content": user_message}]},
-                config,
-                stream_mode=["messages", "updates"],
-            ):
-                yield from _process_chunk(mode, chunk)
-        else:
+        corrupt = "tool_calls" in str(_ve) and "ToolMessage" in str(_ve)
+        # The provider's 400 on a tool call it could not parse reached voice and
+        # WhatsApp as a raw traceback, because only invoke_and_log handled it.
+        # Same failure, same repair — drop the unparseable turn and retry once.
+        if not (corrupt or _is_malformed_tool_args(_ve)):
             raise
+        if corrupt:
+            _clear_thread()
+        else:
+            _repair_thread(agent, config)
+        holder.text = ""
+        holder.messages = []
+        for mode, chunk in agent.stream(
+            {"messages": [{"role": "user", "content": user_message}]},
+            config,
+            stream_mode=["messages", "updates"],
+        ):
+            yield from _process_chunk(mode, chunk)
 
     # Same empty-turn recovery as invoke_and_log — some phrasings make the
     # model emit nothing; retry once with a nudge instead of an empty bubble.

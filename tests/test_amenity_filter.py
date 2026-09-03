@@ -46,3 +46,50 @@ class TestAmenityDisplayIncludesBar:
 
     def test_display_list_has_no_bar_for_minibar(self):
         assert "Bar" not in _extract_amenities("guestrooms with minibars")
+
+
+class TestEveryRoomTypeIsShown:
+    """The website lists 3 room cards for Admiral Plaza — Superior Double,
+    Superior Twin and Family Room — but the agent showed only Superior types.
+
+    The hotel returns 14 RATES across 3 room types (same room at different
+    board/cancellation terms). room_policies was capped at the 5 cheapest
+    rates, which were all duplicates of the two Superiors, so the Family Room
+    never reached the customer.
+    """
+
+    def _admiral(self):
+        from mcp_tools.search_hotels import _impl
+
+        return _impl(destination_city="Dubai", check_in="2026-10-10",
+                     check_out="2026-10-15", hotel_name="Admiral Plaza",
+                     adults=2, force_refresh=True)
+
+    def test_family_room_is_listed(self):
+        o = (self._admiral().get("options") or [{}])[0]
+        rooms = " ".join(p["room"].lower() for p in o.get("room_policies") or [])
+        assert "family room" in rooms, rooms
+
+    def test_no_duplicate_room_types(self):
+        o = (self._admiral().get("options") or [{}])[0]
+        names = [p["room"].strip().lower() for p in o.get("room_policies") or []]
+        assert len(names) == len(set(names)), f"duplicates: {names}"
+
+    def test_distinct_type_count_is_reported(self):
+        o = (self._admiral().get("options") or [{}])[0]
+        # 14 rates collapse to 3 real choices; both numbers are surfaced.
+        assert o.get("room_options_count", 0) > o.get("room_types_total", 0)
+        assert o.get("room_types_total") == len(o.get("room_policies") or [])
+
+    def test_cheapest_rate_wins_per_type(self):
+        # _room_policy_breakdown sorts refundable-first then cheapest, so the
+        # kept row for a type must be its cheapest occurrence.
+        from mcp_tools.search_hotels import _room_policy_breakdown
+
+        rooms = [
+            {"RoomTypeName": "Family Room", "TotalRate": 900, "RoomRates": []},
+            {"RoomTypeName": "Family Room", "TotalRate": 500, "RoomRates": []},
+        ]
+        out = _room_policy_breakdown(rooms, 1)
+        prices = [p["price_inr"] for p in out if "family" in p["room"].lower()]
+        assert prices == sorted(prices), prices

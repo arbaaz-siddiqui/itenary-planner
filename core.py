@@ -528,6 +528,18 @@ class TourOption(BaseModel):
     # Empty when the supplier publishes no per-transfer-type split.
     transfer_prices: list[dict[str, Any]] = Field(default_factory=list)
     transfer_price_display: str = ""
+    # True once the transfer lookup finished for this tour. False means it was
+    # cut off by the fan-out deadline, which is NOT the same as the supplier
+    # publishing no rates — sharing_display must not conflate the two.
+    transfer_lookup_done: bool = False
+    # True when every transfer-id probe raised (tour 30580 answers HTTP 500 on
+    # all of them). A supplier fault, not an absence of rates.
+    transfer_lookup_failed: bool = False
+    # Bookable variants of this tour, harvested from the /tours/options call
+    # that the transfer-price fetch already makes. addon_names lets a search row
+    # say it HAS extras, so the agent offers them instead of asking which tour.
+    variant_count: int = 0
+    addon_names: list[str] = Field(default_factory=list)
     full_description: str = ""
     inclusions: list[str] = Field(default_factory=list)
     exclusions: list[str] = Field(default_factory=list)
@@ -583,12 +595,20 @@ class TourOption(BaseModel):
         # Real prices win over any wording about them.
         if self.transfer_price_display:
             return self.transfer_price_display
+        # Only the supplier can tell us rates are unpublished. If our own lookup
+        # never finished, say that instead of asserting a supplier fact.
+        if self.transfer_lookup_failed:
+            unpriced = "transfer rates unavailable from the supplier right now"
+        elif self.transfer_lookup_done:
+            unpriced = "rates not published for this date yet"
+        else:
+            unpriced = "rates not retrieved — ask me to re-check"
         if self.transfer_options:
             names = ", ".join(self.transfer_options)
-            return f"Transfer options: {names} (rates not published for this date yet)"
+            return f"Transfer options: {names} ({unpriced})"
         s = (self.transfer_scenario or "").strip().lower()
         if "all" in s:
-            return "Shared or private transfer available (rates not published for this date yet)"
+            return f"Shared or private transfer available ({unpriced})"
         if "private" in s:
             return "Private transfer included"
         if "shar" in s:

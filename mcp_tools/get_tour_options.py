@@ -171,7 +171,7 @@ def _impl(
             row["price_display"] = "On request"
         return row
 
-    ex = _cf.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(listed)))
+    ex = _cf.ThreadPoolExecutor(max_workers=max(1, min(_MAX_WORKERS, len(listed))))
     try:
         futures = [ex.submit(_price, o) for o in listed]
         done, _pending = _cf.wait(futures, timeout=_FETCH_DEADLINE_S)

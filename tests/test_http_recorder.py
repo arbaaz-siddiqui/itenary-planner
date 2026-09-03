@@ -31,7 +31,12 @@ def test_records_full_url_and_fields() -> None:
     assert rec["url"] == "https://stagingapi.gujjutours.com/api/Currency/ROE/INR"
     assert rec["method"] == "GET"
     assert rec["status_code"] == 200
-    assert rec["seq"] == 1
+    # seq is a process-wide monotonic counter and clear_http_request_log()
+    # deliberately does NOT reset it: http_requests_since(cursor) and the debug
+    # tab hold cursors across turns, so restarting at 1 would make a stale
+    # cursor match new requests. Assert it is a positive int, not that this
+    # test ran first — it only passed before because nothing preceded it.
+    assert isinstance(rec["seq"], int) and rec["seq"] > 0
 
 
 def test_since_cursor_returns_only_new() -> None:

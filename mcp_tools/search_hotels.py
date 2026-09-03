@@ -209,7 +209,9 @@ def _enrich_with_content(option_dicts: list[dict[str, Any]], city_id: int) -> No
         o["dining_display"] = _dining_summary(desc)
         o["description_short"] = desc[:280].rsplit(" ", 1)[0] + ("…" if len(desc) > 280 else "")
 
-    ex = _cf.ThreadPoolExecutor(max_workers=min(_CONTENT_MAX_WORKERS, len(option_dicts)))
+    ex = _cf.ThreadPoolExecutor(
+        max_workers=max(1, min(_CONTENT_MAX_WORKERS, len(option_dicts)))
+    )
     try:
         futures = [ex.submit(_one, o) for o in option_dicts]
         _cf.wait(futures, timeout=_CONTENT_DEADLINE_S)
@@ -793,14 +795,23 @@ def _impl(
             # UI renders this table itself (_render_hotel), so the model only
             # needs a compact digest, not the full matrix.
             policies = _room_policy_breakdown(hotel_rooms, nights)
+            seen: set[str] = set()
+            distinct: list[dict[str, Any]] = []
+            for p in policies:
+                key = str(p.get("room") or "").strip().lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                distinct.append(p)
             o["room_policies"] = [
                 {
                     "room": p["room"],
                     "total": p["price_display"],
                     "cancel": p["policy"],
                 }
-                for p in policies[:5]
+                for p in distinct[:8]
             ]
+            o["room_types_total"] = len(seen)
             # `amenities` duplicates `amenities_display`; keep the readable one.
             o.pop("amenities", None)
             o.pop("rooms", None)
