@@ -95,6 +95,13 @@ class TestZeroRateTiersAreIncludedNotDropped:
         names = {t["transfer_type"] for t in tiers}
         assert any("Sharing" in n for n in names), f"Sharing tier dropped: {names}"
         assert any("Private" in n for n in names), names
-        sharing = next(t for t in tiers if "Sharing" in t["transfer_type"])
-        assert sharing["price_inr"] == 0
-        assert "Included" in sharing["price_display"] or "\u20b90" in sharing["price_display"]
+        # Whichever tiers are free today must still be present and labelled as
+        # included rather than silently dropped.
+        zero = [t for t in tiers if t["price_inr"] == 0]
+        assert zero, f"no zero-rate tier survived: {tiers}"
+        for t in zero:
+            assert "Included" in t["price_display"] or "\u20b90" in t["price_display"]
+        # A paid tier must carry a real figure, never "Included".
+        for t in tiers:
+            if t["price_inr"]:
+                assert "Included" not in t["price_display"]

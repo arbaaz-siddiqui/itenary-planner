@@ -155,8 +155,19 @@ class LlmSettings(BaseSettings):
     # Comma-separated OpenRouter upstream host names to prefer, in order (e.g.
     # "SiliconFlow,AtlasCloud"). Empty = OpenRouter default routing (what the
     # earlier fast branches used). Set to pin away from slow/flaky hosts.
+    # Upstream hosts that actually return content. Measured 2026-09-06 with the
+    # real agent payload (11 KB prompt + 36 tool schemas), 4 calls each:
+    #   Google 0/4 null   DeepInfra 0/4   Cloudflare 0/4   Novita 0/4
+    #   NextBit 4/4 null  Parasail 4/4    SiliconFlow 4/4
+    # The broken three answer HTTP 200 with `content: null`, no tool_calls and
+    # finish_reason "stop" while billing completion tokens — the reply is
+    # generated and dropped upstream. With this empty, OpenRouter routed onto
+    # them and the customer got a BLANK message (4 of 5 runs on one query).
+    # Defaulted in code, not just .env, because .env is gitignored and never
+    # reaches the deployment.
     openrouter_providers: str = Field(
-        default="", validation_alias="OPENROUTER_PROVIDERS"
+        default="Google,DeepInfra,Cloudflare,Novita",
+        validation_alias="OPENROUTER_PROVIDERS",
     )
     selfhosted_base_url: str = Field(
         default="http://localhost:8000/v1", validation_alias="SELFHOSTED_BASE_URL"

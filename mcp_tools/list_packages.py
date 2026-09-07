@@ -13,6 +13,7 @@ from langchain_core.tools import tool
 
 from booking_api import call_list_packages, call_package_rates
 from core import TripPlannerError, nights_between
+from rules import missing_search_fields, needs_input_error
 from mcp_tools.server import mcp
 from parsers import parse_package_response
 from reference_data_loader import resolve_city
@@ -48,11 +49,33 @@ def _impl(
         if city is None:
             return {
                 "error": True,
-                "message": f"Unsupported destination: {destination_city!r}",
+                "message": (
+                    f"We do not sell packages in {destination_city!r} — the "
+                    f"supplier's inventory for this service is Dubai only."
+                ),
                 "error_type": "UnsupportedRoute",
+                # A bare "Unsupported destination" got paraphrased to the
+                # customer as "I don't have that in my database", which reads
+                # as OUR system being broken rather than us not selling it.
+                "agent_instructions": (
+                    f"Say plainly that we do not offer packages in that city — we "
+                    f"cover Dubai for this service. Never say the data is "
+                    f"missing, unavailable, or not in your database, and never "
+                    f"imply a technical problem. Offer the Dubai equivalent "
+                    f"instead, and do not ask the customer for more details "
+                    f"first — the city is the blocker, not their input."
+                ),
             }
 
-        nights = nights_between(check_in, check_out) if (check_in and check_out) else 0
+        # The supplier REQUIRES both dates: sending checkInDate:"" returns
+        # HTTP 400 `{"$.checkInDate": ["Can't get datetime from the reader!"]}`
+        # and the whole package list is lost. We were treating them as optional
+        # and defaulting nights to 0, so every dateless ask returned nothing.
+        missing = missing_search_fields(check_in=check_in, check_out=check_out)
+        if missing:
+            return needs_input_error(missing)
+
+        nights = nights_between(check_in, check_out)
 
         list_raw = call_list_packages(
             country_id=int(city["country_id"]),

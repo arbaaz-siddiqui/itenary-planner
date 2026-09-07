@@ -70,6 +70,30 @@ def _hotel_name_from_coords(lat: float, lng: float) -> str | None:
     return None
 
 
+def _transfers_table(options: list[dict[str, Any]]) -> str:
+    """One markdown row per vehicle — built here so none can be dropped.
+
+    The supplier returned 20 vehicles for DXB -> Rove Downtown and the reply
+    showed one, because the success path shipped no display rules at all.
+    """
+    head = (
+        "| Vehicle | Type | Capacity | Luggage | Price (total) | Cancellation |"
+        + chr(10) + "|---|---|---|---|---|---|"
+    )
+    rows = []
+    for o in options:
+        cells = [
+            str(o.get("vehicle_name") or ""),
+            str(o.get("transfer_type") or ""),
+            f"{o.get('capacity')} pax" if o.get("capacity") else "-",
+            f"{o.get('luggage_capacity')} bags" if o.get("luggage_capacity") else "-",
+            str(o.get("price_display") or "-"),
+            str(o.get("cancellation_policy_summary") or "-"),
+        ]
+        rows.append("| " + " | ".join(c.replace("|", "/") for c in cells) + " |")
+    return chr(10).join([head, *rows])
+
+
 def _impl(
     arrival_date: str,
     hotel_name: str = "",
@@ -256,11 +280,35 @@ def _impl(
                 ),
             }
 
+        # Ready-to-quote strings. Every other search tool ships these; without
+        # them the model had raw floats and rendered one vehicle out of 20.
+        for _o in options_out:
+            if _o.get("price_inr") is not None:
+                _o["price_display"] = f"₹{_o['price_inr']:,.0f}"
+            if _o.get("per_person_inr") is not None:
+                _o["per_person_display"] = f"₹{_o['per_person_inr']:,.0f}"
+
         return {
             "options": options_out,
+            "table_markdown": _transfers_table(options_out),
             "cheapest_price_inr": options_out[0]["price_inr"] if options_out else None,
             "cheapest_per_person_inr": options_out[0].get("per_person_inr") if options_out else None,
             "total_results": len(options_out),
+            "rows_to_render": len(options_out),
+            # The success path had NO agent_instructions at all — only the two
+            # error paths did — so a good result arrived with 20 vehicles and no
+            # rule about showing them, and the customer saw a single car.
+            "agent_instructions": (
+                f"PASTE `table_markdown` VERBATIM — all {len(options_out)} "
+                f"vehicles, none dropped. The supplier offers "
+                f"{len(options_out)} vehicles for this route and showing one "
+                f"makes us look like we have no choice. Quote `price_display` "
+                f"exactly and never recompute it. A Private row's price is for "
+                f"the WHOLE vehicle, not per person — say so, and read "
+                f"`capacity` / `luggage_capacity` before recommending one for "
+                f"the party size. Relay `availability_note` when it is set, and "
+                f"never offer a provider this tool did not return."
+            ),
             "transfer_type_filter": transfer_type or "all",
             "adults": adults,
             "pricing_rule": (

@@ -1048,11 +1048,18 @@ def needs_input_error(missing: list[str], *, assumed_ok: bool = False) -> dict[s
             f"Cannot search accurately without {joined}. Ask the customer for "
             f"{'it' if len(asks) == 1 else 'these'} in ONE short question, then "
             "call this tool again. Do NOT guess a value, and do NOT present any "
-            "result for a value the customer did not give — a trip with no "
-            "departure city was once searched as Mumbai and the fares shown as "
-            "fact. If the customer declines to say or tells you to search "
-            "anyway, call again with assume_missing=True and state plainly which "
-            "value you assumed."
+            "result for a value the customer did not give — a search once "
+            "invented a value the customer never said and showed the prices as "
+            "fact. Ask ONLY for the fields named above: this refusal lists "
+            "every field this tool needs, so asking for anything else (a "
+            "departure city for a hotel, say) costs the customer a turn for "
+            "data we never use. If the customer declines to say or tells you to "
+            "search anyway, call again with assume_missing=True and state "
+            "plainly which value you assumed."
         ),
         "retry_with": {m: "<value from the customer>" for m in missing},
+        "do_not_ask_for": (
+            "Anything not in missing_fields — especially a departure/origin "
+            "city, which only search_flights uses."
+        ),
     }

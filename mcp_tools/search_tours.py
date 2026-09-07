@@ -325,8 +325,22 @@ def _impl(
         if city is None or not city.get("city_id"):
             return {
                 "error": True,
-                "message": f"Unsupported destination: {destination_city!r}",
+                "message": (
+                    f"We do not sell tours in {destination_city!r} — the "
+                    f"supplier's inventory for this service is Dubai only."
+                ),
                 "error_type": "UnsupportedRoute",
+                # A bare "Unsupported destination" got paraphrased to the
+                # customer as "I don't have that in my database", which reads
+                # as OUR system being broken rather than us not selling it.
+                "agent_instructions": (
+                    f"Say plainly that we do not offer tours in that city — we "
+                    f"cover Dubai for this service. Never say the data is "
+                    f"missing, unavailable, or not in your database, and never "
+                    f"imply a technical problem. Offer the Dubai equivalent "
+                    f"instead, and do not ask the customer for more details "
+                    f"first — the city is the blocker, not their input."
+                ),
             }
         list_raw = call_tour_search(
             country_id=int(city["country_id"]),
@@ -421,6 +435,7 @@ def _impl(
         # target for a follow-up add-ons question.
         addon_rows = [o for o in options if getattr(o, "addon_names", None)]
 
+
         option_dicts = []
         for o in options:
             d = o.model_dump()
@@ -510,19 +525,6 @@ def _impl(
                     "under discussion — do NOT ask them which tour, and never "
                     "answer that a tour has no add-ons without calling "
                     "get_tour_options for it first. "
-                )
-                + (
-                    # Naming the ONE row that has extras, with its id, removes
-                    # the ambiguity that made the model ask "which tour?" on a
-                    # follow-up: on a 15-row page it could not tell which row
-                    # "it" meant, so it asked instead of calling the tool.
-                    f"Only ONE tour on this page has add-ons: "
-                    f"{addon_rows[0].name!r}, tour_id={addon_rows[0].tour_id}. "
-                    f"Any add-on / extras / upgrade question about this page is "
-                    f"about that tour — call "
-                    f"get_tour_options(tour_id={addon_rows[0].tour_id}, "
-                    f"travel_date={travel_date!r}) and answer from it. "
-                    if len(addon_rows) == 1 else ""
                 )
                 + (
                     "Do NOT quote counts or totals to the customer — no '85 tours', "

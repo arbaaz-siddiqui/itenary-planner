@@ -1193,12 +1193,32 @@ def call_entity_search(
 
     svc = service.lower().rstrip("/")
     url = f"{ENTITY_SEARCH_BASE}/{svc}?q={urllib.parse.quote(query)}&size={size}"
+    # This endpoint uses raw urllib (public, no bearer token, different host),
+    # so it never reached record_http_request and the debug tab showed ZERO
+    # calls for every lookup_entity — which reads as the agent answering from
+    # memory when it had in fact fetched live data. Record it explicitly.
+    import time as _time
+
+    from .http_client import record_http_request
+
+    started = _time.perf_counter()
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             import json as _json
-            return _json.loads(resp.read().decode())
+            body = _json.loads(resp.read().decode())
+        record_http_request(
+            method="GET", url=url, status_code=200,
+            duration_ms=(_time.perf_counter() - started) * 1000,
+            response_body=body,
+        )
+        return body
     except Exception as e:
+        record_http_request(
+            method="GET", url=url, status_code=None,
+            duration_ms=(_time.perf_counter() - started) * 1000,
+            error=str(e),
+        )
         return {"data": [], "error": str(e)}
 
 

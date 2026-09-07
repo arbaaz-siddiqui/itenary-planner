@@ -92,7 +92,25 @@ def _impl(
     try:
         raw = call_tour_options(tour_id=int(tour_id), travel_date=travel_date)
     except TripPlannerError as e:
-        return {"error": True, "message": str(e), "error_type": "TourOptionsFailed"}
+        # A bare error made the model improvise: it apologised for a "technical
+        # glitch" and asked which hotel the customer was staying at (irrelevant
+        # to tour variants) while priced tours sat on screen. Say what to do.
+        return {
+            "error": True,
+            "message": str(e),
+            "error_type": "TourOptionsFailed",
+            "agent_instructions": (
+                "The variant lookup failed — this says NOTHING about the tour's "
+                "availability or price. Retry get_tour_options once with the "
+                "same arguments. If it fails again, present the tour from the "
+                "search_tours row you already have (its price and transfer "
+                "prices are valid) and say you could not load the ticket "
+                "variants right now, offering to re-check. Do NOT apologise for "
+                "a technical glitch, do NOT ask which hotel or area they are "
+                "staying in (that is irrelevant to tour variants), and do NOT "
+                "ask for information the customer has already given."
+            ),
+        }
 
     listed = ((raw or {}).get("result") or {}).get("tourOptionlist") or []
     if not listed:

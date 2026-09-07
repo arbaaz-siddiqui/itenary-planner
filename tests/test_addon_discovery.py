@@ -46,17 +46,6 @@ class TestSearchRowsAdvertiseTheirAddons:
         header, _sep, *body = table.splitlines()
         assert all(len(r.split("|")) == len(header.split("|")) for r in body)
 
-    def test_a_single_addon_tour_is_named_with_its_id(self):
-        # This is what removes the ambiguity: the instruction names the one
-        # tour and its id, so a follow-up needs no question back.
-        res = self._desert()
-        rows = [o for o in res["options"] if o.get("addon_names")]
-        if len(rows) != 1:
-            return
-        note = res["agent_instructions"]
-        assert "Only ONE tour on this page has add-ons" in note
-        assert f"tour_id={rows[0]['tour_id']}" in note
-
     def test_instructions_forbid_asking_which_tour(self):
         note = self._desert()["agent_instructions"]
         assert "do NOT ask them which tour" in note

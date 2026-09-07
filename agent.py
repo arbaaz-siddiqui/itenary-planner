@@ -271,8 +271,79 @@ def build_react_agent(
         model=llm,
         tools=parallel_tools,
         prompt=load_system_prompt(surface=surface),
+        post_model_hook=_split_concatenated_args,
         checkpointer=checkpointer,
     )
+
+
+def _split_concatenated_args(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Split a tool call whose arguments are two JSON objects stuck together.
+
+    Asked to compare two restaurants the model wants two `lookup_entity` calls
+    and emits ONE whose arguments are `{...}{...}`. LangChain accepts that, but
+    the provider rejects the message when it is replayed in history, returning
+    HTTP 200 with `{"error": "Extra data: line 1 column 64"}` — so the turn dies
+    and the customer gets a blank reply, permanently, because the poisoned
+    message is now in the thread.
+
+    The objects are cleanly separable with raw_decode, so recover the calls the
+    model intended rather than losing the turn.
+    """
+    msgs = (state or {}).get("messages") or []
+    if not msgs:
+        return None
+    last = msgs[-1]
+    if last.__class__.__name__ != "AIMessage":
+        return None
+
+    raw_calls = list(getattr(last, "tool_calls", None) or [])
+    invalid = list(getattr(last, "invalid_tool_calls", None) or [])
+    if not raw_calls and not invalid:
+        return None
+
+    decoder = json.JSONDecoder()
+    fixed: list[dict[str, Any]] = []
+    changed = False
+    for call in [*raw_calls, *invalid]:
+        args = call.get("args")
+        # A recoverable call carries its arguments as an unparsed string.
+        text = args if isinstance(args, str) else None
+        if text is None:
+            fixed.append(call)
+            continue
+        parts: list[Any] = []
+        idx = 0
+        try:
+            while idx < len(text):
+                obj, end = decoder.raw_decode(text, idx)
+                parts.append(obj)
+                idx = end
+                # Skip whitespace or a stray comma between the two objects.
+                while idx < len(text) and (text[idx].isspace() or text[idx] == ","):
+                    idx += 1
+        except ValueError:
+            parts = []
+        if len(parts) < 2:
+            fixed.append(call)
+            continue
+        changed = True
+        for i, obj in enumerate(parts):
+            fixed.append({
+                "name": call.get("name", ""),
+                "args": obj,
+                "id": f"{call.get('id') or 'call'}_{i}",
+                "type": "tool_call",
+            })
+
+    if not changed:
+        return None
+    logging.getLogger("agent.turn").warning(
+        "split concatenated tool args into %d calls", len(fixed)
+    )
+    repaired = last.model_copy(update={"tool_calls": fixed, "invalid_tool_calls": []})
+    repaired.id = last.id
+    return {"messages": [repaired]}
+
 
 
 # =============================================================================
@@ -509,15 +580,28 @@ def log_turn(
         }
 
         with FileLock(str(LOCK_FILE), timeout=10):
-            if BENCHMARK_FILE.exists():
-                existing = pd.read_excel(BENCHMARK_FILE)
+            existing = None
+            # A run killed mid-write leaves a 0-byte file. exists() is then True
+            # and read_excel raises "Excel file format cannot be determined" on
+            # EVERY later turn, so benchmark logging stays broken until someone
+            # deletes it by hand. Treat an unreadable file as absent.
+            if BENCHMARK_FILE.exists() and BENCHMARK_FILE.stat().st_size > 0:
+                try:
+                    existing = pd.read_excel(BENCHMARK_FILE)
+                except Exception:  # noqa: BLE001 — corrupt file, start fresh
+                    log.warning("benchmark_file_unreadable_recreating")
+            if existing is not None:
                 new_df = pd.concat(
                     [existing, pd.DataFrame([row], columns=BENCHMARK_COLUMNS)],
                     ignore_index=True,
                 )
             else:
                 new_df = pd.DataFrame([row], columns=BENCHMARK_COLUMNS)
-            new_df.to_excel(BENCHMARK_FILE, index=False)
+            # Write to a temp file then replace, so an interrupted write cannot
+            # truncate the real one.
+            tmp = BENCHMARK_FILE.with_suffix(".xlsx.tmp")
+            new_df.to_excel(tmp, index=False)
+            tmp.replace(BENCHMARK_FILE)
     except Exception as e:
         log.warning("benchmark_log_failed", error=str(e), error_type=type(e).__name__)
 
@@ -785,6 +869,7 @@ def _recover_empty_turn(agent: Any, response: dict[str, Any], config: dict[str, 
             return response
         response = retry
     return response
+
 
 
 # A turn that produced no assistant text AND no tool calls retrieved nothing.

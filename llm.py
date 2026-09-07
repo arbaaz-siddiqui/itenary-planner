@@ -10,6 +10,7 @@ Currently supported:
 
 from __future__ import annotations
 
+import httpx
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
@@ -67,7 +68,19 @@ def build_openrouter_llm(
         base_url=s.openrouter_base_url,
         temperature=temperature,
         max_tokens=max_tokens,
+        # `timeout` alone landed on the LangChain wrapper while the underlying
+        # OpenAI client still reported timeout=None, so a stalled connection
+        # hung forever — one turn sat for 10,766s (~3 hours) and every request
+        # after it failed in ~1.5s on the poisoned pool. httpx_client pins the
+        # timeout where it is actually enforced.
         timeout=120,
+        http_client=httpx.Client(
+            timeout=httpx.Timeout(120.0, connect=10.0),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=5),
+        ),
+        # A dropped connection killed the turn outright; two retries ride out
+        # the transient drops we measured (19 in one long run).
+        max_retries=2,
         **({"extra_body": extra_body} if extra_body else {}),
     )
 

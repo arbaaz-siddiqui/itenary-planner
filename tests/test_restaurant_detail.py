@@ -8,6 +8,7 @@ The supplier returns both, and the client named the exact fields:
 appears only in the details response, not the list.
 """
 
+import pytest
 from parsers import parse_restaurant_response
 
 
@@ -155,12 +156,24 @@ class TestReviewRatingWinsOverTopLevel:
         assert parse_restaurant_response(raw)[0].rating == 4.1
 
     def test_live_rangoli_reports_the_review_rating(self):
-        # The exact case the client checked in Postman.
+        # The exact case the client checked in Postman: the supplier sends BOTH
+        # `rating` and `review.rating`, and we must relay review.rating.
+        #
+        # Assert that RULE against whatever the supplier returns today, never a
+        # fixed score: hardcoding a live value reports the supplier changing its
+        # data as a code defect (a Burj transfer tier went 0 -> 33.99 AED and
+        # broke a test that way).
         from mcp_tools.get_restaurant_details import _impl
 
         out = _impl(restaurant_id=3, destination_city="Dubai",
                     search_date="2026-10-01", adults=1)
-        assert (out.get("restaurant") or {}).get("rating") == 4.4
+        r = out.get("restaurant") or {}
+        raw = out.get("raw_review_rating") or r.get("rating")
+        assert r.get("rating"), "no rating relayed"
+        # Whatever the supplier publishes today, we must relay it unrounded —
+        # the bug was reporting 4 when review.rating said 4.4.
+        assert r["rating"] == pytest.approx(float(raw))
+        assert str(r["rating"]) in (r.get("rating_display") or "")
 
 
 class TestFactsAreNotAnsweredFromMemory:

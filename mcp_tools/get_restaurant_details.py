@@ -28,8 +28,22 @@ def _impl(
         if city is None or not city.get("city_id"):
             return {
                 "error": True,
-                "message": f"Unsupported destination: {destination_city!r}",
+                "message": (
+                    f"We do not sell restaurants in {destination_city!r} — the "
+                    f"supplier's inventory for this service is Dubai only."
+                ),
                 "error_type": "UnsupportedRoute",
+                # A bare "Unsupported destination" got paraphrased to the
+                # customer as "I don't have that in my database", which reads
+                # as OUR system being broken rather than us not selling it.
+                "agent_instructions": (
+                    f"Say plainly that we do not offer restaurants in that city — we "
+                    f"cover Dubai for this service. Never say the data is "
+                    f"missing, unavailable, or not in your database, and never "
+                    f"imply a technical problem. Offer the Dubai equivalent "
+                    f"instead, and do not ask the customer for more details "
+                    f"first — the city is the blocker, not their input."
+                ),
             }
         from parsers import parse_restaurant_response
         from fx import live_rate_map

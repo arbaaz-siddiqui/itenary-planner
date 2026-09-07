@@ -574,6 +574,22 @@ def _call_status(call: dict[str, Any]) -> tuple[str, str]:
     return "🟢", "ok"
 
 
+
+def _endpoint_label(url: str) -> str:
+    """Path prefixed with the host when it is not the main B2B API.
+
+    The debug tab split on "/api" and showed the path alone, so a 404 could not
+    be attributed to a host. Several endpoints live on a different host from
+    the rest (the tour-option APIs are B2C-only), and a live 404 on
+    `/tours/options` was unattributable for exactly that reason.
+    """
+    text = str(url or "?")
+    path = text.split("/api", 1)[-1] if "/api" in text else text
+    host = text.split("//", 1)[-1].split("/", 1)[0] if "//" in text else ""
+    if host and not host.startswith("stagingapi."):
+        return f"{host}{path}"
+    return path
+
 def _status_code_emoji(status_code: int | None, error: str | None) -> str:
     if error:
         return "🔴"
@@ -633,7 +649,7 @@ def _render_call_record(call: dict[str, Any], idx: int) -> None:
                 st.markdown(
                     f"**{_status_code_emoji(sc, h.get('error'))} "
                     f"{h.get('method', '?')} "
-                    f"`{str(h.get('url', '?')).split('/api', 1)[-1]}`** · "
+                    f"`{_endpoint_label(h.get('url', '?'))}`** · "
                     f"{status} · {h.get('duration_ms', '?')} ms"
                 )
                 k = f"{call.get('turn', 0)}_{idx}_{j}"
@@ -798,7 +814,7 @@ def _render_debug_inspector() -> None:
                 st.caption(
                     f"{_status_code_emoji(sc, h.get('error'))} "
                     f"`{h.get('method', '?')} "
-                    f"{str(h.get('url', '?')).split('/api', 1)[-1]}` · "
+                    f"{_endpoint_label(h.get('url', '?'))}` · "
                     f"{h.get('error') or ('HTTP ' + str(sc) if sc is not None else '?')} · "
                     f"{h.get('duration_ms', '?')} ms · turn {h.get('turn', '?')}"
                 )
