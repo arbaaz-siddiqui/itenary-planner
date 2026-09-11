@@ -1,8 +1,21 @@
+# Chat API for the Next.js UI (branch: chat/nextjs/development).
+#
+# This branch exists so the new UI can be deployed WITHOUT touching
+# chat/development, which serves the working Streamlit app. The two are
+# separate Railway services reading separate branches, so a problem here
+# cannot take the live chat down.
+#
+# The web front-end is a SECOND service off this same branch with its root
+# directory set to `web/` — Next.js has its own build, so it does not belong
+# in this file.
 [build]
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "PYTHONPATH=/app uvicorn voice_service:app --host 0.0.0.0 --port $PORT"
+startCommand = "PYTHONPATH=/app uvicorn api.main:app --host 0.0.0.0 --port $PORT"
+# /health is liveness only. /health/db proves Postgres is reachable, but it is
+# deliberately NOT the healthcheck: a database blip would then loop the
+# deployment instead of letting the API come up and report the problem.
 healthcheckPath = "/health"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"

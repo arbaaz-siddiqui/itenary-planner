@@ -1010,8 +1010,27 @@ _FIELD_PROMPTS: dict[str, str] = {
 _CONVERSATION_TEXT: ContextVar[str] = ContextVar("conversation_text", default="")
 
 
+# The party size persists ACROSS turns, unlike the turn text above.
+#
+# A customer states it once ("we are 9 ppl") and every later message assumes
+# it -- "give me the price breakup" carries no number at all. Reading only the
+# current turn made the tools fall back to the default of 2 adults, so the
+# follow-up quoted a 1-pax transfer of Rs 3,587 where the party of nine owes
+# Rs 16,139.
+_PARTY_SIZE: ContextVar[int | None] = ContextVar("party_size", default=None)
+
+
 def set_conversation_text(text: str) -> None:
     _CONVERSATION_TEXT.set((text or "").lower())
+    # A newly stated size replaces the old one; silence keeps the last.
+    stated = _party_size_in_text((text or "").lower())
+    if stated:
+        _PARTY_SIZE.set(stated)
+
+
+def reset_party_size() -> None:
+    """Forget the remembered size — a new conversation is a new party."""
+    _PARTY_SIZE.set(None)
 
 
 def customer_said(value: str) -> bool:
@@ -1025,6 +1044,38 @@ def customer_said(value: str) -> bool:
     if not said or not value:
         return True
     return value.strip().lower().split()[0] in said
+
+
+_PAX_PHRASE = re.compile(
+    r"(?:we are|we're|group of|party of|for the|for)\s+(\d{1,2})\s*"
+    r"(?:ppl|people|persons?|pax|adults?|travellers?|travelers?)",
+    re.I,
+)
+
+
+def _party_size_in_text(said: str) -> int | None:
+    """The last party size stated in one piece of text, or None."""
+    best: int | None = None
+    for m in _PAX_PHRASE.finditer(said or ""):
+        try:
+            n = int(m.group(1))
+        except (TypeError, ValueError):
+            continue
+        if 1 <= n <= 60:
+            best = n  # the LAST stated size wins: parties change mid-chat
+    return best
+
+
+def party_size_said() -> int | None:
+    """The party size the customer stated this turn, or None.
+
+    The model kept answering a new party size from an OLD tool result by doing
+    its own arithmetic: asked for 8 people it relayed a private transfer of
+    Rs 34,560, which is the 1-pax figure (4,320) times eight, against a real
+    Rs 4,468. Reading the number from the customer's own words lets the tools
+    refuse to serve a result priced for somebody else.
+    """
+    return _party_size_in_text(_CONVERSATION_TEXT.get()) or _PARTY_SIZE.get()
 
 
 def missing_search_fields(**fields: object) -> list[str]:
@@ -1061,5 +1112,137 @@ def needs_input_error(missing: list[str], *, assumed_ok: bool = False) -> dict[s
         "do_not_ask_for": (
             "Anything not in missing_fields — especially a departure/origin "
             "city, which only search_flights uses."
+        ),
+    }
+
+
+# =============================================================================
+# === PRICING — tour transfers (sharing per person w/ minimum, private per car)
+# =============================================================================
+def transfer_quote(
+    *,
+    tour_rate_inr: float,
+    pax: int,
+    sharing_price_inr: float | None = None,
+    private_price_inr: float | None = None,
+    sharing_min_pax: int | None = None,
+    private_max_pax: int | None = None,
+    supplier_priced_for_pax: bool = True,
+) -> dict[str, object]:
+    """Total cost of a tour with each transfer option, for a known party size.
+
+    Two different pricing bases, which is why a flat "Sharing Rs 1,772" beside
+    every tour is wrong in both directions:
+
+      SHARING is per person, with a floor -- `minPax` is 2 on most tours, so a
+      solo traveller still pays for two seats. BUT when the figures come from a
+      rate call made for this party size (`supplier_priced_for_pax=True`, the
+      normal path) the supplier has ALREADY multiplied, exactly as it does for
+      private. Verified live: sharing rate / pax is a flat 102.30 from pax 2
+      through 10. Multiplying again billed a party of ten 10x the real price.
+
+      PRIVATE is per VEHICLE. The seat count is NOT `maxPax` -- measured
+      against the live API, Desert Safari and Burj Khalifa both report
+      `maxPax: 12` while their private tier DOUBLES at pax 7 (440 -> 880 AED),
+      so the real vehicle holds 6 and `maxPax` is a booking ceiling of two
+      cars. Dividing by `maxPax` would have returned one vehicle for a party of
+      ten and undercharged by a whole car.
+
+      The supplier already applies the vehicle multiple itself: its
+      `startingFromRate` for the private tier steps up as pax crosses a
+      vehicle boundary. So when the figures come from a per-pax rate call
+      (`supplier_priced_for_pax=True`, the normal path) we must NOT multiply
+      again -- that would double-charge. `private_vehicles` is reported for
+      transparency, inferred from the price step rather than asserted.
+
+    `tour_rate_inr` is the TICKET total for `pax` people with no transfer, i.e.
+    what transferId=3 returns. Passing a transfer-inclusive rate here would
+    count the transfer twice -- the bug that showed a Rs 2,074 Dhow ticket as
+    Rs 5,630.
+
+    Returns one entry per available transfer type, cheapest first, so the agent
+    relays a real comparison instead of two indistinguishable per-unit prices.
+    """
+    pax = max(1, int(pax or 1))
+    options: list[dict[str, object]] = []
+
+    if sharing_price_inr:
+        floor = max(1, int(sharing_min_pax or 1))
+        billed = max(pax, floor)
+        if supplier_priced_for_pax:
+            # The rate call was made FOR this party size, so its sharing figure
+            # is already the party total -- not a per-head unit. Verified live
+            # on tour 53632/option 222565: the sharing rate divided by pax is a
+            # flat 102.30 from pax 2 through 10 (204.6, 511.5, 613.8, 716.1,
+            # 1023), i.e. the supplier has already multiplied. Multiplying here
+            # too billed a party of ten 10,230 against a real 1,023 -- a 10x
+            # OVERCHARGE, the mirror of the undercharge the private branch
+            # guards against.
+            transfer_total = round(float(sharing_price_inr), 2)
+            per_person = round(transfer_total / max(1, pax), 2)
+            note = f"per person (~{per_person:,.2f} x {pax})"
+            if floor > pax:
+                # The supplier's own minimum is already inside the figure it
+                # returned; say so rather than re-applying it.
+                note += f", supplier minimum is {floor} pax"
+        else:
+            # Caller holds a genuine per-person unit price, so the floor and the
+            # multiplication are ours to apply.
+            transfer_total = round(float(sharing_price_inr) * billed, 2)
+            per_person = round(float(sharing_price_inr), 2)
+            note = f"per person x {billed}"
+            if billed > pax:
+                # Being explicit matters: the customer will otherwise read the
+                # total as an error when they are billed for seats they did not
+                # ask for.
+                note += f" (supplier minimum is {floor}, you are {pax})"
+        options.append({
+            "transfer_type": "Sharing Transfer",
+            "basis": "per_person",
+            "unit_price_inr": per_person,
+            "billed_pax": billed if not supplier_priced_for_pax else pax,
+            "transfer_total_inr": transfer_total,
+            "total_inr": round(float(tour_rate_inr) + transfer_total, 2),
+            "note": note,
+        })
+
+    if private_price_inr:
+        if supplier_priced_for_pax:
+            # The rate call already reflects however many vehicles this party
+            # needs; multiplying here would charge for them twice.
+            transfer_total = round(float(private_price_inr), 2)
+            ceiling = int(private_max_pax or 0)
+            note = "per vehicle, whole car for your group"
+            if ceiling and pax > ceiling:
+                note += f" — over the supplier's {ceiling}-pax ceiling for this tour"
+        else:
+            # Caller has a single-vehicle price and an explicit seat count.
+            seats = max(1, int(private_max_pax or pax))
+            cars = -(-pax // seats)  # ceil without importing math
+            transfer_total = round(float(private_price_inr) * cars, 2)
+            note = f"per vehicle x {cars} ({seats} seats each)"
+        options.append({
+            "transfer_type": "Private Transfer",
+            "basis": "per_vehicle",
+            "unit_price_inr": round(float(private_price_inr), 2),
+            "billed_pax": pax,
+            "transfer_total_inr": transfer_total,
+            "total_inr": round(float(tour_rate_inr) + transfer_total, 2),
+            "note": note,
+        })
+
+    options.sort(key=lambda o: float(o["total_inr"]))  # type: ignore[arg-type]
+
+    return {
+        "pax": pax,
+        "tour_total_inr": round(float(tour_rate_inr), 2),
+        "options": options,
+        "cheapest": options[0]["transfer_type"] if options else None,
+        "agent_instructions": (
+            "Quote `total_inr` per option and say what the transfer basis is: "
+            "sharing is PER PERSON (and may be billed at the supplier's minimum "
+            "even for a smaller party — relay `note` when it says so), private "
+            "is PER VEHICLE for the whole group. Never add the two together, "
+            "and never multiply a private price by the party size."
         ),
     }

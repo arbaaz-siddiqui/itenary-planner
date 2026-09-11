@@ -79,6 +79,7 @@ TOUR_TIMESLOT_PATH = "/api/v1/tourservices/TourSearch/Timeslot"
 # stagingb2c.gujjutours.com, but that host returns 404 for every /api path --
 # only www.gujjutours.com serves them (verified 2026-08-31).
 TOUR_OPTIONS_PATH = "/api/tours/options"
+TOUR_OPTION_DESCRIPTION_PATH = "/api/v1/tourservices/TourSearch/Getoptiondescription"
 TOUR_OPTION_RATE_PATH = "/api/tours/optionRate"
 TRANSFER_LIST_PATH = "/api/transferservices/TransferList"
 TRANSFER_DETAILS_PATH = "/api/transferservices/TransferDetail"
@@ -1266,6 +1267,35 @@ def call_visa_countries() -> dict[str, Any]:
 # =============================================================================
 # Tour options + per-transfer-type rates (B2C endpoints)
 # =============================================================================
+def call_tour_option_description(
+    *, tour_id: int, tour_option_id: str | int, supplier_id: int
+) -> dict[str, Any]:
+    """Inclusions, exclusions, cancellation and child policy for one variant.
+
+    Returns `result` as a list of {type, content, descriptionText} sections:
+    Inclusions, Exclusions, Useful Information, Option Wise Cancellation Policy
+    (+ Description), Option Wise Child Policy (+ Description), Cancellation
+    policy. `descriptionText` is HTML, `content` a plain-text summary.
+
+    On the MAIN B2B host, unlike the tour-option endpoints which are www-only.
+    """
+    try:
+        return get_client().post(
+            TOUR_OPTION_DESCRIPTION_PATH,
+            json={
+                "tourId": int(tour_id),
+                "tourOptionId": str(tour_option_id),
+                "supplierId": int(supplier_id),
+            },
+            headers=base_headers(),
+        )
+    except Exception as e:
+        raise BookingApiError(
+            f"Tour option description call failed: {e}",
+            endpoint=TOUR_OPTION_DESCRIPTION_PATH,
+        ) from e
+
+
 def call_tour_options(*, tour_id: int, travel_date: str, lang: str = "en") -> dict[str, Any]:
     """Bookable options for one tour, each with its own transfer types.
 

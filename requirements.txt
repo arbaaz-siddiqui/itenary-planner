@@ -29,3 +29,7 @@ fpdf2==2.8.7
 # The chat service needs this so the "Get a call" button can dispatch an outbound
 # call via livekit_config.place_call() without the heavy voice-worker stack.
 livekit-api==1.2.0
+
+# Postgres for chat persistence + LangGraph checkpoints (Next.js surface).
+psycopg[binary,pool]>=3.3.5
+langgraph-checkpoint-postgres>=3.0.0

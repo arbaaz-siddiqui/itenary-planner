@@ -77,6 +77,43 @@ def build_in_memory_checkpoint() -> BaseCheckpointSaver:
     return MemorySaver()
 
 
+def build_postgres_checkpoint(conn_string: str | None = None) -> BaseCheckpointSaver:
+    """LangGraph checkpointer backed by Postgres, for the Next.js surface.
+
+    Streamlit uses the in-memory store, which is why a browser refresh loses
+    the conversation. This makes agent state outlive the process, so a customer
+    can close the tab and come back.
+
+    Deliberately its own connection pool, not the one api/db.py uses for the
+    transcript: a burst of checkpoint writes must not exhaust the connections
+    the UI needs to render a page.
+    """
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from psycopg_pool import ConnectionPool
+
+    if conn_string is None:
+        from api.db import database_url
+
+        conn_string = database_url()
+
+    pool = ConnectionPool(
+        conn_string,
+        min_size=1,
+        max_size=5,
+        # autocommit is required: PostgresSaver issues its own transactions, and
+        # psycopg's default implicit transaction leaves them open, so writes are
+        # never visible to the next turn.
+        kwargs={"autocommit": True, "row_factory": None},
+        open=True,
+    )
+    saver = PostgresSaver(pool)
+    # Creates LangGraph's own tables on first use. Idempotent, and separate
+    # from migrations/001_init.sql because these tables are LangGraph's
+    # implementation detail — ours must not depend on their shape.
+    saver.setup()
+    return saver
+
+
 def build_sqlite_checkpoint(db_path: str | None = None) -> BaseCheckpointSaver:
     path = db_path or get_state_settings().whatsapp_db_path
     Path(path).parent.mkdir(parents=True, exist_ok=True)

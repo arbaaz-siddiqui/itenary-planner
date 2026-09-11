@@ -86,6 +86,11 @@ def _attach_transfer_prices(options: list, travel_date: str, adults: int) -> Non
     from booking_api.endpoints import call_tour_option_rate, call_tour_options
     from fx import convert_supplier_price
 
+    # Every figure below is a TOTAL for this many people, so it travels with
+    # the price. Without it the same 1,793 reads as "per head" and gets
+    # multiplied by the party size downstream.
+    pax = max(1, int(adults or 1))
+
     def _one(o: Any) -> None:
         try:
             raw = call_tour_options(tour_id=int(o.tour_id), travel_date=travel_date)
@@ -113,69 +118,95 @@ def _attach_transfer_prices(options: list, travel_date: str, adults: int) -> Non
             # tour 30580 returns HTTP 500 on every id, which is not the same
             # as having no published rate.
             own = [v.get("transferTypeId") for v in first.get("validateTourOption") or []]
-            rows: list[dict[str, Any]] = []
-            failures = 0
-            # Capped at two tiers. Each probe costs a full round trip, and a
-            # third put slow tours past the fan-out deadline — which showed as
-            # no price at all, strictly worse than one fewer probe.
-            probes = list(dict.fromkeys([*(t for t in own if t), 3, 1]))[:2]
-            for tid in probes:
-                try:
-                    rate_raw = call_tour_option_rate(
-                        tour_id=int(o.tour_id),
-                        option_id=first.get("optionId"),
-                        supplier_id=int(first.get("supplierId") or o.supplier_id or 0),
-                        travel_date=travel_date,
-                        adults=max(1, int(adults or 1)),
-                        transfer_id=int(tid),
-                    )
-                    rows = (rate_raw or {}).get("result") or []
-                except Exception as e:  # noqa: BLE001 — a 500 is per-tour
-                    failures += 1
-                    logger.debug("optionRate tid=%s failed for %s: %s", tid, o.tour_id, e)
-                    rows = []
-                    # optionRate 500s for the whole tour (30580 fails on every
-                    # tier), so another tier only buys another timeout.
-                    break
-                if rows and rows[0].get("initialTransferRates"):
-                    break
-            if failures:
+
+            def _rate_for(tid: int) -> float | None:
+                """Total ticket price for `pax` on one transfer tier, in INR."""
+                rate_raw = call_tour_option_rate(
+                    tour_id=int(o.tour_id),
+                    option_id=first.get("optionId"),
+                    supplier_id=int(first.get("supplierId") or o.supplier_id or 0),
+                    travel_date=travel_date,
+                    adults=pax,
+                    transfer_id=int(tid),
+                )
+                rows = (rate_raw or {}).get("result") or []
+                if not rows:
+                    return None
+                raw = rows[0].get("rate")
+                if raw is None or float(raw) <= 0:
+                    return None
+                inr, _cur = convert_supplier_price(
+                    raw, fare_currency=rows[0].get("currencyCode") or "AED"
+                )
+                return inr
+
+            # The cost of a transfer is the DIFFERENCE between the tier's total
+            # and the ticket-only total, not `initialTransferRates`.
+            #
+            # `startingFromRate` reports Sharing = 0 on every Dubai tour we
+            # checked, while the real rates say sharing costs Rs 17,932 for ten
+            # people -- so trusting that field told the customer a paid transfer
+            # was free. Measured on tours 53632 and 30647, every variant, 10
+            # adults: ticket-only 8,966, sharing 26,898 (+17,932), private
+            # 32,104 (+23,138). The private figure matches the client website's
+            # own grand total of Rs 32,103.77 to the rupee.
+            TIER_NAMES = {1: "Sharing Transfer", 2: "Private Transfer",
+                          3: "Without Transfer"}
+            try:
+                base = _rate_for(3)
+            except Exception as e:  # noqa: BLE001 — a 500 is per-tour
+                logger.debug("optionRate tid=3 failed for %s: %s", o.tour_id, e)
                 o.transfer_lookup_failed = True
                 return
-            if not rows:
+            if base is None:
                 return
-            tiers = rows[0].get("initialTransferRates") or []
-            # All-zero tiers = rates not loaded for this date (their own
-            # calendar returns no rows), NOT "included" — attach nothing.
-            if not any(float(t.get("startingFromRate") or 0) > 0 for t in tiers):
-                return
+
             priced: list[dict[str, Any]] = []
-            for t in tiers:
-                raw_rate = t.get("startingFromRate")
-                if raw_rate is None:
+            priced.append({
+                "transfer_type": TIER_NAMES[3],
+                "price_inr": 0,
+                "price_display": "Included (₹0)",
+                "priced_for_pax": pax,
+            })
+            # Only the tiers this variant actually supports, so we never quote
+            # a transfer the supplier will refuse to book.
+            for tid in (1, 2):
+                if tid not in own:
                     continue
-                # Rs 0 is real data (tier included in the ticket), not absence.
-                if float(raw_rate) == 0:
+                try:
+                    total = _rate_for(tid)
+                except Exception as e:  # noqa: BLE001 — one tier failing is not fatal
+                    logger.debug("optionRate tid=%s failed for %s: %s", tid, o.tour_id, e)
+                    continue
+                if total is None:
+                    continue
+                extra = round(total - base, 2)
+                if extra <= 0:
+                    # Genuinely bundled into the ticket on this tour.
                     priced.append({
-                        "transfer_type": t.get("transferTypeName") or "",
+                        "transfer_type": TIER_NAMES[tid],
                         "price_inr": 0,
                         "price_display": "Included (₹0)",
+                        "priced_for_pax": pax,
                     })
                     continue
-                inr, _cur = convert_supplier_price(
-                    raw_rate, fare_currency=t.get("currencyCode") or "AED"
-                )
                 priced.append({
-                    "transfer_type": t.get("transferTypeName") or "",
-                    "price_inr": inr,
-                    "price_display": f"₹{inr:,.0f}",
+                    "transfer_type": TIER_NAMES[tid],
+                    "price_inr": extra,
+                    # Already the total for `pax` people: the supplier applies
+                    # its own vehicle multiple, so private steps by a whole car
+                    # at the seat boundary and must never be multiplied again.
+                    "price_display": f"₹{extra:,.0f}",
+                    "priced_for_pax": pax,
                 })
+
             if not priced:
                 return
             o.transfer_prices = priced
+            suffix = f" (total for {pax} pax)" if pax > 1 else ""
             o.transfer_price_display = " · ".join(
                 f"{p['transfer_type']}: {p['price_display']}" for p in priced
-            )
+            ) + suffix
         except Exception as e:  # noqa: BLE001 — best-effort enrichment
             logger.debug("transfer price lookup failed for %s: %s", o.tour_id, e)
         finally:
@@ -314,7 +345,14 @@ def _impl(
 
     # Tour inventory and prices are date-specific (transfer rate plans end
     # 30 Oct 2026), so a guessed date shows the wrong catalogue as fact.
-    from rules import missing_search_fields, needs_input_error
+    from rules import missing_search_fields, needs_input_error, party_size_said
+
+    # Transfer prices are TOTALS for `adults`, so searching at the wrong party
+    # size hands the model a figure it will multiply. Honour the size the
+    # customer actually stated over whatever the model passed.
+    stated = party_size_said()
+    if stated and stated != int(adults or 0):
+        adults = stated
 
     missing = missing_search_fields(travel_date=travel_date)
     if missing and not assume_missing:
@@ -451,6 +489,17 @@ def _impl(
             d["addons_display"] = (
                 f"{len(addons)} add-on(s): " + ", ".join(addons) if addons else ""
             )
+            # How many bookable variants sit behind this row. Already
+            # harvested from the options call above, so it costs nothing
+            # extra. The customer cannot ask "which variant?" when nothing
+            # tells them variants exist -- on the website choosing a date
+            # shows them, here the model asked "the Gujjutours one or the
+            # Rayna one?" and the customer had no way to answer.
+            vc = int(getattr(o, "variant_count", 0) or 0)
+            d["variant_count"] = vc
+            d["variants_display"] = (
+                f"{vc} ticket options to choose from" if vc > 1 else ""
+            )
             d["cancellation_display"] = o.cancellation_display
             d["price_display"] = o.price_display
             d["timeslots"] = getattr(o, "timeslots", [])
@@ -469,6 +518,11 @@ def _impl(
             # `total_results` is this PAGE (kept for back-compat). The two below
             # are what the customer should hear.
             "total_results": len(options),
+            # These prices are valid for THIS party size only. The model kept
+            # reusing a 1-adult result and multiplying it by the real party
+            # size, which is how a 10-person quote came out at 10 x 11,569
+            # when the supplier charges 23,138.
+            "priced_for_pax": max(1, int(adults or 1)),
             "total_available": len(ranked),
             "remaining": remaining,
             "offset": start,
@@ -506,7 +560,17 @@ def _impl(
                     "row ('Included (₹0)' means it costs nothing extra). When "
                     "asked about a tour's transfers, list EVERY entry in "
                     "`transfer_prices` — all tiers including the ₹0 ones, and "
-                    "name the exact tour the row belongs to. Never explain a "
+                    "name the exact tour the row belongs to. EACH PRICE IS "
+                    "ALREADY THE TOTAL FOR `priced_for_pax` PEOPLE — never "
+                    "multiply it by the party size, and never call it "
+                    "'per person'. The supplier has done the multiplying: on "
+                    "Dubai Desert Safari the private tier is ₹11,569 for up to "
+                    "6 travellers and ₹23,138 from 7 (a second vehicle), while "
+                    "sharing stays ₹1,793 at every size. If the customer's "
+                    "party size differs from `priced_for_pax`, DO NOT compute "
+                    "it yourself — call search_tours again with adults set to "
+                    "the real party size and quote the figures it returns. "
+                    "Never explain a "
                     "tour's shared/private price by hotel distance — that is how "
                     "AIRPORT transfers work, not tours. A row with no "
                     "`transfer_prices` means the supplier has not "

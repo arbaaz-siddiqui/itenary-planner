@@ -244,6 +244,88 @@ def price_group_tool(
 
 
 @tool
+def transfer_quote_tool(
+    tour_total_inr: float,
+    pax: int,
+    sharing_price_inr: float | None = None,
+    private_price_inr: float | None = None,
+    sharing_min_pax: int | None = None,
+    private_max_pax: int | None = None,
+    priced_for_pax: int | None = None,
+) -> dict[str, Any]:
+    """Compare Sharing vs Private transfer TOTALS once the party size is known.
+
+    Call this after the customer says how many people are travelling. Before
+    that, the two transfer prices look interchangeable on screen — they are
+    not, because they are charged on different bases:
+
+      Sharing is PER PERSON with a supplier minimum (usually 2), so a solo
+      traveller still pays for two seats.
+      Private is PER VEHICLE, and the vehicle is SMALLER than `max_pax`: on
+      Desert Safari the private tier jumps by a whole car at pax 7 while
+      `max_pax` reads 12, so a party of ten needs two cars.
+
+    The supplier prices BOTH tiers for the party size the rate call was made
+    with, so the figures on a search row are already totals for THAT many
+    people — not per-head units. Passing them for a different party size is
+    the one way to get this badly wrong, which is what `priced_for_pax` is
+    for.
+
+    Args:
+        tour_total_inr: the TICKET total for `pax` people with NO transfer —
+            the `price_total_inr` from get_tour_options. Never pass a
+            transfer-inclusive figure or the transfer is counted twice.
+        pax: how many people are actually travelling.
+        sharing_price_inr / private_price_inr: per-unit figures from the row's
+            `transfer_prices`. Omit either if that tier is not offered.
+        sharing_min_pax / private_max_pax: `min_pax` / `max_pax` from the
+            row's `pax_limits` for that transfer type.
+        priced_for_pax: how many adults the search that produced those prices
+            was run for — `adults` on the search_tours call, which DEFAULTS TO
+            1. If this does not equal `pax`, re-run the search with
+            adults=pax before quoting: the prices are party totals, so a
+            1-adult figure quoted to a party of ten undercharges by most of
+            the fare.
+
+    Returns one entry per available tier with its own total, cheapest first,
+    plus `cheapest`. Relay `note` when it mentions a supplier minimum — a
+    customer billed for seats they did not ask for will otherwise read the
+    total as a mistake.
+    """
+    from rules import transfer_quote
+
+    if priced_for_pax is not None and int(priced_for_pax) != int(pax):
+        # Refuse rather than quote. The prices are totals for `priced_for_pax`
+        # people; reusing them for a different party size silently mis-bills,
+        # and a wrong number the customer acts on is worse than a retry.
+        return {
+            "error": "prices_are_for_a_different_party_size",
+            "priced_for_pax": int(priced_for_pax),
+            "requested_pax": int(pax),
+            "agent_instructions": (
+                f"These transfer prices were fetched for {int(priced_for_pax)} "
+                f"adult(s), not {int(pax)}. The supplier prices each tier for "
+                "the whole party, so they cannot be reused for a different "
+                f"size. Call search_tours again with adults={int(pax)} and "
+                "quote from that result."
+            ),
+        }
+
+    result = transfer_quote(
+        tour_rate_inr=tour_total_inr,
+        pax=pax,
+        sharing_price_inr=sharing_price_inr,
+        private_price_inr=private_price_inr,
+        sharing_min_pax=sharing_min_pax,
+        private_max_pax=private_max_pax,
+    )
+    for o in result.get("options") or []:
+        o["total_display"] = format_inr(o["total_inr"])
+        o["transfer_total_display"] = format_inr(o["transfer_total_inr"])
+    return result
+
+
+@tool
 def compute_hotel_block_cost_tool(
     per_room_per_night_inr: float,
     rooms: int,
@@ -491,6 +573,24 @@ def _tour_facts_lookup(title: str, travel_date: str) -> dict[str, Any]:
         # "Dubai Frame Ticket" ahead of an exact-ish alternative.
         cands = [r for r in index if want in r[0] or r[0] in want]
         hit = max(cands, key=lambda r: len(r[0])) if cands else None
+    if hit is None:
+        # Word spacing differs between what the model writes and what the
+        # supplier publishes: "Dubai Citytour" vs "Dubai City Tour with Hindi
+        # Guide by GujjuTours". Containment cannot bridge that missing space,
+        # so the tour silently priced at 0 inside an itinerary total. Compare
+        # with spacing removed before giving up.
+        squashed = want.replace(" ", "")
+        cands = [
+            r for r in index
+            if squashed and (squashed in r[0].replace(" ", "")
+                             or r[0].replace(" ", "") in squashed)
+        ]
+        # CLOSEST length, not longest. "Dubai Citytour" matches ten city tours,
+        # and taking the longest name picked "Dubai City Tour with Blue Mosque
+        # Visit & Al Khayma Heritage" at Rs 30,106 — for a customer who asked
+        # for a plain city tour, priced from Rs 1,464. Overcharging by 20x is
+        # far worse than the Rs 0 this replaced.
+        hit = min(cands, key=lambda r: abs(len(r[0]) - len(want))) if cands else None
     if hit is None:
         return {}
     _name, price, duration, slots_json = hit
@@ -1178,6 +1278,7 @@ def _build_all_tools() -> list[BaseTool]:
         resolve_party_tool,
         check_floor_tool,
         price_group_tool,
+        transfer_quote_tool,
         compute_hotel_block_cost_tool,
         sum_trip_total_tool,
         apply_selection_tool,

@@ -55,6 +55,43 @@ def _strip_html(value: Any) -> str:
     return html.unescape(_HTML_TAG_RE.sub("", str(value))).strip()
 
 
+_LIST_ITEM_RE = re.compile(r"<li[^>]*>(.*?)</li>", re.I | re.S)
+_BLOCK_SPLIT_RE = re.compile(r"</(?:p|div|br)\s*>|<br\s*/?>", re.I)
+
+
+def parse_tour_option_description(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    """The supplier's variant detail sections, as plain text.
+
+    Returns one entry per section -- Overview, Inclusions, Exclusions, the
+    cancellation and child policies -- each with its bullets already split.
+
+    The supplier sends `descriptionText` as HTML (`<ul><li>...`). It is NOT
+    forwarded to the browser: that would be unsanitised third-party markup on
+    our own origin. Extracting the text keeps the structure (one bullet per
+    item) without the injection risk.
+    """
+    sections: list[dict[str, Any]] = []
+    for entry in (raw or {}).get("result") or []:
+        if not isinstance(entry, dict):
+            continue
+        title = str(entry.get("type") or "").strip()
+        markup = str(entry.get("descriptionText") or "")
+
+        items = [_strip_html(m) for m in _LIST_ITEM_RE.findall(markup)]
+        items = [i for i in items if i]
+        if not items:
+            # No list: split on block boundaries so a multi-paragraph overview
+            # does not collapse into one run-on line.
+            items = [_strip_html(part) for part in _BLOCK_SPLIT_RE.split(markup)]
+            items = [i for i in items if i]
+
+        summary = _strip_html(entry.get("content"))
+        if not title or (not items and not summary):
+            continue
+        sections.append({"title": title, "summary": summary, "items": items})
+    return sections
+
+
 def _safe_int(value: Any) -> int | None:
     if value is None:
         return None
@@ -591,13 +628,45 @@ def _parse_bullets(value: Any) -> list[str]:
     return [line.strip("•- ").strip() for line in text.split("\n") if line.strip()]
 
 
+# Media is served from CloudFront, NOT from the API host. Verified 2026-09-11:
+# https://stagingapi.gujjutours.com/tour-images/... returns 404 (JSON), while
+# the identical path on this CDN returns 200 image/webp -- and the client's own
+# website loads every tour image from here. Building media URLs against the API
+# base meant every image on every surface was broken.
+MEDIA_CDN_BASE = "https://d3bfv5x1dw8ekm.cloudfront.net"
+# The API host, used only for media the CDN does not serve.
+DEFAULT_IMAGE_BASE_URL = "https://stagingapi.gujjutours.com"
+
+# Paths the CDN serves directly.
+_CDN_PREFIXES = ("/tour-images/", "/hotel-images/", "/restaurant-images/")
+
+# The supplier returns tenant-scoped media as `/{guid}/TourMedia/...`, but the
+# CDN serves it under `/uploads/{guid}/TourMedia/...` -- without that prefix it
+# answers 403. Confirmed by reading the URLs the client's own website uses.
+_CDN_UPLOADS_MARKERS = ("/TourMedia/", "/HotelMedia/", "/RestaurantMedia/")
+
+
+def _cdn_url(path: str) -> str | None:
+    """CDN URL for a media path, or None when it is not CDN-served."""
+    if path.startswith(_CDN_PREFIXES):
+        return MEDIA_CDN_BASE + path
+    if any(m in path for m in _CDN_UPLOADS_MARKERS):
+        return MEDIA_CDN_BASE + "/uploads" + path
+    return None
+
+
 def _resolve_image_url(image_path: Any, base_url: str) -> str:
     if not image_path:
         return ""
     image_path = str(image_path)
     if image_path.startswith("http"):
-        return image_path
-    return base_url + ("" if image_path.startswith("/") else "/") + image_path
+        # An absolute API-host URL for CDN media is still broken, so rewrite the
+        # host rather than trusting what the supplier sent. Strip scheme+host
+        # and re-resolve the path.
+        tail = "/" + image_path.split("//", 1)[-1].split("/", 1)[-1]
+        return _cdn_url(tail) or image_path
+    path = image_path if image_path.startswith("/") else "/" + image_path
+    return _cdn_url(path) or (base_url + path)
 
 
 # =============================================================================
@@ -1380,7 +1449,16 @@ def _parse_hotel_static_record(h: Any) -> dict[str, Any] | None:
             else:
                 url = img
             if url:
-                image_urls.append(str(url))
+                # Route through the CDN resolver like every other media path.
+                # NOTE: verified 2026-09-11 that the supplier returns NO images
+                # for hotels on any endpoint -- GetPropertyDescriptions gives
+                # prose (ID/Name/Description) and PropertyInfo gives 4 fields
+                # (hotelID/HotelName/Review/StarRating). This stays so the
+                # paths resolve correctly if they ever start sending them,
+                # rather than silently emitting a relative URL.
+                resolved = _resolve_image_url(url, DEFAULT_IMAGE_BASE_URL)
+                if resolved:
+                    image_urls.append(resolved)
 
     return {
         "hotel_id": hotel_id,
