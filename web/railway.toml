@@ -1,0 +1,14 @@
+# Next.js web UI (Railway service root: web/).
+#
+# This file has to exist. Without it Railway falls back to the repository
+# root's railway.toml, which starts the Python API — the web container then
+# died on "uvicorn: command not found" and every request answered 502.
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+# `next start` alone listens on 3000, but Railway routes to $PORT. The
+# package.json start script reads $PORT with 3000 as the local fallback.
+startCommand = "npm run start"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

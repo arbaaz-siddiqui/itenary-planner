@@ -1,0 +1,13 @@
+# Node build for the web UI.
+#
+# Pinned rather than left to detection: the repository root's nixpacks.toml
+# installs python312 and no Node at all, and if Railway ever resolves that file
+# for this service the build produces a container with no `next` in it.
+[phases.setup]
+nixPkgs = ["nodejs_22"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npm run build"]
