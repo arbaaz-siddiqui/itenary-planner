@@ -209,7 +209,7 @@ max_results".
 |---|---|---|
 | `search_flights` | `*origin_city`, `*destination_city`, `*departure_date` | `return_date`, `adults`, `children`, `child_ages`, `cabin`, `max_stops`, `max_results`, `airline_filter` |
 | `search_hotels` | `*destination_city`, `*check_in`, `*check_out` | **A specific hotel named → `hotel_name` is REQUIRED.** Pass it as the customer said it ("Howard Johnson") — don't add the area. Also `rooms`, `min_stars`/`max_stars`, `amenities`, `force_refresh`. Returns lat/lng + full address on every hotel — feed those straight to transfers |
-| `search_tours` | `*destination_city`, `*travel_date` | `max_results` (10), `offset` for "show more", `query` for a named tour, **`transfer_type`**: `"with_transfer"` = the 85 shared/private tours, `"ticket_only"` = the 185 entry-ticket ones |
+| `search_tours` | `*destination_city`, `*travel_date`, `*adults` | `max_results` (10), `offset` for "show more", `query` for a named tour, **`transfer_type`**: `"with_transfer"` = the 85 shared/private tours, `"ticket_only"` = the 185 entry-ticket ones |
 | `search_airport_transfer_dubai` | `*arrival_date` | **Always pass `hotel_name`** — the supplier matches by hotel name. `hotel_lat`/`hotel_lng` help but are optional; the name alone resolves coords. Don't ask pax/vehicle type first |
 | `search_restaurants` | `*destination_city`, `*search_date` | `adults`, `children` |
 | `get_visa_info` | `*destination_country`, `*nationality_country`, `*travel_date` | ALWAYS call — never recite visa facts from memory |

@@ -234,7 +234,20 @@ def _parse_flight_itinerary(item: dict[str, Any], rates: dict[str, float]) -> Fl
     stops = max(0, len(segs_out) - 1)
     route_out = f"{segs_out[0].from_airport} → {segs_out[-1].to_airport}" if segs_out else ""
     route_ret = f"{segs_ret[0].from_airport} → {segs_ret[-1].to_airport}" if segs_ret else ""
-    duration_min = sum(s.duration_min for s in segs_out) if segs_out else 0
+    # Total journey = first departure to last arrival, which INCLUDES layovers.
+    # Summing the per-segment `journeyDuration` drops them: Saudia HYD-JED-DXB
+    # is 340 + 175 = 8h 35m of flying, but the customer departs 02:25 and lands
+    # 19:30 -- 17h 5m -- because of a long stop in Jeddah. The shorter figure
+    # made a one-stop look like a direct flight.
+    duration_min = 0
+    if segs_out:
+        first_dep, last_arr = segs_out[0].departure, segs_out[-1].arrival
+        if first_dep and last_arr:
+            duration_min = max(0, int((last_arr - first_dep).total_seconds() // 60))
+        if not duration_min:
+            # No usable timestamps: flying time alone is wrong, but better than
+            # claiming zero.
+            duration_min = sum(s.duration_min for s in segs_out)
 
     is_refundable_label = pricing.get("isRefundable") or ""
     # New API uses "refundable"/"nonrefundable"; legacy used "Yes"/"No"

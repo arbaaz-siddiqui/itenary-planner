@@ -538,7 +538,10 @@ def _tour_facts_index(travel_date: str) -> tuple[tuple[str, float, str, str], ..
         from mcp_tools.search_tours import _impl as _search_tours
 
         res = _search_tours(
-            destination_city="Dubai", travel_date=travel_date, max_results=400
+            destination_city="Dubai",
+            travel_date=travel_date,
+            adults=1,
+            max_results=400,
         )
         return tuple(
             (

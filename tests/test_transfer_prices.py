@@ -79,29 +79,22 @@ class TestPriceFreshness:
         assert "can move" in note
 
 
-class TestZeroRateTiersAreIncludedNotDropped:
-    """Burj Khalifa (tour 30614) publishes Without Rs 0 / Sharing Rs 0 /
-    Private 192.61 AED. Dropping the Rs 0 tiers left the model with only
-    'Private' and it invented 'sharing depends on your hotel distance'."""
+class TestOnlyPaidTiersAreShown:
+    """A transfer that costs nothing is not listed.
 
-    def test_burj_shows_all_three_tiers(self):
+    It used to render as "Included (Rs 0)". That reads as a free transfer --
+    a promise we cannot keep -- and gives the customer nothing to act on. The
+    related worry, that a missing tier invites the model to invent a reason
+    for it, is handled by the tool's agent_instructions.
+    """
+
+    def test_burj_lists_only_tiers_that_cost_something(self):
         from mcp_tools.search_tours import _impl
 
         r = _impl(destination_city="Dubai", travel_date="2026-09-30",
                   adults=1, query="burj khalifa tickets", force_refresh=True)
         burj = [o for o in r["options"] if o["tour_id"] == 30614]
         assert burj, "tour 30614 not in results"
-        tiers = burj[0].get("transfer_prices") or []
-        names = {t["transfer_type"] for t in tiers}
-        assert any("Sharing" in n for n in names), f"Sharing tier dropped: {names}"
-        assert any("Private" in n for n in names), names
-        # Whichever tiers are free today must still be present and labelled as
-        # included rather than silently dropped.
-        zero = [t for t in tiers if t["price_inr"] == 0]
-        assert zero, f"no zero-rate tier survived: {tiers}"
-        for t in zero:
-            assert "Included" in t["price_display"] or "\u20b90" in t["price_display"]
-        # A paid tier must carry a real figure, never "Included".
-        for t in tiers:
-            if t["price_inr"]:
-                assert "Included" not in t["price_display"]
+        for t in burj[0].get("transfer_prices") or []:
+            assert t["price_inr"] > 0, f"a free tier leaked through: {t}"
+            assert "Included" not in t["price_display"], t

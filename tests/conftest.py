@@ -49,3 +49,14 @@ def _clear_settings_caches() -> None:
 
     yield
     clear_all_caches()
+
+
+@pytest.fixture(autouse=True)
+def _clear_conversation_state() -> None:
+    """The customer's words live in a ContextVar for the turn; clear them so
+    one test's message cannot be read by the next."""
+    from rules import set_conversation_text
+
+    set_conversation_text("")
+    yield
+    set_conversation_text("")

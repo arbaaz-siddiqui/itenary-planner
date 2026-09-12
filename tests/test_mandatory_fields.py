@@ -93,12 +93,13 @@ class TestToolsRefuseRatherThanGuess:
         from mcp_tools.search_tours import _impl
 
         set_conversation_text("show me dubai tours")
-        out = _impl(destination_city="Dubai", travel_date="")
+        out = _impl(destination_city="Dubai", travel_date="", adults=2)
         assert out["error_type"] == "NeedsCustomerInput"
         assert out["missing_fields"] == ["travel_date"]
 
     @pytest.mark.parametrize("tool_path,kwargs", [
-        ("mcp_tools.search_tours", {"destination_city": "Dubai", "travel_date": ""}),
+        ("mcp_tools.search_tours", {"destination_city": "Dubai", "travel_date": "",
+                                    "adults": 2}),
         ("mcp_tools.search_hotels", {"destination_city": "Dubai", "check_in": "",
                                      "check_out": "", "adults": 0}),
     ])

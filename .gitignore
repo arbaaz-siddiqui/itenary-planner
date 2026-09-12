@@ -57,3 +57,6 @@ eval_j3.json
 journey_run.log
 eval_final.json
 eval_r1.json
+
+# Deploy env files — contain live tokens, never commit
+railway-env*.txt

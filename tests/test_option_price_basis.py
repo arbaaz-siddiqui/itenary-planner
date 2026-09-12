@@ -23,7 +23,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_tools.get_tour_options import _impl
+from mcp_tools.tour_pricing import tour_options
 
 TOUR = 30647
 DATE = "2026-09-15"
@@ -39,13 +39,19 @@ OPTIONS = [
 
 
 def _run(adults: int) -> dict[str, dict]:
+    # get_tour_options is cached on its call kwargs, so a run earlier in the
+    # suite with the same (tour, date, adults) returns ITS rows and the mocks
+    # below never fire. Passed alone the test went green, which is how it hid.
+    from mcp_tools.result_cache import clear_result_cache
+
+    clear_result_cache()
     raw = {"result": {"tourOptionlist": OPTIONS}}
     # 100 AED a head, so the per-adult figure is stable and the group figure
     # visibly is not.
     rate = {"result": [{"rate": 100.0 * adults, "currencyCode": "AED"}]}
-    with patch("booking_api.endpoints.call_tour_options", lambda **k: raw), \
-         patch("booking_api.endpoints.call_tour_option_rate", lambda **k: rate):
-        out = _impl(tour_id=TOUR, travel_date=DATE, adults=adults)
+    with patch("mcp_tools.tour_pricing.call_tour_options", lambda **k: raw), \
+         patch("mcp_tools.tour_pricing.call_tour_option_rate", lambda **k: rate):
+        out = tour_options(TOUR, DATE, adults)
     return {o["name"]: o for o in out.get("options") or []}
 
 

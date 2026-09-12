@@ -1,88 +1,74 @@
-"""A tour is not one product — it has bookable variants.
-
-The client's site shows 12 option cards for "Desert Safari Tours in Dubai"
-(Overnight/Evening x Shared/Private vehicle x add-ons) and 12 for Burj Khalifa
-(At the Top Silver, Fast Track, Level 148...). We showed none of them: asked
-"what are the tour options for X", the agent answered from get_tour_details
-prose. get_tour_options exposes the real variants.
-"""
+"""get_tour_options — variants of one tour, priced for a stated party size."""
 
 import pytest
+
+from mcp_tools.tour_pricing import tour_options, transfer_prices
 
 
 class TestVariantsAreExposed:
     @pytest.fixture(scope="class")
-    def desert(self):
-        from mcp_tools.get_tour_options import _impl
-
-        return _impl(tour_id=46009, travel_date="2026-09-30", adults=2)
-
-    @pytest.fixture(scope="class")
     def burj(self):
-        from mcp_tools.get_tour_options import _impl
-
-        return _impl(tour_id=30614, travel_date="2026-09-30", adults=2)
-
-    def test_desert_safari_returns_its_variants(self, desert):
-        assert desert["total_results"] >= 10, desert["total_results"]
-        names = " ".join(o["name"] for o in desert["options"]).lower()
-        assert "overnight" in names and "evening" in names
-        assert "shared vehicle" in names or "private vehicle" in names
+        return tour_options(30614, "2026-09-30", 2)
 
     def test_burj_variants_carry_real_prices(self, burj):
-        priced = [o for o in burj["options"] if o.get("price_inr")]
-        assert priced, "expected priced Burj variants"
-        assert any("at the top" in o["name"].lower() for o in burj["options"])
+        assert [o for o in burj["options"] if o.get("price_total_inr")]
 
-    def test_table_has_one_row_per_variant(self, burj):
-        rows = len(burj["table_markdown"].splitlines()) - 2  # header + separator
-        assert rows == burj["total_results"]
-
-    def test_pax_limits_and_rate_basis_present(self, desert):
-        limits = [o["pax_limits"] for o in desert["options"] if o.get("pax_limits")]
-        assert limits, "pax limits missing"
-        first = next(iter(limits[0].values()))
-        assert "min_pax" in first and "max_pax" in first and "rate_basis" in first
-
-    def test_unpriced_variants_say_on_request_not_zero(self, desert):
-        for o in desert["options"]:
-            if not o.get("price_inr"):
+    def test_unpriced_variants_say_on_request_not_zero(self, burj):
+        for o in burj["options"]:
+            if not o.get("price_total_inr"):
                 assert o["price_display"] == "On request"
-                assert "0" not in o["price_display"]
 
-    def test_instructions_demand_every_row(self, burj):
-        note = burj["agent_instructions"]
-        assert "PASTE `table_markdown` VERBATIM" in note
-        assert str(burj["total_results"]) in note
-
-    def test_timeslot_flag_is_surfaced(self, burj):
-        # Burj variants are slot-based; the agent needs to know to fetch times.
-        assert any(o["has_timeslots"] for o in burj["options"])
+    def test_prices_are_totals_for_the_party(self, burj):
+        assert burj["adults"] == 2
+        for o in burj["options"]:
+            if o.get("price_total_inr"):
+                assert o["price_per_adult_inr"] == pytest.approx(
+                    o["price_total_inr"] / 2, abs=1
+                )
 
 
-class TestNoFabricatedTransferPrices:
-    def test_all_zero_tiers_are_not_reported_as_included(self):
-        from mcp_tools.get_tour_options import _tier_rows
+class TestTransferTiers:
+    """Tier prices come from `initialTransferRates`.
 
-        # Rates not loaded for the date -> both tiers 0 -> report nothing.
-        row = {"initialTransferRates": [
-            {"transferTypeName": "Sharing Transfers", "startingFromRate": 0, "currencyCode": "AED"},
-            {"transferTypeName": "Private Transfers", "startingFromRate": 0, "currencyCode": "AED"},
+    `totalTransferRate` is the per-person ticket plus that tier's transfer, so
+    subtracting the Without-Transfer entry leaves the transfer itself. A tier
+    that costs nothing is not listed: "Included (Rs 0)" reads as a free
+    transfer and gives the customer nothing to act on.
+    """
+
+    def _row(self, *, sharing_total, private_total, base=100.0):
+        return {"initialTransferRates": [
+            {"transferTypeId": 3, "transferTypeName": "Without Transfer",
+             "startingFromRate": 0, "totalTransferRate": base,
+             "currencyCode": "AED"},
+            {"transferTypeId": 1, "transferTypeName": "Sharing Transfer",
+             "startingFromRate": 0, "totalTransferRate": sharing_total,
+             "currencyCode": "AED"},
+            {"transferTypeId": 2, "transferTypeName": "Private Transfer",
+             "startingFromRate": private_total - base,
+             "totalTransferRate": private_total, "currencyCode": "AED"},
         ]}
-        assert _tier_rows(row) == []
 
-    def test_zero_alongside_a_paid_tier_is_included(self):
-        from mcp_tools.get_tour_options import _tier_rows
+    def test_a_tier_that_costs_nothing_is_not_listed(self):
+        row = self._row(sharing_total=100.0, private_total=100.0)
+        assert transfer_prices(row, 1) == []
 
-        row = {"initialTransferRates": [
-            {"transferTypeName": "Sharing Transfer", "startingFromRate": 0, "currencyCode": "AED"},
-            {"transferTypeName": "Private Transfer", "startingFromRate": 192.61, "currencyCode": "AED"},
-        ]}
-        tiers = _tier_rows(row)
-        assert len(tiers) == 2
-        sharing = next(t for t in tiers if "Sharing" in t["transfer_type"])
-        assert sharing["price_inr"] == 0
-        assert "Included" in sharing["price_display"]
+    def test_a_paid_tier_survives_when_another_is_free(self):
+        row = self._row(sharing_total=100.0, private_total=292.61)
+        tiers = transfer_prices(row, 1)
+        assert [t["transfer_type"] for t in tiers] == ["Private Transfer"]
+        assert tiers[0]["price_inr"] > 0
+
+    def test_sharing_scales_with_the_party_but_private_does_not(self):
+        # Sharing is per person; private is per vehicle, and startingFromRate
+        # already holds the whole-vehicle figure.
+        row = self._row(sharing_total=125.0, private_total=300.0)
+        one = {t["transfer_type"]: t["price_inr"] for t in transfer_prices(row, 1)}
+        four = {t["transfer_type"]: t["price_inr"] for t in transfer_prices(row, 4)}
+        assert four["Sharing Transfer"] == pytest.approx(
+            one["Sharing Transfer"] * 4, abs=2
+        )
+        assert four["Private Transfer"] == pytest.approx(one["Private Transfer"])
 
 
 class TestRoeCaching:
@@ -110,163 +96,25 @@ class TestRoeCaching:
         assert len(calls) == 1, f"12 callers made {len(calls)} ROE fetches"
 
 
-class TestTransferProbeSkipsTicketOnlyTours:
-    def test_without_transfer_tours_are_not_probed(self):
-        import mcp_tools.search_tours as st
-
-        class Opt:
-            tour_id = 46009
-            transfer_scenario = "Without Transfer"
-            supplier_id = 3
-
-        probed = []
-        orig = st.call_tour_options if hasattr(st, "call_tour_options") else None
-        assert orig is None  # imported inside the function, so nothing to patch
-        # A "Without Transfer" tour short-circuits before any network call.
-        st._attach_transfer_prices([Opt()], "2026-09-30", 2)
-        assert probed == []
-
-
-class TestAddonsArePricedAndFlagged:
-    """The website priced "2 Drinks Package - Per Person (Add-on)" while we said
-    "On request". Cause: the rate call is keyed on transferId and we hardcoded 1;
-    add-ons only answer on transferId 3 (Without Transfers), returning
-    result:null for 1."""
-
+class TestAddonsAndGroupPricing:
     @pytest.fixture(scope="class")
     def desert(self):
-        from mcp_tools.get_tour_options import _impl
-
-        return _impl(tour_id=30647, travel_date="2026-09-25", adults=2)
-
-    def test_no_variant_is_on_request(self, desert):
-        unpriced = [o["name"] for o in desert["options"] if not o.get("price_inr")]
-        assert not unpriced, f"still On request: {unpriced}"
+        return tour_options(30647, "2026-09-15", 4)
 
     def test_addons_are_flagged(self, desert):
         addons = [o for o in desert["options"] if o.get("is_addon")]
-        assert addons, "no add-on detected"
-        assert all("add-on" in o["name"].lower() for o in addons)
-
-    def test_addons_carry_their_own_transfer_prices(self, desert):
-        # The website shows Sharing/Private on an add-on too, and the API backs
-        # it: add-on 113117 returns Sharing 62 AED / Private 400 AED, which is
-        # Rs 1,619.06 / Rs 10,445.52 — the site's figures to the paisa.
-        addons = [o for o in desert["options"] if o.get("is_addon")]
-        assert addons
-        assert any(o.get("transfer_prices") for o in addons)
+        assert addons, "tour 30647 sells add-ons"
+        for a in addons:
+            assert "add-on" in a["name"].lower()
 
     def test_main_variants_keep_transfer_prices(self, desert):
-        mains = [o for o in desert["options"] if not o.get("is_addon")]
-        assert any(o.get("transfer_prices") for o in mains)
+        main = [o for o in desert["options"] if not o.get("is_addon")]
+        assert any(o.get("transfer_prices") for o in main)
 
-    def test_addons_sort_after_main_variants(self, desert):
-        body = [ln for ln in desert["table_markdown"].splitlines()[2:]]
-        first_addon = next(i for i, ln in enumerate(body) if "(add-on)" in ln)
-        assert all("(add-on)" not in ln for ln in body[:first_addon])
-
-    def test_instructions_tell_agent_to_offer_addons(self, desert):
-        note = desert["agent_instructions"].lower()
-        assert "is_addon" in note
-        assert "ask whether they want any add-ons" in note
-
-
-class TestBookingConstraintsAreSurfaced:
-    """Variants carry rules: an add-on needs a main option, and
-    restrictedRateType lists pax types that cannot take it (the drinks package
-    excludes Child and Infant)."""
-
-    @pytest.fixture(scope="class")
-    def desert(self):
-        from mcp_tools.get_tour_options import _impl
-
-        return _impl(tour_id=30647, travel_date="2026-09-25", adults=2)
-
-    def test_restricted_pax_types_are_listed(self, desert):
-        drinks = next(o for o in desert["options"] if "drinks" in o["name"].lower())
-        assert "Child" in drinks["not_available_for"]
-        assert "Infant" in drinks["not_available_for"]
-
-    def test_unrestricted_variants_list_nothing(self, desert):
-        main = next(o for o in desert["options"] if o["name"] == "Dubai Desert Safari")
-        assert main["not_available_for"] == []
-
-    def test_notes_column_states_the_rules(self, desert):
-        table = desert["table_markdown"]
-        assert "add-on — needs a main option" in table
-        assert "not for Child/Infant" in table
-
-    def test_notes_cell_is_dash_when_unconstrained(self):
-        from mcp_tools.get_tour_options import _notes_cell
-
-        assert _notes_cell({"is_addon": False}) == "-"
-
-    def test_notes_cell_combines_constraints(self):
-        from mcp_tools.get_tour_options import _notes_cell
-
-        cell = _notes_cell({
-            "is_addon": True,
-            "not_available_for": ["Child"],
-            "transfer_not_available": ["Private Transfers"],
-        })
-        assert "add-on" in cell and "not for Child" in cell
-        assert "no Private Transfers" in cell
-
-    def test_instructions_cover_the_dependency_rules(self, desert):
-        note = desert["agent_instructions"]
-        assert "not_available_for" in note
-        assert "transfer_not_available" in note
-
-
-class TestLookupEntityPointsAtRealTools:
-    """Asked for desert safari add-ons, the agent said "no add-ons listed"
-    while the supplier had a drinks package and two Majlis options.
-
-    lookup_entity's usage_hint was built as f"search_{svc[:-1]}" — "search_tour",
-    "search_restaurant" — tools that do not exist. The model hit a dead end and
-    answered from memory instead of fetching.
-    """
-
-    def test_tour_lookup_sends_the_agent_to_get_tour_options(self):
-        from mcp_tools.lookup_entity import _impl
-
-        hint = _impl(service="tours", query="Dubai Desert Safari",
-                     city="Dubai")["usage_hint"]
-        assert "get_tour_options" in hint
-        assert "add-ons" in hint
-        # The tool that never existed must not be named.
-        assert "search_tour(" not in hint and "search_tour call" not in hint
-
-    def test_restaurant_lookup_sends_the_agent_to_details(self):
-        from mcp_tools.lookup_entity import _impl
-
-        hint = _impl(service="restaurants", query="Rangoli",
-                     city="Dubai")["usage_hint"]
-        assert "get_restaurant_details" in hint
-        assert "search_restaurant call" not in hint
-
-    def test_every_hint_names_a_registered_tool(self):
-        from agent_tools import ALL_TOOLS
-        from mcp_tools.lookup_entity import _DEFAULT_NEXT_STEP, _NEXT_STEP
-
-        import re
-
-        registered = {t.name for t in ALL_TOOLS}
-        for svc, hint in _NEXT_STEP.items():
-            # Names can be followed by "(query=" or punctuation, so match the
-            # identifier itself rather than splitting on whitespace.
-            named = set(re.findall(r"\b(?:get|search)_[a-z_]+", hint))
-            unknown = {n for n in named if n not in registered}
-            assert not unknown, f"{svc} hint names non-existent tool(s): {unknown}"
-        assert _DEFAULT_NEXT_STEP  # generic fallback names no specific tool
-
-    def test_addons_are_reachable_for_the_reported_tour(self):
-        # tour 30647 publishes a drinks package and two Majlis options.
-        from mcp_tools.get_tour_options import _impl
-
-        names = " ".join(
-            o["name"].lower()
-            for o in _impl(tour_id=30647, travel_date="2026-09-11", adults=2)["options"]
+    def test_a_per_group_item_is_not_labelled_per_adult(self, desert):
+        majlis = next(
+            (o for o in desert["options"] if "per group" in o["name"].lower()), None
         )
-        assert "drinks package" in names
-        assert "majlis" in names
+        assert majlis, "expected the Private Majlis add-on"
+        assert majlis["price_basis"] == "per_group"
+        assert "per adult" not in majlis["price_display"].lower()

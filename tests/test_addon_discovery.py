@@ -78,10 +78,10 @@ class TestLookupRanksTheRealMatchFirst:
         # has ZERO bookable variants, over "At The Top, Burj Khalifa" (28488,
         # 14 priced). This response cannot distinguish them
         # (totalAvailableServices reads 2 for both), so supplier order wins.
-        from mcp_tools.get_tour_options import _impl as _options
+        from mcp_tools.tour_pricing import tour_options
 
         best = _lookup(service="tours", query="burj khalifa", city="Dubai")["best_match_id"]
-        assert _options(tour_id=best, travel_date=DATE, adults=2)["total_results"] > 0
+        assert tour_options(best, DATE, 2)["options"]
 
     def test_the_dead_duplicate_field_is_gone(self):
         # all_results was a byte-identical copy of results that nothing read.

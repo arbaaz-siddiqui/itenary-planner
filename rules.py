@@ -1010,27 +1010,8 @@ _FIELD_PROMPTS: dict[str, str] = {
 _CONVERSATION_TEXT: ContextVar[str] = ContextVar("conversation_text", default="")
 
 
-# The party size persists ACROSS turns, unlike the turn text above.
-#
-# A customer states it once ("we are 9 ppl") and every later message assumes
-# it -- "give me the price breakup" carries no number at all. Reading only the
-# current turn made the tools fall back to the default of 2 adults, so the
-# follow-up quoted a 1-pax transfer of Rs 3,587 where the party of nine owes
-# Rs 16,139.
-_PARTY_SIZE: ContextVar[int | None] = ContextVar("party_size", default=None)
-
-
 def set_conversation_text(text: str) -> None:
     _CONVERSATION_TEXT.set((text or "").lower())
-    # A newly stated size replaces the old one; silence keeps the last.
-    stated = _party_size_in_text((text or "").lower())
-    if stated:
-        _PARTY_SIZE.set(stated)
-
-
-def reset_party_size() -> None:
-    """Forget the remembered size — a new conversation is a new party."""
-    _PARTY_SIZE.set(None)
 
 
 def customer_said(value: str) -> bool:
@@ -1044,38 +1025,6 @@ def customer_said(value: str) -> bool:
     if not said or not value:
         return True
     return value.strip().lower().split()[0] in said
-
-
-_PAX_PHRASE = re.compile(
-    r"(?:we are|we're|group of|party of|for the|for)\s+(\d{1,2})\s*"
-    r"(?:ppl|people|persons?|pax|adults?|travellers?|travelers?)",
-    re.I,
-)
-
-
-def _party_size_in_text(said: str) -> int | None:
-    """The last party size stated in one piece of text, or None."""
-    best: int | None = None
-    for m in _PAX_PHRASE.finditer(said or ""):
-        try:
-            n = int(m.group(1))
-        except (TypeError, ValueError):
-            continue
-        if 1 <= n <= 60:
-            best = n  # the LAST stated size wins: parties change mid-chat
-    return best
-
-
-def party_size_said() -> int | None:
-    """The party size the customer stated this turn, or None.
-
-    The model kept answering a new party size from an OLD tool result by doing
-    its own arithmetic: asked for 8 people it relayed a private transfer of
-    Rs 34,560, which is the 1-pax figure (4,320) times eight, against a real
-    Rs 4,468. Reading the number from the customer's own words lets the tools
-    refuse to serve a result priced for somebody else.
-    """
-    return _party_size_in_text(_CONVERSATION_TEXT.get()) or _PARTY_SIZE.get()
 
 
 def missing_search_fields(**fields: object) -> list[str]:

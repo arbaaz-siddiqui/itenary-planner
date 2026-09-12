@@ -11,7 +11,7 @@ so the tour's picture is the right one to show.
 
 from unittest.mock import patch
 
-from mcp_tools.get_tour_options import _impl, _tour_image_url
+from mcp_tools.tour_pricing import tour_image_url, tour_options
 
 TOUR = 30647
 DATE = "2026-09-15"
@@ -28,10 +28,10 @@ OPTIONS = [
 def _run(image: str) -> list[dict]:
     raw = {"result": {"tourOptionlist": OPTIONS}}
     rate = {"result": [{"rate": 200.0, "currencyCode": "AED"}]}
-    with patch("booking_api.endpoints.call_tour_options", lambda **k: raw), \
-         patch("booking_api.endpoints.call_tour_option_rate", lambda **k: rate), \
-         patch("mcp_tools.get_tour_options._tour_image_url", lambda *a, **k: image):
-        out = _impl(tour_id=TOUR, travel_date=DATE, adults=2)
+    with patch("mcp_tools.tour_pricing.call_tour_options", lambda **k: raw), \
+         patch("mcp_tools.tour_pricing.call_tour_option_rate", lambda **k: rate), \
+         patch("mcp_tools.tour_pricing.tour_image_url", lambda *a, **k: image):
+        out = tour_options(TOUR, DATE, 2)
     return out.get("options") or []
 
 
@@ -63,7 +63,7 @@ def test_the_image_lookup_never_raises():
     clear_result_cache()
     with patch("booking_api.endpoints.call_tour_search",
                side_effect=RuntimeError("supplier down")):
-        assert _tour_image_url(TOUR, DATE) == ""
+        assert tour_image_url(TOUR, DATE) == ""
 
 
 class TestTheTourImageIsResolvedToTheCdn:
@@ -78,7 +78,7 @@ class TestTheTourImageIsResolvedToTheCdn:
         # Bypass the static-tier cache so each case really calls through.
         clear_result_cache()
         with patch("booking_api.endpoints.call_tour_search", lambda **k: raw):
-            return _tour_image_url(TOUR, DATE)
+            return tour_image_url(TOUR, DATE)
 
     def test_a_plain_cdn_path_resolves(self):
         assert self._image("tour-images/RYT/1/a.webp") == (

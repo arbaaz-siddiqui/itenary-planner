@@ -43,16 +43,27 @@ def _fake_options(**_kw):
 
 
 def _rate_for(private_aed):
+    """A rate row shaped like the supplier's.
+
+    Tier prices live in `initialTransferRates`: `totalTransferRate` is the
+    per-person ticket PLUS that tier, so the transfer is the difference from
+    the Without-Transfer entry.
+    """
     def _call(**kw):
-        tid = kw.get("transfer_id")
-        rate = private_aed if tid == 2 else 100.0
         return {"result": [{
-            "rate": rate,
+            "rate": 100.0,
+            "currencyCode": "AED",
             "initialTransferRates": [
+                {"transferTypeId": 3, "transferTypeName": "Without Transfer",
+                 "startingFromRate": 0, "totalTransferRate": 100.0,
+                 "currencyCode": "AED"},
                 {"transferTypeId": 1, "transferTypeName": "Sharing Transfer",
-                 "startingFromRate": 100.0, "currencyCode": "AED"},
+                 "startingFromRate": 25.0, "totalTransferRate": 125.0,
+                 "currencyCode": "AED"},
                 {"transferTypeId": 2, "transferTypeName": "Private Transfer",
-                 "startingFromRate": private_aed, "currencyCode": "AED"},
+                 "startingFromRate": private_aed,
+                 "totalTransferRate": 100.0 + private_aed,
+                 "currencyCode": "AED"},
             ],
         }]}
     return _call

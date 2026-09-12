@@ -124,7 +124,7 @@ dead air. `*` = required.
 |---|---|---|
 | `search_flights` | wants flights | `*origin_city`, `*destination_city`, `*departure_date`; `return_date`, `adults` (default 1) |
 | `search_hotels` | wants hotel | `*destination_city`, `*check_in`, `*check_out`; `rooms` (default [{adults:1}]); a named hotel → add `hotel_name` |
-| `search_tours` | wants tours/activities | `*destination_city`, `*travel_date` |
+| `search_tours` | wants tours/activities | `*destination_city`, `*travel_date`, `*adults` |
 | `get_hotel_description` | amenity question | `*hotel_ids` (a LIST, even for one hotel) |
 | `get_visa_info` | visa question | `*destination_country`, `*nationality_country` ("India"), `*travel_date` — all three, or the call fails |
 | `search_airport_transfer_dubai` | airport pickup/drop | `*arrival_date`; always pass `hotel_name` (coords optional) |
