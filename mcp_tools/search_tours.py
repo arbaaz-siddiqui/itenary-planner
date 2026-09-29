@@ -135,7 +135,10 @@ def _attach_transfer_prices(options: list, travel_date: str, adults: int) -> Non
             if not priced:
                 return
             o.transfer_prices = priced
-            suffix = f" (total for {pax} pax)" if pax > 1 else ""
+            # Always say the party size. Without it on a 1-adult search the
+            # model read "Sharing Transfer: Rs 1,793" as a per-person rate and
+            # told the customer so; it is the total for one traveller.
+            suffix = f" (total for {pax} pax)" if pax > 1 else " (total for 1 pax)"
             o.transfer_price_display = " · ".join(
                 f"{p['transfer_type']}: {p['price_display']}" for p in priced
             ) + suffix

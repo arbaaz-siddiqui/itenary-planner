@@ -1044,6 +1044,12 @@ def needs_input_error(missing: list[str], *, assumed_ok: bool = False) -> dict[s
         "error": True,
         "error_type": "NeedsCustomerInput",
         "missing_fields": missing,
+        # No search ran, so there are no results. Said explicitly because the
+        # refusal used to carry no `options` key at all: asked for flights with
+        # the origin city missing, the model filled the silence with four
+        # invented airlines and prices and showed them as fact.
+        "options": [],
+        "total_results": 0,
         "message": (
             f"Cannot search accurately without {joined}. Ask the customer for "
             f"{'it' if len(asks) == 1 else 'these'} in ONE short question, then "

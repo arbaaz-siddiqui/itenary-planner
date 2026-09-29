@@ -108,6 +108,27 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/itinerary/{itinerary_id}.pdf")
+async def serve_itinerary(itinerary_id: str) -> Response:
+    """The generated itinerary PDF.
+
+    Public on purpose, like the WhatsApp surface's copy of this route: the
+    customer opens the link from a chat message, often on a device that is not
+    signed in, and the id is an unguessable hash. Without this route the PDF
+    was written and linked but every download 404'd.
+    """
+    from fastapi.responses import FileResponse
+
+    from itinerary_store import get_itinerary_path
+
+    path = get_itinerary_path(itinerary_id)
+    if path is None:
+        return Response(content="Not found", status_code=404)
+    return FileResponse(
+        path, media_type="application/pdf", filename="Dubai-itinerary.pdf"
+    )
+
+
 @app.get("/health/db")
 async def health_db() -> dict[str, Any]:
     """Separate, so a DB problem is diagnosable without failing the deploy."""
@@ -410,6 +431,32 @@ async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
             option_groups = [{"kind": plural.get(kind, kind), "items": items}]
     except Exception as e:  # noqa: BLE001 — cards are a bonus, never the reply
         log.warning("option_extraction_failed: %s", e)
+
+    # The generated PDF rides the same persisted `options` channel as the
+    # cards, so it survives a reload and needs no schema change. Without this
+    # the only trace of a PDF was the URL the model happened to type into its
+    # reply, which rendered as a bare link with nothing to click.
+    try:
+        from agent import _coerce_to_dict
+
+        for call in tool_calls:
+            # A ToolMessage's content is a JSON STRING, not a dict.
+            out = _coerce_to_dict(call.get("output"))
+            if not out or not out.get("itinerary_id"):
+                continue
+            # No URL here on purpose: the browser fetches the same-origin
+            # path /itinerary/{id}.pdf, so this works on localhost and in
+            # production without either knowing the other's hostname.
+            option_groups.append({
+                "kind": "itinerary_pdf",
+                "items": [{
+                    "itinerary_id": out.get("itinerary_id"),
+                    "filename": out.get("filename") or "itinerary.pdf",
+                }],
+            })
+            break
+    except Exception as e:  # noqa: BLE001 — never fail a turn over the PDF
+        log.warning("pdf_extraction_failed: %s", e)
 
     saved = repository.add_message(
         str(session["id"]), "assistant", reply, tool_calls, option_groups

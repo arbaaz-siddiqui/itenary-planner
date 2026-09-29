@@ -24,9 +24,13 @@ export function Carousel({ children, count }: { children: React.ReactNode; count
   };
 
   // A single card has nothing to scroll to: render it plainly, at card width
-  // rather than stretched across the row.
+  // rather than stretched across the row. The child is still a carousel slide
+  // (`w-[85%] shrink-0`), and a percentage width inside a shrink-to-fit box
+  // collapses to the content width -- which rendered a lone result as a ~90px
+  // column. `w-full [&>*]:w-full` gives the slide a real basis to resolve
+  // against and overrides its own percentage.
   if (count <= 1) {
-    return <div className="max-w-sm">{children}</div>;
+    return <div className="w-full max-w-sm [&>*]:w-full">{children}</div>;
   }
 
   return (
