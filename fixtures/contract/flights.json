@@ -1,0 +1,108 @@
+{
+  "ref": "ref_flights_bomdxb_1012",
+  "kind": "flights",
+  "summary_md": "Three return options, Mumbai to Dubai, 12–16 October, 2 adults.\n",
+  "rows": [
+    {
+      "id": "6E1471-6E1472",
+      "kind": "flights",
+      "title": "IndiGo 6E 1471",
+      "subtitle": "BOM → DXB · non-stop",
+      "price_inr": 38400.0,
+      "price_basis": "total",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "Non-stop",
+          "tone": "ok"
+        },
+        {
+          "label": "Cabin 7kg",
+          "tone": "neutral"
+        }
+      ],
+      "image": null,
+      "detail_ref": "flights:6E1471-6E1472",
+      "facets": {
+        "Outbound": "12 Oct · 04:25 BOM → 06:00 DXB · 3h 05m",
+        "Return": "16 Oct · 07:10 DXB → 11:55 BOM · 3h 15m",
+        "Cabin": "Economy",
+        "Baggage": "7kg cabin, 20kg check-in",
+        "Fare type": "Saver — change fee applies"
+      }
+    },
+    {
+      "id": "EK503-EK500",
+      "kind": "flights",
+      "title": "Emirates EK 503",
+      "subtitle": "BOM → DXB · non-stop",
+      "price_inr": 61250.0,
+      "price_basis": "total",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "Non-stop",
+          "tone": "ok"
+        },
+        {
+          "label": "30kg included",
+          "tone": "ok"
+        }
+      ],
+      "image": null,
+      "detail_ref": "flights:EK503-EK500",
+      "facets": {
+        "Outbound": "12 Oct · 04:30 BOM → 06:05 DXB · 3h 05m",
+        "Return": "16 Oct · 10:15 DXB → 15:05 BOM · 3h 20m",
+        "Cabin": "Economy",
+        "Baggage": "7kg cabin, 30kg check-in",
+        "Fare type": "Flex — free date change"
+      }
+    },
+    {
+      "id": "AI907-AI906",
+      "kind": "flights",
+      "title": "Air India AI 907",
+      "subtitle": "BOM → DXB · 1 stop (DEL)",
+      "price_inr": 34100.0,
+      "price_basis": "total",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "1 stop",
+          "tone": "warn"
+        },
+        {
+          "label": "Longest 9h 40m",
+          "tone": "warn"
+        }
+      ],
+      "image": null,
+      "detail_ref": "flights:AI907-AI906",
+      "facets": {
+        "Outbound": "12 Oct · 06:00 BOM → 15:40 DXB · 9h 40m via DEL",
+        "Return": "16 Oct · 19:30 DXB → 06:20 BOM · 8h 20m via DEL",
+        "Cabin": "Economy",
+        "Baggage": "7kg cabin, 25kg check-in",
+        "Fare type": "Saver — non-refundable"
+      }
+    }
+  ],
+  "facts": {
+    "priced_for_pax": 2,
+    "currency": "INR",
+    "as_of": "2026-09-29T09:15:00Z",
+    "origin": "BOM",
+    "destination": "DXB",
+    "departure_date": "2026-10-12",
+    "return_date": "2026-10-16"
+  },
+  "more": {
+    "total_available": 27,
+    "showing": 3,
+    "next_offset": 3
+  },
+  "degraded": null,
+  "suggest": [],
+  "error": null
+}

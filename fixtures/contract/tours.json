@@ -1,0 +1,130 @@
+{
+  "ref": "ref_tours_dxb_1012",
+  "kind": "tours",
+  "summary_md": "Three of the 13 desert safaris running on 12 October. Prices are totals for 2 travellers.\n",
+  "rows": [
+    {
+      "id": "28488",
+      "kind": "tours",
+      "title": "Dubai Desert Safari with BBQ Dinner",
+      "subtitle": "6 hours · Adventure",
+      "price_inr": 1793.0,
+      "price_basis": "per_adult",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "Recommended",
+          "tone": "ok"
+        },
+        {
+          "label": "Free cancellation 24h",
+          "tone": "ok"
+        },
+        {
+          "label": "3 ticket options",
+          "tone": "neutral"
+        }
+      ],
+      "image": {
+        "src": "/api/img?src=supplier%2Ftour-28488.jpg&w=640",
+        "alt": "",
+        "ratio": 1.777
+      },
+      "detail_ref": "tours:28488",
+      "facets": {
+        "Duration": "6 hours",
+        "Transfer": "Sharing ₹1,793 · Private ₹11,569 (vehicle, up to 6)",
+        "Cancellation": "Free until 24 hours before",
+        "Start times": "Flexible — no fixed start time",
+        "Add-ons": "2 add-ons: Quad Bike, Camel Ride"
+      }
+    },
+    {
+      "id": "28502",
+      "kind": "tours",
+      "title": "Evening Desert Safari — Premium Camp",
+      "subtitle": "7 hours · Adventure",
+      "price_inr": 2640.0,
+      "price_basis": "per_adult",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "Free cancellation 48h",
+          "tone": "ok"
+        }
+      ],
+      "image": {
+        "src": "/api/img?src=supplier%2Ftour-28502.jpg&w=640",
+        "alt": "",
+        "ratio": 1.777
+      },
+      "detail_ref": "tours:28502",
+      "facets": {
+        "Duration": "7 hours",
+        "Transfer": "Sharing ₹2,640 · Private ₹13,900 (vehicle, up to 6)",
+        "Cancellation": "Free until 48 hours before",
+        "Start times": "Flexible — no fixed start time"
+      }
+    },
+    {
+      "id": "30112",
+      "kind": "tours",
+      "title": "Burj Khalifa Level 124 & 125",
+      "subtitle": "1 hour 30 minutes · Sightseeing",
+      "price_inr": 4180.0,
+      "price_basis": "per_adult",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "33 start times",
+          "tone": "neutral"
+        },
+        {
+          "label": "Non-refundable",
+          "tone": "warn"
+        }
+      ],
+      "image": {
+        "src": "/api/img?src=supplier%2Ftour-30112.jpg&w=640",
+        "alt": "",
+        "ratio": 1.777
+      },
+      "detail_ref": "tours:30112",
+      "facets": {
+        "Duration": "1 hour 30 minutes",
+        "Transfer": "Without transfer — no pickup on this ticket",
+        "Cancellation": "Non-refundable",
+        "Start times": "33 start times: 09:00, 09:30, 10:00, 10:30, 11:00, 11:30 …"
+      }
+    }
+  ],
+  "facts": {
+    "priced_for_pax": 2,
+    "currency": "INR",
+    "as_of": "2026-09-29T09:15:00Z",
+    "travel_date": "2026-10-12",
+    "destination": "Dubai",
+    "total_available": 13
+  },
+  "more": {
+    "total_available": 13,
+    "showing": 3,
+    "next_offset": 3
+  },
+  "degraded": null,
+  "suggest": [
+    {
+      "kind": "transfers",
+      "reason": "adjacent",
+      "text": "You have no airport transfer for the 12th yet.",
+      "action": "search_transfers(from='DXB', to='Rove Downtown', date='2026-10-12')"
+    },
+    {
+      "kind": "tours",
+      "reason": "gap",
+      "text": "Nothing is booked for the 14th.",
+      "action": "search_tours(destination_city='Dubai', travel_date='2026-10-14')"
+    }
+  ],
+  "error": null
+}
