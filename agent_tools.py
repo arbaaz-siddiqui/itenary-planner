@@ -1110,11 +1110,12 @@ def generate_itinerary_pdf_tool(
                             "due_date_iso": "2026-06-10"}].
 
     Returns:
-        {itinerary_id, download_url (or None), filename, summary} — share the
-        download link with the customer. On WhatsApp the service attaches the
-        PDF automatically when an itinerary_id is produced.
+        {itinerary_id, filename, summary}. Do NOT write a URL or a link into
+        your reply: the chat UI renders its own download button from this
+        result, and WhatsApp attaches the file itself. Just say the itinerary
+        is ready to download.
     """
-    from itinerary_store import public_url_for, save_itinerary_pdf
+    from itinerary_store import save_itinerary_pdf
 
     # A customer who was just given a day-by-day plan in chat expects to see it
     # in the document. The model kept writing a full 5-day schedule in the reply
@@ -1209,14 +1210,19 @@ def generate_itinerary_pdf_tool(
     except Exception as e:  # never crash the turn over a PDF
         return {"error": True, "message": f"Could not generate the PDF: {e}"}
 
-    url = public_url_for(itinerary_id)
+    # download_url is deliberately NOT returned to the model. It used to be,
+    # and the model pasted the raw URL into its reply -- which is what the
+    # customer saw instead of a button, and which 404s whenever the file was
+    # written to a non-persistent directory. The surfaces build their own link
+    # from itinerary_id: the chat UI renders a download button, WhatsApp
+    # attaches the file.
     return {
         "itinerary_id": itinerary_id,
-        "download_url": url,
         "filename": f"{destination}-itinerary.pdf",
         "summary": (
-            f"Itinerary PDF ready ({destination}, {party_summary or 'your party'})."
-            + (f" Download: {url}" if url else " Available to download in the app.")
+            f"Itinerary PDF ready ({destination}, {party_summary or 'your party'}). "
+            "Tell the customer it is ready and that they can download it below. "
+            "Do not write a URL."
         ),
     }
 

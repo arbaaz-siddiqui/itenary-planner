@@ -3,6 +3,7 @@
 import { memo, useMemo } from "react";
 import { Markdown } from "./Markdown";
 import { OptionCards } from "./OptionCards";
+import { ItineraryPdf } from "./ItineraryPdf";
 import { SegmentList } from "./SegmentList";
 import type { Message, OptionItem, Segment } from "@/lib/types";
 
@@ -69,10 +70,14 @@ const Bubble = memo(function Bubble({
     const byName = new Map<string, OptionItem>();
     for (const group of m.options ?? []) {
       for (const item of group.items ?? []) {
-        const name = typeof item.name === "string" ? item.name : item.hotel_name;
-        if (typeof name === "string" && name.trim()) {
-          byName.set(normaliseName(name), item);
-        }
+        // Each kind names itself differently: tours `name`, hotels
+        // `hotel_name`, flights `airline`. Indexing only the first two left a
+        // flights-only reply with an empty map, so `optionFor` returned
+        // undefined and the table rows lost both image and details link.
+        const name = [item.name, item.hotel_name, item.airline].find(
+          (v): v is string => typeof v === "string" && v.trim() !== "",
+        );
+        if (name) byName.set(normaliseName(name), item);
       }
     }
     if (!byName.size) return undefined;
@@ -109,8 +114,18 @@ const Bubble = memo(function Bubble({
           )
         )}
 
+        {/* The PDF is not a card and is never suppressed by a result table:
+            it is the deliverable the customer asked for. */}
+        {m.options
+          ?.filter((g) => g.kind === "itinerary_pdf")
+          .flatMap((g) => g.items ?? [])
+          .slice(0, 1)
+          .map((item, i) => <ItineraryPdf key={i} item={item} />)}
+
         {!hasResultTable &&
-          m.options?.map((g, i) => <OptionCards key={i} group={g} />)}
+          m.options
+            ?.filter((g) => g.kind !== "itinerary_pdf")
+            .map((g, i) => <OptionCards key={i} group={g} />)}
 
         {m.error && (
           <p role="alert" className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-500">

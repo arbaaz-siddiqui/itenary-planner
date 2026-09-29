@@ -372,6 +372,11 @@ def _split_concatenated_args(state: dict[str, Any]) -> dict[str, Any] | None:
                 "type": "tool_call",
             })
 
+    dropped = _drop_repeated_failures(msgs, fixed)
+    if dropped is not None:
+        fixed = dropped
+        changed = True
+
     if not changed:
         return None
     logging.getLogger("agent.turn").warning(
@@ -380,6 +385,211 @@ def _split_concatenated_args(state: dict[str, Any]) -> dict[str, Any] | None:
     repaired = last.model_copy(update={"tool_calls": fixed, "invalid_tool_calls": []})
     repaired.id = last.id
     return {"messages": [repaired]}
+
+
+_PDF_LINK = re.compile(r"\[([^\]]*)\]\((?:https?://)?[^)\s]*/itinerary/[^)\s]+\)|(?:https?://)?\S*/itinerary/\S+\.pdf")
+
+
+def _strip_pdf_links(response: dict[str, Any]) -> None:
+    """Remove any itinerary-PDF URL the model wrote into its reply.
+
+    The tool stopped returning a URL, but the link also travels in the thread:
+    once one reply carries it, later turns copy it forward verbatim. Those
+    links 404 as soon as the file moves -- a container restart, or a base URL
+    pointing at a host that never held the file -- and the customer sees a dead
+    link where the download button belongs. A markdown link keeps its text so
+    the sentence still reads.
+    """
+    messages = response.get("messages") or []
+    for msg in reversed(messages):
+        if _message_role(msg) not in {"ai", "assistant"}:
+            continue
+        text = _message_content(msg)
+        if not isinstance(text, str) or "/itinerary/" not in text:
+            return
+        cleaned = _PDF_LINK.sub(lambda m: m.group(1) or "", text)
+        cleaned = re.sub(r"[ 	]{2,}", " ", cleaned).strip()
+        if hasattr(msg, "content"):
+            msg.content = cleaned
+        elif isinstance(msg, dict):
+            msg["content"] = cleaned
+        return
+
+
+_PDF_CLAIM = re.compile(
+    r"(?:ready to download|download (?:it|the|your)[^.\n]*|\[[^\]]*download[^\]]*\])",
+    re.IGNORECASE,
+)
+
+
+def _pdf_id_in_thread(msgs: list[Any]) -> str:
+    """The itinerary_id of a PDF this thread actually produced, or ""."""
+    for msg in reversed(msgs):
+        if _message_role(msg) != "tool":
+            continue
+        if "pdf" not in str(_safe_attr(msg, "name") or ""):
+            continue
+        out = _coerce_to_dict(_message_content(msg)) or {}
+        if out.get("itinerary_id"):
+            return str(out["itinerary_id"])
+    return ""
+
+
+def _correct_unbuilt_pdf_claim(response: dict[str, Any]) -> None:
+    """Stop a reply promising a download when no PDF was built.
+
+    generate_itinerary_pdf_tool refuses a trip with no day_plans (a PDF with a
+    price table and no schedule is worse than none). The model answered that
+    refusal with "the itinerary is ready to download below" and even typed
+    "[Download Itinerary PDF]" as literal text -- so the customer read success,
+    saw something button-shaped, and clicked nothing. Asked again, it made no
+    tool call at all and repeated the claim.
+
+    A promise of a download is only honest when a tool actually returned an
+    itinerary_id, because that id is what renders the real button.
+    """
+    messages = response.get("messages") or []
+    if _pdf_id_in_thread(messages):
+        return
+    for msg in reversed(messages):
+        if _message_role(msg) not in {"ai", "assistant"}:
+            continue
+        text = _message_content(msg)
+        if not isinstance(text, str) or not _PDF_CLAIM.search(text):
+            return
+        replacement = (
+            "I could not build the PDF yet — it needs a day-by-day plan, and we "
+            "have not settled one. Tell me which tours you want (or say \"you "
+            "pick\") and I will put the schedule together and generate it."
+        )
+        if hasattr(msg, "content"):
+            msg.content = replacement
+        elif isinstance(msg, dict):
+            msg["content"] = replacement
+        return
+
+
+def _replace_invented_results(response: dict[str, Any]) -> None:
+    """Replace a reply that lists results no search produced.
+
+    A search tool that is missing a mandatory field returns a refusal naming
+    what to ask for, and no results. The model sometimes answers it with a
+    table anyway: asked for flights with the origin city missing, it printed
+    four airlines with departure times and fares, none of which came from the
+    supplier. The customer cannot tell that apart from a real quote.
+
+    So when the only search results this turn were refusals and the reply still
+    contains a priced table, the reply is discarded and the tool's own question
+    is asked instead. Fabricated prices are worse than an extra turn.
+    """
+    msgs = response.get("messages") or []
+    refusals: list[dict[str, Any]] = []
+    produced_results = False
+
+    for msg in msgs:
+        if msg.__class__.__name__ != "ToolMessage":
+            continue
+        parsed = _coerce_to_dict(getattr(msg, "content", None))
+        if not isinstance(parsed, dict):
+            continue
+        if parsed.get("error_type") == "NeedsCustomerInput":
+            refusals.append(parsed)
+        elif parsed.get("options"):
+            produced_results = True
+
+    if produced_results or not refusals:
+        return
+
+    last = next(
+        (m for m in reversed(msgs) if _message_role(m) in {"ai", "assistant"}), None
+    )
+    text = _message_content(last) if last is not None else None
+    if not isinstance(text, str) or "₹" not in text:
+        return
+
+    # Worded for the customer. rules._FIELD_PROMPTS is written for the model
+    # ("which city they are flying from") and reads wrong addressed to someone.
+    ASK_FOR = {
+        "origin_city": "which city you are flying from",
+        "departure_date": "your departure date",
+        "check_in": "your check-in date",
+        "check_out": "your check-out date",
+        "travel_date": "your travel date",
+        "adults": "how many adults are travelling",
+    }
+
+    fields: list[str] = []
+    for r in refusals:
+        for f in r.get("missing_fields") or []:
+            if f not in fields:
+                fields.append(f)
+    asks = [ASK_FOR.get(f, f.replace("_", " ")) for f in fields]
+    joined = asks[0] if len(asks) == 1 else ", ".join(asks[:-1]) + f" and {asks[-1]}"
+
+    logging.getLogger("agent.turn").warning(
+        "replaced a reply that quoted prices with no search behind it (missing: %s)",
+        ", ".join(fields),
+    )
+    last.content = (
+        f"Before I can pull live prices I need {joined}. Could you tell me "
+        f"{'that' if len(asks) == 1 else 'those'}?"
+    )
+
+
+def _failed_calls_so_far(msgs: list[Any]) -> set[tuple[str, str]]:
+    """(tool name, arguments) pairs that already returned NeedsCustomerInput.
+
+    Read from the thread rather than tracked separately so it survives the
+    replay LangGraph does on every step.
+    """
+    seen: set[tuple[str, str]] = set()
+    by_id: dict[str, tuple[str, str]] = {}
+    for msg in msgs:
+        for call in getattr(msg, "tool_calls", None) or []:
+            cid = call.get("id")
+            if cid:
+                by_id[cid] = (
+                    call.get("name", ""),
+                    json.dumps(call.get("args"), sort_keys=True, default=str),
+                )
+        if msg.__class__.__name__ != "ToolMessage":
+            continue
+        key = by_id.get(getattr(msg, "tool_call_id", ""))
+        if key and "NeedsCustomerInput" in str(getattr(msg, "content", "")):
+            seen.add(key)
+    return seen
+
+
+def _drop_repeated_failures(
+    msgs: list[Any], calls: list[dict[str, Any]]
+) -> list[dict[str, Any]] | None:
+    """Remove calls whose exact arguments already earned a refusal.
+
+    A missing mandatory field makes the tool refuse and name what to ask for.
+    The model sometimes re-sends the identical arguments instead, and with
+    nothing to break the cycle it did so 42 times in one turn -- burning the
+    recursion budget and the credit balance, then answering from invention
+    because it never got a result.
+
+    Dropping the duplicate leaves the earlier refusal as the only thing in
+    front of the model, which is the message that tells it what to ask.
+    """
+    failed = _failed_calls_so_far(msgs)
+    if not failed:
+        return None
+    kept = [
+        c
+        for c in calls
+        if (c.get("name", ""), json.dumps(c.get("args"), sort_keys=True, default=str))
+        not in failed
+    ]
+    if len(kept) == len(calls):
+        return None
+    logging.getLogger("agent.turn").warning(
+        "dropped %d repeated tool call(s) that already failed",
+        len(calls) - len(kept),
+    )
+    return kept
 
 
 
@@ -840,6 +1050,9 @@ def invoke_and_log(
             {"messages": [{"role": "user", "content": user_message}]}, config
         )
     latency = time.perf_counter() - start
+    _replace_invented_results(response)
+    _strip_pdf_links(response)
+    _correct_unbuilt_pdf_claim(response)
     # Colored per-turn timeline to the console: serving model, tools, [CACHED] tags.
     print_turn_timeline(
         surface=surface, user_message=user_message,
