@@ -1062,9 +1062,8 @@ def _customer_words(agent: Any, config: dict[str, Any], user_message: str) -> st
         state = agent.get_state(config)
         for m in (state.values or {}).get("messages") or []:
             text = _message_content(m)
-            if (_message_role(m) in {"human", "user"} and isinstance(text, str)
-                    and not is_internal_marker(text)):
-                said.append(text)
+            if _message_role(m) in {"human", "user"} and isinstance(text, str):
+                said.append(_customer_part(text))
     except Exception:  # noqa: BLE001 -- no history is a fresh conversation
         pass
     said.append(user_message)
@@ -1333,6 +1332,25 @@ def _recover_empty_turn(agent: Any, response: dict[str, Any], config: dict[str, 
 # Prefix that marks a message as internal guidance, never shown to a customer.
 INTERNAL_MARKER_PREFIX = "[system]"
 
+# Graph steps per tool round: pre_model_hook, model, post_model_hook, tools.
+_STEPS_PER_TOOL_ROUND = 4
+
+
+def _customer_part(text: str) -> str:
+    """What the customer typed, without a leading `[system]` context block.
+
+    The API prepends remembered facts to a session's first message
+    ("[system] Known about this customer ...", a blank line, then their
+    message). Dropping every marker-led message threw the customer's own words
+    away with it: "Burj Khalifa on 22 October" was forgotten, and "the same
+    day" on the next turn was refused for having no date. A marker with no
+    customer text after it yields "".
+    """
+    if not is_internal_marker(text):
+        return text
+    _, sep, rest = text.partition("\n\n")
+    return rest if sep else ""
+
 
 def is_internal_marker(text: object) -> bool:
     """True if this content is an internal guidance marker, not customer text."""
@@ -1472,10 +1490,12 @@ def stream_and_log(
         config["recursion_limit"] = 25
     else:
         # Backstop against tool-loops (some models re-call the same search 5-7×,
-        # hanging the turn for 90s). ~12 steps = the model + up to ~5 tool cycles,
-        # plenty for a legit multi-tool turn, but caps a runaway loop. Generous
-        # enough not to cut mid-tool-call (which would corrupt the thread).
-        config["recursion_limit"] = 12
+        # hanging the turn for 90s). Counted in graph steps, and one tool round
+        # is FOUR of them since the pre/post model hooks were added (hook,
+        # model, hook, tools): the old 12 allowed only three rounds, so
+        # lookup -> options -> details hit the cap and the customer saw a raw
+        # "Recursion limit of 12 reached". Six rounds, plus the final answer.
+        config["recursion_limit"] = _STEPS_PER_TOOL_ROUND * 6 + 1
     start = time.perf_counter()
 
     def _process_chunk(mode: str, chunk: Any) -> list[str]:

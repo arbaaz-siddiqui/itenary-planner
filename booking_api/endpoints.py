@@ -35,6 +35,7 @@ Each function:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import lru_cache
 from typing import Any
 
@@ -1325,6 +1326,25 @@ def call_tour_options(*, tour_id: int, travel_date: str, lang: str = "en") -> di
         ) from e
 
 
+def _tour_pax_details(
+    adults: int, child_ages: Sequence[int], units: int = 0
+) -> list[dict[str, str]]:
+    """The optionRate party: adults, then children with their ages.
+
+    An option sold per unit (a quad bike, a private majlis) is priced by unit
+    count instead; the supplier answers 500 to an adult count on those.
+    """
+    if units:
+        return [{"label": "unit", "value": str(units), "age": ""}]
+    pax = [{"label": "adult", "value": str(adults), "age": ""}]
+    ages = [int(a) for a in child_ages or ()]
+    if ages:
+        pax.append(
+            {"label": "child", "value": str(len(ages)), "age": ",".join(map(str, ages))}
+        )
+    return pax
+
+
 def call_tour_option_rate(
     *,
     tour_id: int,
@@ -1334,12 +1354,24 @@ def call_tour_option_rate(
     adults: int = 2,
     transfer_id: int = 1,
     lang: str = "en",
+    child_ages: Sequence[int] = (),
+    units: int = 0,
+    vehicle_id: int = 0,
 ) -> dict[str, Any]:
     """Rate for one tour option, INCLUDING the per-transfer-type prices.
 
     `result[0].initialTransferRates` is the field the flat toursearchlistrate
     never had: one entry per transferTypeId with `startingFromRate`. A tour with
     no pickup returns an empty list -- that is "Without Transfer", not an error.
+
+    `result[0].rate` is the supplier's TOTAL for the whole party on the
+    `transfer_id` basis (1 Sharing, 2 Private, 3 Without): ticket plus that
+    transfer, vehicles included. It is exactly what gujjutours.com charges, so
+    it is the figure to quote; no client-side arithmetic reproduces it as well.
+    Children are priced from `child_ages` (one age per child); `units`
+    replaces both for an option sold per unit. A private transfer on a tour
+    with named vehicles needs `vehicle_id` from `vehicleRates`: without it the
+    supplier silently returns the ticket-only rate.
     """
     payload = {
         "tourID": tour_id,
@@ -1349,10 +1381,10 @@ def call_tour_option_rate(
         "StartTime": "",
         "guideId": 0,
         "lang": lang,
-        "paxDetails": [{"label": "adult", "value": str(adults), "age": ""}],
+        "paxDetails": _tour_pax_details(adults, child_ages, units),
         "supplierId": supplier_id,
         "timeSlotId": "",
-        "vehicleId": 0,
+        "vehicleId": vehicle_id,
     }
     try:
         return get_b2c_client().post(

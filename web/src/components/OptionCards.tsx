@@ -90,21 +90,27 @@ function Transfers({ o }: { o: OptionItem }) {
   const tiers = o.transfer_prices;
   if (!Array.isArray(tiers) || !tiers.length) return null;
 
-  // Every figure is the TOTAL for `priced_for_pax` people, never a per-head
-  // unit -- saying so on the card is what stops a reader multiplying it by the
-  // party size, which is exactly how a 7-person quote came out 7x too high.
+  // Every figure is the supplier's GRAND total for the whole party on that
+  // transfer type, ticket included -- never a per-head unit, never a
+  // surcharge to add to the ticket. Saying so on the card is what stops a
+  // reader adding or multiplying it.
   const pax = tiers.map((t) => num(t as OptionItem, "priced_for_pax")).find((n) => n != null);
+  const party = str(o, "party");
+  const perUnit = str(o, "price_basis") === "per_unit";
 
   return (
     <div className="mt-2 rounded-lg bg-surface-2 px-2.5 py-2">
       <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-fg-muted">
-        Transfer {pax && pax > 1 ? `· total for ${pax} travellers` : "· per booking"}
+        {perUnit
+          ? "Total · per unit, ticket included"
+          : `Total · ${party ?? (pax && pax > 1 ? `${pax} travellers` : "1 traveller")}, ticket included`}
       </p>
       <ul className="space-y-0.5">
         {tiers.map((t, i) => {
           const tier = t as OptionItem;
           const label = str(tier, "transfer_type") ?? "Transfer";
-          const price = str(tier, "price_display") ?? inr(num(tier, "price_inr"));
+          const price =
+            str(tier, "total_display") ?? str(tier, "price_display") ?? inr(num(tier, "price_inr"));
           const free = num(tier, "price_inr") === 0;
           return (
             <li key={i} className="flex items-baseline justify-between gap-3 text-xs">
@@ -168,6 +174,8 @@ function TourCard({ o }: { o: OptionItem }) {
           {addon && (
             <p className="mt-1 text-[11px] text-fg-muted">Needs a main option to book</p>
           )}
+          {/* The option's own terms, so the card never reads "TBC". */}
+          <Meta items={[str(o, "cancellation") ?? str(o, "cancellation_display"), str(o, "timing")]} />
         </div>
         {display ? (
           <div className="shrink-0 text-right">

@@ -546,10 +546,12 @@ class TourOption(BaseModel):
     discount_value: float = 0.0
     duration: str = ""
     short_description: str = ""
-    # Filled by search_tours from /api/tours/optionRate -> initialTransferRates.
-    # Empty when the supplier publishes no per-transfer-type split.
+    # Filled by search_tours from /api/tours/optionRate: the party's grand
+    # total per transfer type (ticket + transfer + vehicles, children
+    # included), for the option named in `priced_option_name`.
     transfer_prices: list[dict[str, Any]] = Field(default_factory=list)
     transfer_price_display: str = ""
+    priced_option_name: str = ""
     # True once the transfer lookup finished for this tour. False means it was
     # cut off by the fan-out deadline, which is NOT the same as the supplier
     # publishing no rates — sharing_display must not conflate the two.

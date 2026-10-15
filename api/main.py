@@ -280,6 +280,12 @@ async def chat_stream(
     )
 
 
+_TURN_FAILED = (
+    "Sorry, I could not finish that one. Please send it again, and I will "
+    "pick up from where we were."
+)
+
+
 async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
     """Run one agent turn, emitting SSE events as tokens arrive."""
     from agent import StreamResult, extract_tool_calls, stream_and_log
@@ -380,7 +386,11 @@ async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
                 loop.call_soon_threadsafe(queue.put_nowait, ("token", token))
             _drain_tool_events()
         except Exception as e:  # noqa: BLE001
-            loop.call_soon_threadsafe(queue.put_nowait, ("error", str(e)))
+            # Logged in full, shown to the customer in words: a framework
+            # message ("Recursion limit of 12 reached ... visit docs.langchain")
+            # is not something a traveller can act on.
+            log.exception("stream_turn_failed: %s", e)
+            loop.call_soon_threadsafe(queue.put_nowait, ("error", _TURN_FAILED))
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)
 

@@ -230,6 +230,7 @@ def convert_supplier_price(
     *,
     fare_currency: str = "",
     display_currency: str | None = None,
+    places: int | None = None,
 ) -> tuple[float | None, str]:
     """Convert a supplier fare to the currency we quote in.
 
@@ -248,6 +249,10 @@ def convert_supplier_price(
     Note this INCLUDES the supplier's service fee, so it is the total the
     customer pays. It is deliberately ~fee larger than the endpoint's own
     `priceWithoutROE` field (which is the fare NET of the fee).
+
+    `places` overrides the rounding. INR defaults to whole rupees, but a quote
+    the customer compares line by line against the website (tour totals, which
+    gujjutours.com shows to the paisa) needs places=2.
 
     Returns (amount, currency_code). Amount is None when no rate is available —
     callers must then fall back rather than invent a number.
@@ -270,7 +275,8 @@ def convert_supplier_price(
     buying, selling = _roe_pair(target)
     # INR is quoted in whole rupees — paisa on a visa fee reads like a bug.
     # Minor units matter for USD/EUR, so only INR-like currencies are rounded.
-    places = 0 if target in {"INR", "JPY"} else 2
+    if places is None:
+        places = 0 if target in {"INR", "JPY"} else 2
 
     # The branch is on whether the fare row is denominated in OUR currency.
     if fare_cur == target:
