@@ -60,3 +60,6 @@ eval_r1.json
 
 # Deploy env files — contain live tokens, never commit
 railway-env*.txt
+
+# Browser-automation captures (page snapshots, supplier responses)
+.playwright-mcp/

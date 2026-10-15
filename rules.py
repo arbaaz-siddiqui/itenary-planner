@@ -1001,6 +1001,7 @@ _FIELD_PROMPTS: dict[str, str] = {
     "check_out": "the check-out date",
     "travel_date": "the travel date",
     "adults": "how many adults are travelling",
+    "child_ages": "the age of each child (under-2s fly as lap infants)",
 }
 
 

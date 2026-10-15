@@ -142,12 +142,107 @@ def _is_bogus_flight(opt: FlightOption) -> bool:
     return False
 
 
+def _seg_value(segment: Any, name: str) -> Any:
+    """Read a segment field from a FlightSegment or its model_dump() dict."""
+    if isinstance(segment, dict):
+        return segment.get(name)
+    return getattr(segment, name, None)
+
+
+def flight_layovers(segments: list[Any]) -> list[tuple[str, int]]:
+    """(airport, minutes) for every connection on one leg.
+
+    Measured from the arrival to the next departure at the SAME airport, so
+    both clock times share one timezone and the gap is exact (it matched the
+    supplier's layoverTimeInMinute on 2,055 of 2,055 live connections). The
+    supplier stores that figure on the segment ARRIVING at the stop; it is the
+    fallback when the two times are unusable.
+    """
+    out: list[tuple[str, int]] = []
+    for prev, nxt in zip(segments, segments[1:]):
+        arrived = _parse_datetime(_seg_value(prev, "arrival"))
+        leaves = _parse_datetime(_seg_value(nxt, "departure"))
+        minutes = int((leaves - arrived).total_seconds() // 60) if arrived and leaves else -1
+        if minutes < 0:
+            minutes = int(_seg_value(prev, "layover_min") or 0)
+        airport = str(_seg_value(nxt, "from_airport") or _seg_value(prev, "to_airport") or "")
+        out.append((airport, minutes))
+    return out
+
+
+def flight_leg_duration_min(segments: list[Any]) -> int:
+    """Door-to-door minutes for one leg: flying time plus every connection.
+
+    Segment times are local clock times with no UTC offset, so arrival minus
+    departure is wrong whenever a leg crosses a timezone -- by 1h30m on every
+    India-Gulf flight (FZ 438 AMD 04:25 -> DXB 06:20 is 3h25m, not 1h55m). The
+    supplier's journeyDuration is real elapsed flying time per segment; adding
+    the connections gives the true total (matched 1,440 of 1,440 live legs).
+    Returns 0 when a segment carries no flying time: unknown, never a guess.
+    """
+    if not segments:
+        return 0
+    flying = [int(_seg_value(s, "duration_min") or 0) for s in segments]
+    if any(m <= 0 for m in flying):
+        return 0
+    return sum(flying) + sum(m for _, m in flight_layovers(segments))
+
+
+# Cabin ladder. A segment's cabinClassText is free text from the supplier
+# ("ECONOMY", "Economy Standard", "Business", ...).
+FLIGHT_CABIN_RANK: dict[str, int] = {"Y": 0, "S": 1, "C": 2, "F": 3}
+
+
+def flight_cabin_code(text: Any) -> str:
+    """Normalise a segment's cabin text to Y/S/C/F, or "" when unknown.
+
+    "Economy Premium" and "Economy Standard" are economy FARE BRANDS, not the
+    premium-economy cabin, so only the phrase "premium economy" maps to S.
+    """
+    t = str(text or "").upper()
+    if "FIRST" in t:
+        return "F"
+    if "BUSINESS" in t:
+        return "C"
+    if "PREMIUM ECONOMY" in t:
+        return "S"
+    if "ECONOMY" in t:
+        return "Y"
+    return ""
+
+
+def _itinerary_cabin(segments: list[FlightSegment]) -> str:
+    """The lowest cabin flown on any segment, or "" if any segment is unknown."""
+    codes = [flight_cabin_code(s.cabin_class_text) for s in segments]
+    if not codes or "" in codes:
+        return ""
+    return min(codes, key=FLIGHT_CABIN_RANK.__getitem__)
+
+
+def _meets_cabin(option: FlightOption, requested: str) -> bool:
+    """True when every segment is flown in the requested cabin or better.
+
+    A business search returns economy itineraries too (255 of 371 on a live
+    AMD-DXB search); without this they were sorted to the top of a "business"
+    answer. An itinerary whose cabin the supplier did not state only passes an
+    economy request -- economy is the supplier's default, anything higher must
+    be stated to be believed.
+    """
+    want = FLIGHT_CABIN_RANK.get(requested.upper())
+    if want is None:
+        return True
+    if not option.cabin:
+        return want == 0
+    return FLIGHT_CABIN_RANK[option.cabin] >= want
+
+
 def parse_flight_response(
     raw: dict[str, Any],
     *,
     expected_destination: str | None = None,
     expected_origin: str | None = None,
     max_results: int | None = None,
+    cabin: str | None = None,
 ) -> list[FlightOption]:
     """Parse a FlightSearch response into ranked FlightOption objects.
 
@@ -158,6 +253,8 @@ def parse_flight_response(
             related-route suggestions (e.g. DEL→NMI when you asked DEL→BOM).
         expected_origin: Same idea for origin.
         max_results: Cap on returned options.
+        cabin: Requested cabin (Y/S/C/F). Itineraries flown below it are
+            dropped. None keeps every cabin.
     """
     if not isinstance(raw, dict):
         raise FlightNormalizationError("Expected dict response", missing_field="root")
@@ -168,14 +265,17 @@ def parse_flight_response(
 
     expected_dest_upper = expected_destination.upper() if expected_destination else None
     expected_origin_upper = expected_origin.upper() if expected_origin else None
+    conversation_id = str(raw.get("conversationId") or "")
 
     rates = live_rate_map()
     options: list[FlightOption] = []
     for item in itineraries:
-        opt = _parse_flight_itinerary(item, rates)
+        opt = _parse_flight_itinerary(item, rates, conversation_id=conversation_id)
         if opt is None:
             continue
         if _is_bogus_flight(opt):
+            continue
+        if cabin and not _meets_cabin(opt, cabin):
             continue
         # Drop itineraries to/from the wrong airport
         if expected_dest_upper and opt.segments_outbound:
@@ -191,7 +291,12 @@ def parse_flight_response(
     return options[:max_results] if max_results else options
 
 
-def _parse_flight_itinerary(item: dict[str, Any], rates: dict[str, float]) -> FlightOption | None:
+def _parse_flight_itinerary(
+    item: dict[str, Any],
+    rates: dict[str, float],
+    *,
+    conversation_id: str = "",
+) -> FlightOption | None:
     if not isinstance(item, dict):
         return None
 
@@ -229,25 +334,20 @@ def _parse_flight_itinerary(item: dict[str, Any], rates: dict[str, float]) -> Fl
     segs_out = _parse_segments(od_options[0]) if len(od_options) > 0 else []
     segs_ret = _parse_segments(od_options[1]) if len(od_options) > 1 else []
 
-    airline = segs_out[0].marketing_airline if segs_out else ""
+    # Every marketing carrier on the trip, in flying order. Naming only the
+    # first segment's carrier sold AI 2546 + FZ 442 / FZ 437 as "Air India"
+    # when two of its three flights are flydubai.
+    carriers = list(dict.fromkeys(
+        s.marketing_airline for s in [*segs_out, *segs_ret] if s.marketing_airline
+    ))
+    airline = " + ".join(carriers)
     airline_code = segs_out[0].marketing_airline_code if segs_out else ""
     stops = max(0, len(segs_out) - 1)
+    stops_return = max(0, len(segs_ret) - 1)
     route_out = f"{segs_out[0].from_airport} → {segs_out[-1].to_airport}" if segs_out else ""
     route_ret = f"{segs_ret[0].from_airport} → {segs_ret[-1].to_airport}" if segs_ret else ""
-    # Total journey = first departure to last arrival, which INCLUDES layovers.
-    # Summing the per-segment `journeyDuration` drops them: Saudia HYD-JED-DXB
-    # is 340 + 175 = 8h 35m of flying, but the customer departs 02:25 and lands
-    # 19:30 -- 17h 5m -- because of a long stop in Jeddah. The shorter figure
-    # made a one-stop look like a direct flight.
-    duration_min = 0
-    if segs_out:
-        first_dep, last_arr = segs_out[0].departure, segs_out[-1].arrival
-        if first_dep and last_arr:
-            duration_min = max(0, int((last_arr - first_dep).total_seconds() // 60))
-        if not duration_min:
-            # No usable timestamps: flying time alone is wrong, but better than
-            # claiming zero.
-            duration_min = sum(s.duration_min for s in segs_out)
+    duration_min = flight_leg_duration_min(segs_out)
+    duration_return_min = flight_leg_duration_min(segs_ret)
 
     is_refundable_label = pricing.get("isRefundable") or ""
     # New API uses "refundable"/"nonrefundable"; legacy used "Yes"/"No"
@@ -278,9 +378,13 @@ def _parse_flight_itinerary(item: dict[str, Any], rates: dict[str, float]) -> Fl
         airline=airline,
         airline_code=airline_code,
         stops=stops,
+        stops_return=stops_return,
         route_outbound=route_out,
         route_return=route_ret,
         duration_min=duration_min,
+        duration_return_min=duration_return_min,
+        cabin=_itinerary_cabin([*segs_out, *segs_ret]),
+        conversation_id=conversation_id,
         segments_outbound=segs_out,
         segments_return=segs_ret,
         refundable=refundable,

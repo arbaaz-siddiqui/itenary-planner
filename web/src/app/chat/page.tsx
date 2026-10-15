@@ -259,7 +259,12 @@ export default function ChatPage() {
           case "done":
             // Adopt the server id so a later refetch dedupes cleanly. The id
             // change also ends the live view, since liveId no longer matches.
-            persist({ id: ev.message_id || draftId });
+            // The server's stored reply wins over the streamed text: it is the
+            // corrected version when a guard rewrote the answer.
+            persist({
+              id: ev.message_id || draftId,
+              ...(ev.content ? { content: ev.content } : {}),
+            });
             break;
 
           // `start`, `token` and `tool` are fully handled by the reducer.

@@ -207,23 +207,55 @@ def _mentions_price(text: str) -> bool:
 # =============================================================================
 # Card renderers (one function per kind)
 # =============================================================================
+_FLIGHT_CABINS = {"Y": "Economy", "S": "Premium economy", "C": "Business", "F": "First"}
+
+
+def _flight_leg_line(label: str, route: str, leg: dict[str, Any]) -> str:
+    """'Outbound: AMD → DXB · 438 · 04:25 → 06:20 · 3h 25m · Non-stop'.
+
+    The duration is the server's (flying time + layovers); clock times are
+    local to two different zones, so it is never derived from them here.
+    """
+    stops = leg.get("stops")
+    stops_label = None if stops is None else ("Non-stop" if stops == 0 else f"{stops} stop(s)")
+    if stops_label and leg.get("layovers"):
+        stops_label += f" ({', '.join(leg['layovers'])})"
+    times = (f"{leg['departure_time']} → {leg['arrival_time']}"
+             if leg.get("departure_time") and leg.get("arrival_time") else None)
+    parts = [route, " + ".join(leg.get("flight_numbers") or []) or None, times,
+             leg.get("duration_display") or None, stops_label]
+    return f"{label}: " + " · ".join(p for p in parts if p)
+
+
 def _render_flight(o: dict[str, Any]) -> None:
     with st.container(border=True):
         c1, c2 = st.columns([3, 1])
         with c1:
             st.markdown(f"**✈️ {o.get('airline') or 'Flight'}**")
-            if o.get("route_outbound"):
-                st.caption(f"Outbound: {o['route_outbound']}")
-            if o.get("route_return"):
-                st.caption(f"Return: {o['route_return']}")
-            stops = o.get("stops", 0)
-            duration = o.get("duration_min", 0)
-            stops_label = "Non-stop" if stops == 0 else f"{stops} stop(s)"
-            dur = f"{duration // 60}h {duration % 60}m" if duration else "—"
-            st.caption(f"{stops_label} · {dur}")
-            if o.get("refundable"):
-                st.caption("✓ Refundable")
-            if o.get("baggage_info"):
+            outbound, inbound = o.get("outbound") or {}, o.get("inbound") or {}
+            if outbound:
+                st.caption(_flight_leg_line("Outbound", o.get("route_outbound", ""), outbound))
+                if inbound:
+                    st.caption(_flight_leg_line("Return", o.get("route_return", ""), inbound))
+            else:
+                # Results stored before per-leg summaries existed.
+                if o.get("route_outbound"):
+                    st.caption(f"Outbound: {o['route_outbound']}")
+                if o.get("route_return"):
+                    st.caption(f"Return: {o['route_return']}")
+                stops = o.get("stops", 0)
+                duration = o.get("duration_min", 0)
+                stops_label = "Non-stop" if stops == 0 else f"{stops} stop(s)"
+                dur = f"{duration // 60}h {duration % 60}m" if duration else "—"
+                st.caption(f"{stops_label} · {dur}")
+            details = [
+                _FLIGHT_CABINS.get(o.get("cabin") or "", ""),
+                "✓ Refundable" if o.get("refundable") else "Non-refundable",
+            ]
+            st.caption(" · ".join(d for d in details if d))
+            if o.get("baggage_display"):
+                st.caption(f"🧳 {o['baggage_display']}")
+            elif o.get("baggage_info"):
                 st.caption(f"🧳 {', '.join(o['baggage_info'])}")
         with c2:
             st.markdown(f"### {format_inr(o.get('price_inr', 0))}")
