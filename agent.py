@@ -1241,6 +1241,90 @@ def _apply_reply_guards(response: dict[str, Any]) -> None:
     _replace_invented_results(response)
     _strip_pdf_links(response)
     _correct_unbuilt_pdf_claim(response)
+    _enforce_visa_timeline(response)
+    _ensure_visa_party_total(response)
+
+
+def _ensure_visa_party_total(response: dict[str, Any]) -> None:
+    """A party of 2+ is told what the visa costs them all, not one adult fare.
+
+    The cards show per-person prices. Asked for "2 adults and 1 child", the
+    reply gave only the Express family total and never the Normal one
+    (Rs 17,713.08), though the tool returned it. When the reply carries no
+    party total for the first (cheapest) visa option, the tool's own line is
+    added.
+    """
+    turn = _this_turn((response or {}).get("messages") or [])
+    first: dict[str, Any] | None = None
+    for call in extract_tool_calls({"messages": turn}):
+        if str(call.get("tool_name") or "") != "get_visa_info":
+            continue
+        out = _coerce_to_dict(call.get("output"))
+        opts = (out or {}).get("options") or []
+        if opts and isinstance(opts[0], dict) and opts[0].get("party_totals"):
+            first = opts[0]
+    if not first:
+        return
+    normal = next((t for t in first["party_totals"] if t.get("track") == "Normal"), None)
+    if not normal or "1 adult (" in str(normal.get("display")):
+        return
+    text = _final_reply(response)
+    amount = f"{float(normal['total_inr']):,.2f}"
+    # Indian grouping in the display ("17,713.08" either way for 5 digits);
+    # check the display's own digits so 1,77,130.80 also matches.
+    shown = str(normal.get("display") or "").split(" for ")[0].lstrip("₹")
+    if not text or shown in text or amount in text:
+        return
+    _set_final_reply(
+        response,
+        f"{text.rstrip()}\n\n**Total, {first.get('visa_type') or 'visa'}:** {normal['display']}",
+    )
+
+
+# A promise about a visa's outcome or timing. Approval is UAE immigration's
+# decision, so none of these can be honest.
+_VISA_GUARANTEE = re.compile(
+    r"\b(definitely|certainly|surely|guarantee[ds]?|no problem|for sure)\b", re.IGNORECASE
+)
+
+
+def _enforce_visa_timeline(response: dict[str, Any]) -> None:
+    """Make the visa-timing answer match get_visa_info's timeline.
+
+    Asked on 16 Oct about a 20 Oct flight, with the tool's timeline saying one
+    working day was left and neither track was sure to finish, the model
+    replied "Yes, your visa can definitely be ready in time" -- the report's
+    original finding, unchanged by a prompt rule. So in code: when this turn
+    looked a visa up, any sentence promising readiness or approval is removed,
+    and when time is tight the tool's own note is added if the reply lacks it.
+    """
+    turn = _this_turn((response or {}).get("messages") or [])
+    timeline: dict[str, Any] | None = None
+    for call in extract_tool_calls({"messages": turn}):
+        if str(call.get("tool_name") or call.get("name") or "") != "get_visa_info":
+            continue
+        out = _coerce_to_dict(call.get("output"))
+        if isinstance(out, dict) and isinstance(out.get("timeline"), dict):
+            timeline = out["timeline"]
+    if not timeline or not timeline.get("note"):
+        return
+    text = _final_reply(response)
+    if not text:
+        return
+    # Drop just the offending sentences, in place, so tables and line breaks
+    # in the rest of the reply survive.
+    fixed = text
+    for m in reversed(list(re.finditer(r"[^.!?\n]*[.!?]", text))):
+        s = m.group(0)
+        if _VISA_GUARANTEE.search(s) and re.search(r"ready|in time|approv|visa", s, re.I):
+            fixed = fixed[:m.start()] + fixed[m.end():]
+    fixed = re.sub(r"[ \t]{2,}", " ", fixed).strip()
+    tight = timeline.get("recommended_track") != "Normal"
+    note = str(timeline["note"])
+    if tight and note[:40] not in fixed and "may not finish" not in fixed and "Neither" not in fixed:
+        fixed = f"**Timing:** {note}\n\n{fixed}"
+    if fixed != text:
+        _set_final_reply(response, fixed)
 
 
 def _final_reply(response: dict[str, Any]) -> str:
@@ -1277,6 +1361,15 @@ _PROMISE = re.compile(
     re.IGNORECASE,
 )
 
+# A lookup offered on the customer's answer is not a broken promise: "Just let
+# me know which one interests you, and I'll pull up the timings" waits for them
+# by design. Retrying it appended a second "which one?" answer to the first.
+_WAITS_FOR_CUSTOMER = re.compile(
+    r"\b(let me know|tell me|once you|if you|when you|which (one|flight|hotel|option)|"
+    r"you('d| would) like|your (pick|choice)|pick one|choose)\b",
+    re.IGNORECASE,
+)
+
 _ACT_NOW_MARKER = (
     "[system] Your last reply said you would look something up, but no search "
     "ran. If you have what you need, call the tools now and answer from their "
@@ -1303,7 +1396,7 @@ def _is_unfulfilled_promise(response: dict[str, Any]) -> bool:
     if not text:
         return False
     last = re.split(r"(?<=[.!?])\s+", text)[-1]
-    return bool(_PROMISE.search(last))
+    return bool(_PROMISE.search(last)) and not _WAITS_FOR_CUSTOMER.search(last)
 
 
 # What the customer sees when a nudged retry still produced nothing to stand on.

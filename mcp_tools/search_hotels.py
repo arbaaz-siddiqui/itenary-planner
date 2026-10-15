@@ -22,6 +22,8 @@ from reference_data_loader import (
     get_hotel_names,
     get_hotel_stars,
     resolve_city,
+    area_matches,
+    resolve_dubai_area,
 )
 
 logger = logging.getLogger(__name__)
@@ -590,6 +592,7 @@ def _impl(
     hotel_name: str | None = None,
     force_refresh: bool = False,
     assume_missing: bool = False,
+    area: str | None = None,
 ) -> dict[str, Any]:
     """Search hotels in the destination city. Returns options + per-night pricing.
 
@@ -610,6 +613,13 @@ def _impl(
     mentions). This lets you confirm "has a pool/bar" from REAL data instead of
     guessing — never claim an amenity that isn't in amenities_matched.
 
+    `area`: the neighbourhood the customer asked for ("Deira", "Bur Dubai",
+    "Dubai Marina", "Downtown"). Only hotels in that area are returned; each
+    result carries `area` and `district` resolved from the hotel's own address
+    and coordinates. Quote those, never your own idea of where a hotel is. If
+    none is in the area, `area_note` says so and the hotels shown are elsewhere.
+    Stars come from the hotel's own record (`stars`; 0 = not published).
+
     Occupancy — two ways to specify:
     - For a single room, pass flat `adults` / `children` / `child_ages`.
     - For multiple rooms (e.g. a family of 4 split as 2+2, or 3+1), pass
@@ -621,7 +631,13 @@ def _impl(
       confirm the room split with the customer before searching — never guess
       how many rooms 4+ guests want.
     """
-    from rules import missing_search_fields, needs_input_error
+    from rules import exact_star_request, missing_search_fields, needs_input_error
+
+    # "A 4-star hotel" is a 4-star hotel. The model passes min_stars=4 and leaves
+    # max at 5, so 5-star hotels came back as the "4-star" picks. When the
+    # customer's own words name one star level, cap at it.
+    if min_stars and max_stars >= 5 and exact_star_request(int(min_stars)):
+        max_stars = min_stars
 
     # `adults` defaults to 2 in the signature, so a party size the customer
     # never gave looks identical to one they did. `rooms` carries its own count,
@@ -693,14 +709,27 @@ def _impl(
             star_min=int(min_stars) if min_stars > 0 else 1,
             star_max=int(max_stars) if max_stars > 0 else 5,
         )
-        # Stars: curated file first, then live discovery ratings (so discovered
-        # hotels show their real star rating, not 0).
-        star_map: dict[str, float] = {
-            str(hid): st for hid, st in discover_city_hotel_ids(city_id) if st > 0
-        }
-        star_map.update(get_hotel_stars(city_key))  # curated wins on overlap
-        # Static data: names, lat/lng, addresses, images for all searched IDs.
+        # Stars: the availability response carries none (StarRating 0), so they
+        # come from elsewhere, weakest source first so the strongest wins:
+        # the curated file (only where it actually has a rating), the city
+        # discovery list, then each hotel's own static record, which is what
+        # gujjutours.com shows. The curated file has no ratings today; letting
+        # its 0s win (as before) wiped real ratings, and the model filled the
+        # gap ("Admiral Plaza is 4-star"; the site says 3).
         static_map = _fetch_hotel_static(hotel_ids)
+        star_map: dict[str, float] = {
+            hid: st for hid, st in get_hotel_stars(city_key).items() if st > 0
+        }
+        star_map.update(
+            {str(hid): st for hid, st in discover_city_hotel_ids(city_id) if st > 0}
+        )
+        for hid, rec in static_map.items():
+            try:
+                st = float(rec.get("stars") or 0)
+            except (TypeError, ValueError):
+                st = 0.0
+            if st > 0:
+                star_map[hid] = st
         name_map: dict[str, str] = {
             hid: rec["hotel_name"]
             for hid, rec in static_map.items()
@@ -713,7 +742,10 @@ def _impl(
             hotel_names=name_map,
             hotel_areas=get_hotel_areas(city_key),
             hotel_stars=star_map,
-            max_results=max_results * 2,
+            # An area or star request filters after parsing, so it needs the
+            # wider pool: from the 10 cheapest alone, "4-star in Deira" missed
+            # every 4-star Deira hotel the website lists.
+            max_results=max_results * (8 if (area or min_stars > 0) else 2),
         )
 
         # Specific hotel searched but not available — say so clearly
@@ -727,6 +759,38 @@ def _impl(
                 "options": [],
                 "total_results": 0,
             }
+        # Area: the supplier has no locality field, so resolve it from each
+        # hotel's static address and coordinates. Before the area filter, so
+        # "4-star in Deira" checks both at once.
+        # The address and coordinates come from the address endpoint (the
+        # static record above has none); fetched once here for every candidate
+        # and reused by the coordinate enrichment below.
+        coords_map = _fetch_hotel_coords(
+            [int(o.hotel_id) for o in options if str(o.hotel_id).isdigit()]
+        )
+        resolved: list[Any] = []
+        for o in options:
+            rec = coords_map.get(str(o.hotel_id)) or static_map.get(str(o.hotel_id)) or {}
+            a, dist = resolve_dubai_area(
+                rec.get("full_address") or o.full_address,
+                rec.get("latitude"), rec.get("longitude"),
+            ) if city_key == "dubai" else ("", "")
+            resolved.append(o.model_copy(update={"area": a or o.area, "district": dist}))
+        options = resolved
+
+        area_note = None
+        if area:
+            in_area = [o for o in options if area_matches(area, o.area, o.district)]
+            if in_area:
+                options = in_area
+            elif options:
+                where = sorted({o.district or o.area for o in options if o.district or o.area})
+                area_note = (
+                    f"None of the available hotels is in {area}. The ones shown are in "
+                    f"{', '.join(where) or 'other areas'}; say so plainly and do not call "
+                    f"any of them a {area} hotel."
+                )
+
         # Filter by stars, but NEVER drop a hotel whose rating is unknown (0):
         # the availability API omits stars, so an unknown rating must not be
         # treated as "below min" — that silently zeroed out all results before.
@@ -819,8 +883,12 @@ def _impl(
         # Coordinate enrichment: fetch lat/lng/address from the address endpoint
         # so the agent can pass hotel_lat/hotel_lng directly to search_airport_transfer_dubai
         # without needing a separate lookup_entity call.
-        result_ids = [int(o["hotel_id"]) for o in option_dicts]
-        coords_map = _fetch_hotel_coords(result_ids)
+        missing_ids = [
+            int(o["hotel_id"]) for o in option_dicts
+            if str(o.get("hotel_id")) not in coords_map and str(o.get("hotel_id", "")).isdigit()
+        ]
+        if missing_ids:
+            coords_map.update(_fetch_hotel_coords(missing_ids))
         for o in option_dicts:
             coords = coords_map.get(str(o.get("hotel_id")))
             if coords:
@@ -871,6 +939,7 @@ def _impl(
             "room_count": room_count,
             "total_results": len(options),
             **({"note": note} if note else {}),
+            **({"area_note": area_note} if area_note else {}),
             **({"amenity_note": amenity_note} if amenity_note else {}),
             "pricing_note": (
                 f"price_inr is the TOTAL for all {room_count} room(s) across the "

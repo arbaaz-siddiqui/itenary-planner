@@ -119,14 +119,15 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
 | Kind | Tool name(s) | Notes |
 |---|---|---|
 | Flights | `search_flights`, `get_flight_details` | max 9 passengers (supplier rejects more); details need `conversationId` |
-| Hotels | `search_hotels`; static content: `lookup_hotel_city`, `list_city_hotels`, `get_hotel_info`, `get_hotel_description`, `get_hotel_reviews` | static content uses the hotels-only token; 9 rooms / 30 nights / 2 children (age 1-12) max |
+| Hotels | `search_hotels` (`area=` filter; results carry `stars` from each hotel's static record and `area`/`district` resolved from its address via `reference_data/dubai_areas.json`); static content: `lookup_hotel_city`, `list_city_hotels`, `get_hotel_info`, `get_hotel_description`, `get_hotel_reviews` | static content uses the hotels-only token; 9 rooms / 30 nights / 2 children (age 1-12) max |
 | Tours | `search_tours`, `get_tour_details`, `get_tour_timeslots`, `get_tour_options` (agent-only) | party totals per transfer type; `tour_pricing.py` |
 | Transfers | `search_airport_transfer_dubai` (module `search_transfers.py`), `get_transfer_details` | hotel name alone resolves coordinates |
 | Restaurants | `search_restaurants`, `get_restaurant_details` | only ~9 Dubai restaurants, all veg; `restaurant_catalog.py` |
-| Visa | `get_visa_info`, `list_visa_countries` | Indian nationality uses supplier id 245 |
+| Visa | `get_visa_info`, `list_visa_countries` | Indian nationality uses supplier id 245. Returns `refund_policy`, `track_times` (website wording), `party_totals`, and a `timeline` (working days to travel, which track fits) |
 | Packages | `list_packages`, `get_package_details` | `totalPrice=0` means price on request |
 | Lookup / FX | `lookup_entity` (public autocomplete), `get_exchange_rate` | |
-| Helpers | `result_cache.py`, `ui_payload.py`, `tour_pricing.py` | |
+| Package maths | `plan_itinerary_tool` (needs `adults`; tours carry `date`; `flight_fare_ref`; `fill_days` opt-in; returns `package_lines`), `cancellation_breakdown_tool` (refund full/none/partial) | |
+| Helpers | `result_cache.py`, `ui_payload.py`, `tour_pricing.py`, `quote_registry.py` (prices quoted per conversation; a transfer total must have been quoted) | |
 
 `surfaces/mcp_server.py` does not import `lookup_entity`, `get_tour_timeslots` or `list_visa_countries`.
 
@@ -146,7 +147,7 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
   - checkpointer: memory by default, `build_postgres_checkpoint` (chat API) or `build_sqlite_checkpoint` (WhatsApp).
 - **Recursion limit:** 25 (`_STEPS_PER_TOOL_ROUND * 6 + 1`).
 - **Streaming:** `stream_and_log` returns a `StreamResult` (`text`, `messages`, `tool_event_log`, `latency_seconds`, `on_update` callback fired after every update chunk, `.response`). Stream modes `messages` + `updates`. `on_update` is how the chat API emits live tool steps.
-- **Guards** (both paths): injection guard, malformed-args repair, empty-turn and unfulfilled-promise nudges, `_apply_reply_guards` (invented results, fake PDF links, claiming an unbuilt PDF).
+- **Guards** (both paths): injection guard, malformed-args repair, empty-turn and unfulfilled-promise nudges (a lookup offered on the customer's answer is not a broken promise), `_apply_reply_guards` (invented results, fake PDF links, claiming an unbuilt PDF, visa guarantees removed and the tight-timeline note added, a missing visa party total added).
 - **`_customer_part`** strips stacked leading `[system]` blocks the API prepends (mode, regenerate, memory) so rules see only the customer's words.
 - **`extract_all_search_options`** returns the latest result **per kind** (one card group per kind), resolved through `ui_payload.full_result`.
 
@@ -223,7 +224,7 @@ The browser keeps no account data. `localStorage` holds only the theme as a firs
 
 - Supplier prices are AED-based. `fx.convert_supplier_price`: same currency as the account → `price / buyingROE`, otherwise `price * sellingROE`. Cache the ROE pair (`fx._roe_pair`); never hardcode rates. INR rounds to 0 places unless `places` is passed (tours use 2).
 - Website and chatbot prices are identical since 2026-10-15 (the client removed the 5% flight markup). Price differences versus the website come from the supplier `rateCategory`, not ROE.
-- Visa: INR = (price − fee) × (1 / buyingROE); Indian nationality is supplier id 245.
+- Visa: `convert_supplier_price(price)` = price / buyingROE, service fee included, kept to 2 places (the website shows ₹7,753.36); Indian nationality is supplier id 245.
 - **Field names by kind** (the UI reads these):
   - Flights: `price_inr` (whole party), `price_per_adult_inr`, `base_fare_inr`, `total_tax_inr`.
   - Hotels: `price_inr` (all rooms, whole stay), `per_night_inr`; rooms carry `price_inr`, `per_night_inr`, `price_display`.
@@ -390,3 +391,5 @@ Rules for agents:
 - `/chat/stream` detached turns live in one process; scaling the API to several replicas needs a shared store first.
 - Restaurant data has no availability; only ~9 Dubai restaurants, all vegetarian.
 - Flight results can contain the same flight from two suppliers; the UI shows one card per airline + flight numbers + times + fare.
+- Cabin is normalised (`normalize_cabin`): the supplier returns zero fares, silently, for any cabin that is not a bare code.
+- The website adds a hotel markup that varies by hotel (4.0% to 11.4% seen); the chatbot quotes the supplier rate until the client confirms the rule. The website's visa cards (3-4 working days, Express 1 working day) disagree with its own visa article (2–4 days, 24–48 hours); the chatbot follows the article.

@@ -825,6 +825,64 @@ def compute_hotel_block_cost(
 # =============================================================================
 # === BUDGET — deterministic line-item trip total
 # =============================================================================
+def cancellation_breakdown(lines: list[dict[str, object]]) -> dict[str, object]:
+    """Split a package into what a cancellation refunds and what it loses.
+
+    Each line is {"label", "amount_inr", "refund"} with refund "full",
+    "none" or "partial"; a partial line also carries "refund_pct" (0-100).
+    A bare percentage was ambiguous to the model: it sent refund_pct "1"
+    meaning "fully refundable" and got a 1% refund. `refund_pct` alone is
+    still read (old callers), but only a number above 1 counts as a percent.
+    Decimal arithmetic, rounded to the paisa once per line, so refunded + lost
+    always equals the package total exactly. The model used to do this sum
+    itself and was off by Rs 1 on both sides.
+    """
+    from decimal import ROUND_HALF_UP, Decimal
+
+    paisa = Decimal("0.01")
+    out_lines: list[dict[str, object]] = []
+    refunded = lost = total = Decimal("0")
+    for line in lines or []:
+        if not isinstance(line, dict):
+            continue
+        try:
+            amount = Decimal(str(line.get("amount_inr") or 0)).quantize(paisa, ROUND_HALF_UP)
+            refund = str(line.get("refund") or "").strip().lower()
+            raw_pct = line.get("refund_pct")
+            if refund in {"full", "yes", "refundable", "true"}:
+                pct = Decimal("100")
+            elif refund in {"none", "no", "non-refundable", "nonrefundable", "false"}:
+                pct = Decimal("0")
+            elif raw_pct is not None:
+                pct = Decimal(str(raw_pct))
+                # 0-1 without an explicit "partial" reads as a yes/no flag.
+                if refund != "partial" and Decimal("0") < pct <= Decimal("1"):
+                    pct = Decimal("100")
+            else:
+                pct = Decimal("0")
+        except Exception:  # noqa: BLE001 -- a bad line is skipped, not guessed
+            continue
+        pct = min(max(pct, Decimal("0")), Decimal("100"))
+        back = (amount * pct / 100).quantize(paisa, ROUND_HALF_UP)
+        gone = amount - back
+        refunded += back
+        lost += gone
+        total += amount
+        out_lines.append({
+            "label": str(line.get("label") or "Item"),
+            "amount_inr": float(amount),
+            "refund_pct": float(pct),
+            "refunded_inr": float(back),
+            "lost_inr": float(gone),
+        })
+    return {
+        "lines": out_lines,
+        "total_inr": float(total),
+        "refunded_inr": float(refunded),
+        "lost_inr": float(lost),
+    }
+
+
 def sum_trip_total(line_items: list[dict[str, object]]) -> dict[str, object]:
     """Sum named line items into ONE inclusive trip total, deterministically.
 
@@ -996,6 +1054,25 @@ def set_conversation_text(text: str) -> None:
 # calls key it by this, so one customer's state can never be read in another
 # customer's chat on the same server process.
 _CURRENT_THREAD: ContextVar[str] = ContextVar("current_thread", default="")
+
+
+def exact_star_request(stars: int) -> bool:
+    """Did the customer ask for exactly this star level ("a 4-star hotel")?
+
+    False for open-ended asks ("4 star or above", "at least 4", "4+"), and
+    when we have no conversation text (fail open: the caller keeps its range).
+    """
+    import re
+
+    text = _CONVERSATION_TEXT.get()
+    if not text:
+        return False
+    named = re.search(rf"\b{stars}\s*(?:-|\s)?\s*(?:star|★|\*)", text)
+    if not named:
+        return False
+    tail = text[named.end(): named.end() + 25]
+    head = text[max(0, named.start() - 15): named.start()]
+    return not re.search(r"\+|above|or more|plus|and up|or better|minimum|at least", tail + " " + head)
 
 
 def set_current_thread(thread_id: str) -> None:

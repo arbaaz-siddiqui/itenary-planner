@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatInr, idOf, imagesOf, kindOf, titleOf } from "./cards";
+import { formatInr, idOf, imagesOf, kindOf, partyTotalNote, titleOf, withRowTotal } from "./cards";
 
 describe("kindOf", () => {
   it("trusts the group kind first", () => {
@@ -34,5 +34,19 @@ describe("formatting and identity", () => {
     expect(idOf({ restaurant_id: 2 }, "restaurant")).toBe("restaurant-2");
     expect(idOf({ tour_id: 53632, option_id: 222565 }, "tour")).toBe("tour-53632-222565");
     expect(titleOf({ vehicle_name: "Toyota Hiace" }, "transfer")).toBe("Toyota Hiace");
+  });
+});
+
+describe("withRowTotal / partyTotalNote", () => {
+  const visa = { visa_type: "30 Days Single Entry Tourist Visa", price_per_person_inr: 7753.36 };
+
+  it("keeps a party total the table row carried", () => {
+    const item = withRowTotal(visa, "₹17,713.08");
+    expect(partyTotalNote(item)).toBe("₹17,713.08 for your party");
+  });
+
+  it("adds nothing when the row shows the per-person price itself", () => {
+    expect(partyTotalNote(withRowTotal(visa, "₹7,753.36"))).toBeNull();
+    expect(partyTotalNote(withRowTotal(visa, null))).toBeNull();
   });
 });

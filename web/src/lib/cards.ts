@@ -131,3 +131,35 @@ export const KIND_LABEL: Record<CardKind, string> = {
   transfer: "Transfers",
   visa: "Visas",
 };
+
+/**
+ * Key a result table row's own price is copied under when that row becomes a
+ * card. The agent's table says what the customer's party pays ("₹17,713.08"
+ * for 2 adults + 1 child) while the card shows the per-person price; without
+ * this the party total vanished from the screen once the row turned into a
+ * card.
+ */
+export const PARTY_TOTAL_TAG = "__party_total";
+
+/** "₹17,713.08 for your party", or null when the row carried no total. */
+export function partyTotalNote(item: OptionItem): string | null {
+  const v = item[PARTY_TOTAL_TAG];
+  return typeof v === "string" && v.trim() ? `${v.trim()} for your party` : null;
+}
+
+// Per-unit prices a card already shows. A row price equal to one of these is
+// the same number, not a party total.
+const UNIT_PRICE_KEYS = ["price_per_person_inr", "price_per_adult_inr", "per_night_inr", "price_inr"];
+
+/**
+ * Carry the table row's own price onto the card when it is a different number
+ * from what the card shows (the party total), so it is not lost.
+ */
+export function withRowTotal(item: OptionItem, rowPrice: string | null | undefined): OptionItem {
+  const amount = Number(String(rowPrice ?? "").replace(/[^0-9.]/g, ""));
+  if (!(amount > 0)) return item;
+  const same = UNIT_PRICE_KEYS.some((k) => typeof item[k] === "number" && Math.abs((item[k] as number) - amount) < 1);
+  if (same) return item;
+  const shown = String(rowPrice).match(/₹\s?[\d,]+(?:\.\d+)?/)?.[0] ?? `₹${amount}`;
+  return { ...item, [PARTY_TOTAL_TAG]: shown };
+}

@@ -1197,16 +1197,120 @@ def parse_visa_response(raw: dict[str, Any], *, max_results: int | None = None) 
         if sub_options:
             parent_name = v.get("name") or v.get("visaType") or "Tourist Visa"
             visa_type_id = v.get("visaTypeId")
+            policy = parse_visa_policy(v)
+            tracks = policy.get("track_times") or {}
             for opt in sub_options:
                 row = _parse_visa_option(opt, parent_name, visa_type_id, rates)
-                if row is not None:
-                    options.append(row)
+                if row is None:
+                    continue
+                update = dict(policy)
+                # The supplier's per-rate text ("3-4 Working Days", "1 Working
+                # Day") disagrees with the website ("2–4 Working Days", "24–48
+                # Hours"). Every field the agent or the card can read carries
+                # the website's wording, so no reply can quote the other one.
+                if tracks.get("Normal"):
+                    update["processing_time_text"] = tracks["Normal"]
+                update["fares"] = [
+                    f.model_copy(update={"processing_time_text": tracks[f.process_type]})
+                    if tracks.get(f.process_type) else f
+                    for f in row.fares
+                ]
+                options.append(row.model_copy(update=update))
         else:
             # Legacy flat-option shape
             row = _parse_visa_flat(v, rates)
             if row is not None:
                 options.append(row)
     return options[:max_results] if max_results else options
+
+
+_VISA_TRACK_RE = re.compile(
+    r"\b(Normal|Express)\s+(\d+\s*[–-]\s*\d+\s*(?:Working\s+Days?|Hours?|Days?)"
+    r"|\d+\s*(?:Working\s+Days?|Hours?|Days?))",
+    re.I,
+)
+_APPLY_BEFORE_RE = re.compile(
+    r"Apply at least\s+\d+\s*(?:[–-]\s*\d+\s*)?days? before (?:departure|travel)\.?", re.I
+)
+# "Dubai tourist visa fees are non-refundable once ... regardless of the visa
+# outcome." At most one capitalised word before "tourist visa", so a heading
+# run into the sentence ("Please Read Before Paying") is not swept in.
+_VISA_REFUND_RE = re.compile(
+    r"((?:[A-Z][a-z]+ )?(?:tourist )?visa fees? (?:are|is) non-refundable[^.]*\.)", re.I
+)
+_COUNTED_FROM_RE = re.compile(r"Processing time is counted from[^.]*\.", re.I)
+_WEEKEND_RE = re.compile(r"weekends?\s*\(\s*([A-Za-z]{3,9})\s*[–-]\s*([A-Za-z]{3,9})\s*\)", re.I)
+
+
+def parse_visa_policy(visa: dict[str, Any]) -> dict[str, Any]:
+    """The policy facts gujjutours.com publishes for one visa type.
+
+    Everything here is read from the supplier's own data, the same text the
+    website renders: `cancellationPolicies` (refundability) and the
+    process-step article (processing time per track, when to apply, how
+    processing days are counted, the UAE weekend). Nothing is written by us,
+    so the agent can quote it instead of guessing; the guesses were wrong
+    ("a partial refund is likely", "1 Working Day", "definitely ready").
+    """
+    out: dict[str, Any] = {}
+
+    # Refundability: the structured policy is authoritative for the flag.
+    policies = [p for p in visa.get("cancellationPolicies") or [] if isinstance(p, dict)]
+    if policies:
+        out["refundable"] = any(bool(p.get("isRefundable")) for p in policies)
+        desc = " ".join(_strip_html(p.get("description")) for p in policies if p.get("description"))
+        if desc:
+            out["refund_policy"] = desc
+
+    # Tags become spaces, not nothing: table cells written without whitespace
+    # between them ("<td>Normal</td><td>2–4 Working Days</td>") must not run
+    # together into one word.
+    import html as _html
+
+    article = " ".join(
+        _html.unescape(re.sub(r"<[^>]+>", " ", str(s.get("processStepDescription"))))
+        for s in visa.get("processSteps") or []
+        if isinstance(s, dict) and s.get("processStepDescription")
+    )
+    article = re.sub(r"\s+", " ", article)
+    if article:
+        # The website's own refund sentence is the fuller one ("... regardless
+        # of the visa outcome"); prefer it over the short policy line.
+        m = _VISA_REFUND_RE.search(article)
+        if m:
+            out["refund_policy"] = m.group(1).strip()
+
+        tracks: dict[str, str] = {}
+        table_at = article.lower().find("track processing time")
+        scope = article[table_at:table_at + 400] if table_at >= 0 else article
+        for m in _VISA_TRACK_RE.finditer(scope):
+            tier = m.group(1).capitalize()
+            tracks.setdefault(tier, re.sub(r"\s+", " ", m.group(2)).strip())
+        if tracks:
+            out["track_times"] = tracks
+        if re.search(r"Express[^.]{0,80}additional charges apply", scope, re.I):
+            out["express_note"] = "Express costs extra (additional charges apply)."
+
+        m = _APPLY_BEFORE_RE.search(article)
+        if m:
+            out["apply_before_text"] = m.group(0).rstrip(".") + "."
+        m = _COUNTED_FROM_RE.search(article)
+        if m:
+            out["processing_counted_from"] = m.group(0).strip()
+        m = _WEEKEND_RE.search(article)
+        if m:
+            out["weekend_days"] = [m.group(1)[:3].title(), m.group(2)[:3].title()]
+
+    holidays: list[str] = []
+    for h in visa.get("holidays") or []:
+        if isinstance(h, dict) and h.get("fromDate"):
+            holidays.append(str(h.get("fromDate"))[:10])
+            to = str(h.get("toDate") or "")[:10]
+            if to and to != holidays[-1]:
+                holidays.append(to)
+    if holidays:
+        out["holidays"] = holidays
+    return out
 
 
 def _parse_visa_option(
@@ -1256,8 +1360,10 @@ def _parse_visa_option(
             # This INCLUDES the service fee, so it is the total the customer
             # pays — deliberately ~fee more than `priceWithoutROE`, which is the
             # fare NET of the fee.
+            # To the paisa: gujjutours.com shows ₹7,755.30, and a whole-rupee
+            # figure can never match it line for line.
             converted, _cur = convert_supplier_price(
-                amount, fare_currency=str(fi.get("currency") or "")
+                amount, fare_currency=str(fi.get("currency") or ""), places=2
             )
             if not converted:
                 # No live rate — fall back to the supplier's own net figure

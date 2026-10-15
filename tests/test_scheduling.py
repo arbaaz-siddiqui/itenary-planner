@@ -503,9 +503,11 @@ class TestComputedTripTotal:
         out = self._plan(flight_total_inr=999999.0, origin_city="Hyderabad")
         assert out["cost_breakdown"]["flights"] == pytest.approx(999999.0, abs=1.0)
 
-    def test_adults_defaults_safely(self) -> None:
+    def test_missing_party_size_is_refused_not_guessed(self) -> None:
+        """It used to default to 1 adult, which priced a 2-adult package for
+        one person (client packages report, Oct 2026)."""
         out = self._plan(adults=0)
-        assert out["adults"] == 1
+        assert out["error_type"] == "MissingPartySize"
 
 
 class TestSpreadAndFill:
@@ -623,6 +625,9 @@ class TestAutoFillDays:
             "tours": self.THIN,
             "arrival_time": "05:25",
             "departure_time": "15:00",
+            # Auto-fill is opt-in (customer asked to fill free days); these
+            # tests are about what it does once asked.
+            "fill_days": True,
         }
         args.update(kw)
         return plan_itinerary_tool.invoke(args)
@@ -729,6 +734,7 @@ class TestNoFreeDaysEver:
             "tours": self.ONE_TOUR,
             "arrival_time": "05:25",
             "departure_time": "20:50",
+            "fill_days": True,  # opt-in, see TestAutoFillDays
         }
         args.update(kw)
         return plan_itinerary_tool.invoke(args)
