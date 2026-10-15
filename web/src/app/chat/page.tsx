@@ -1,13 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Menu, Moon, Sun } from "lucide-react";
 import { api, isUnauthorized, MOCK_MODE } from "@/lib/api";
-import type { ChatSession, Message, OptionGroup, ToolCall, User } from "@/lib/types";
+import type { ChatSession, Message, OptionGroup, User } from "@/lib/types";
 import { useStreamSegments } from "@/lib/useStreamSegments";
+import { usePersisted } from "@/lib/usePersisted";
+import { useTheme } from "@/lib/theme";
+import { firstNameFrom, serviceById, type ServiceId } from "@/lib/services";
 import { Sidebar } from "@/components/Sidebar";
 import { MessageList } from "@/components/MessageList";
-import { Composer } from "@/components/Composer";
+import { Composer, type ComposerHandle, type ComposerMode } from "@/components/Composer";
+import { HomeHero } from "@/components/HomeHero";
+import { SearchDialog } from "@/components/SearchDialog";
+import { SettingsDialog } from "@/components/SettingsDialog";
 
 const ACTIVE_KEY = "active-session-id";
 
@@ -26,6 +33,17 @@ export default function ChatPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   /** Which bubble the live segments belong to. */
   const [liveId, setLiveId] = useState<string | null>(null);
+
+  // Shell state. Collapsed and pinned are per-browser conveniences.
+  const [collapsed, setCollapsed] = usePersisted("sidebar-collapsed", false);
+  const [pinnedList, setPinnedList] = usePersisted<string[]>("pinned-chats", []);
+  const pinned = useMemo(() => new Set(pinnedList), [pinnedList]);
+  const [service, setService] = useState<ServiceId | null>(null);
+  const [mode, setMode] = useState<ComposerMode>("ask");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const theme = useTheme();
+  const composerRef = useRef<ComposerHandle>(null);
 
   // Live segments + the idle "Thinking…" timer. Segments are a streaming-only
   // view; the settled message still persists as content + tool_calls.
@@ -121,17 +139,41 @@ export default function ChatPage() {
   // Cancel any in-flight stream on unmount.
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // Ctrl/Cmd+K opens chat search from anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // --- session CRUD ---
 
-  async function newChat() {
+  /**
+   * Back to the home screen. The session itself is created by the first
+   * message, so opening "New chat" and walking away leaves no empty chat.
+   */
+  function newChat(withService: ServiceId | null = null) {
+    if (streaming) stop();
     setDrawerOpen(false);
-    try {
-      const s = await api.createSession();
-      setSessions((prev) => [s, ...prev]);
-      setActiveId(s.id);
-    } catch (e) {
-      setBanner(e instanceof Error ? e.message : "Could not create chat");
-    }
+    setActiveId(null);
+    setMessages([]);
+    setService(withService);
+  }
+
+  function selectChat(id: string) {
+    setDrawerOpen(false);
+    setSearchOpen(false);
+    setService(null);
+    setActiveId(id);
+  }
+
+  function togglePin(id: string) {
+    setPinnedList((list) => (list.includes(id) ? list.filter((x) => x !== id) : [id, ...list]));
   }
 
   async function renameChat(id: string, title: string) {
@@ -149,6 +191,7 @@ export default function ChatPage() {
     const prev = sessions;
     const remaining = prev.filter((x) => x.id !== id);
     setSessions(remaining);
+    setPinnedList((list) => list.filter((x) => x !== id));
     if (id === activeId) setActiveId(remaining[0]?.id ?? null);
     try {
       await api.deleteSession(id);
@@ -169,7 +212,12 @@ export default function ChatPage() {
 
   // --- the streaming turn ---
 
-  async function send(text: string) {
+  async function send(typed: string) {
+    // A service picked in the sidebar names the intent for the agent, once.
+    const svc = serviceById(service);
+    const text =
+      svc && !typed.toLowerCase().includes(svc.label.toLowerCase()) ? `${svc.label}: ${typed}` : typed;
+    setService(null);
     let sessionId = activeId;
 
     // First message with no session yet: create one on the fly.
@@ -327,46 +375,64 @@ export default function ChatPage() {
   }
 
   const activeTitle = sessions.find((s) => s.id === activeId)?.title ?? "New chat";
+  const name = firstNameFrom(user?.email);
+  const home = !messagesLoading && messages.length === 0;
+
+  const sidebarProps = {
+    sessions,
+    activeId,
+    user,
+    loading: sessionsLoading,
+    pinned,
+    activeService: service,
+    onSelect: selectChat,
+    onNew: () => newChat(),
+    onService: (id: ServiceId) => newChat(id),
+    onSearch: () => {
+      setDrawerOpen(false);
+      setSearchOpen(true);
+    },
+    onRename: renameChat,
+    onDelete: deleteChat,
+    onTogglePin: togglePin,
+    onSettings: () => {
+      setDrawerOpen(false);
+      setSettingsOpen(true);
+    },
+    onLogout: logout,
+  };
+
+  const composer = (variant: "hero" | "dock") => (
+    <Composer
+      ref={composerRef}
+      variant={variant}
+      onSend={send}
+      onStop={stop}
+      streaming={streaming}
+      service={service}
+      onClearService={() => setService(null)}
+      mode={mode}
+      onModeChange={setMode}
+    />
+  );
 
   return (
     <div className="flex h-dvh overflow-hidden bg-bg">
-      {/* Sidebar: static column on desktop, slide-over drawer on mobile. */}
-      <aside className="hidden w-64 shrink-0 border-r border-border md:block">
-        <Sidebar
-          sessions={sessions}
-          activeId={activeId}
-          user={user}
-          loading={sessionsLoading}
-          onSelect={setActiveId}
-          onNew={newChat}
-          onRename={renameChat}
-          onDelete={deleteChat}
-          onLogout={logout}
-        />
+      {/* Desktop: a 280px column that collapses to a 64px icon rail. */}
+      <aside
+        className={`hidden shrink-0 border-r border-sidebar-border transition-[width] duration-200 ease-out lg:block ${
+          collapsed ? "w-16" : "w-[280px]"
+        }`}
+      >
+        <Sidebar {...sidebarProps} collapsed={collapsed} onToggleCollapse={() => setCollapsed((c) => !c)} />
       </aside>
 
+      {/* Below 1024px: an off-canvas drawer. */}
       {drawerOpen && (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setDrawerOpen(false)}
-            aria-hidden="true"
-          />
-          <div className="absolute inset-y-0 left-0 w-72 max-w-[85vw] border-r border-border shadow-xl">
-            <Sidebar
-              sessions={sessions}
-              activeId={activeId}
-              user={user}
-              loading={sessionsLoading}
-              onSelect={(id) => {
-                setActiveId(id);
-                setDrawerOpen(false);
-              }}
-              onNew={newChat}
-              onRename={renameChat}
-              onDelete={deleteChat}
-              onLogout={logout}
-            />
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
+          <div className="absolute inset-y-0 left-0 w-[280px] max-w-[85vw] shadow-2xl">
+            <Sidebar {...sidebarProps} onClose={() => setDrawerOpen(false)} />
           </div>
         </div>
       )}
@@ -374,34 +440,45 @@ export default function ChatPage() {
       {/* min-w-0 here is load-bearing: without it a wide table in a message
           expands this flex child and pushes the whole layout sideways. */}
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
-            aria-label="Open chats"
-            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-surface-2 md:hidden"
+            aria-label="Open menu"
+            className="grid h-9 w-9 place-items-center rounded-lg text-fg-muted hover:bg-surface-2 hover:text-fg lg:hidden"
           >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-              <path d="M3 6h18M3 12h18M3 18h18" />
-            </svg>
+            <Menu size={19} aria-hidden />
           </button>
-          <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{activeTitle}</h1>
+          <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{home ? "New chat" : activeTitle}</h1>
           {MOCK_MODE && (
             <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
               MOCK
             </span>
           )}
+          <button
+            type="button"
+            onClick={() => theme.setPref(theme.resolved === "dark" ? "light" : "dark")}
+            aria-label={theme.resolved === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            title={theme.resolved === "dark" ? "Light theme" : "Dark theme"}
+            className="grid h-9 w-9 place-items-center rounded-lg text-fg-muted hover:bg-surface-2 hover:text-fg"
+          >
+            {theme.resolved === "dark" ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Account and settings"
+            title={user?.email}
+            className="grid h-8 w-8 place-items-center rounded-full bg-brand-red text-sm font-semibold text-white"
+          >
+            {(name || "T")[0]}
+          </button>
         </header>
 
         {banner && (
-          <div role="alert" className="shrink-0 bg-red-500/10 px-4 py-2 text-center text-xs text-red-500">
+          <div role="alert" className="shrink-0 bg-brand-red/10 px-4 py-2 text-center text-xs text-brand-red">
             {banner}
-            <button
-              type="button"
-              onClick={() => setBanner(null)}
-              className="ml-2 underline"
-              aria-label="Dismiss"
-            >
+            <button type="button" onClick={() => setBanner(null)} className="ml-2 underline" aria-label="Dismiss">
               dismiss
             </button>
           </div>
@@ -410,26 +487,26 @@ export default function ChatPage() {
         <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
           {messagesLoading && messages.length === 0 ? (
             <p className="py-10 text-center text-sm text-fg-muted">Loading messages…</p>
-          ) : messages.length === 0 ? (
-            <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center gap-2 px-6 text-center">
-              <h2 className="text-lg font-semibold">Plan a Dubai trip</h2>
-              <p className="text-sm text-fg-muted">
-                Ask for hotels, tours, transfers or flights. Prices come back in ₹ with a
-                comparison table.
-              </p>
-            </div>
+          ) : home ? (
+            <HomeHero name={name} service={service} onPick={(p) => send(p)}>
+              {composer("hero")}
+            </HomeHero>
           ) : (
-            <MessageList
-              messages={messages}
-              liveId={liveId}
-              segments={stream.segments}
-              streaming={streaming}
-            />
+            <MessageList messages={messages} liveId={liveId} segments={stream.segments} streaming={streaming} />
           )}
         </div>
 
-        <Composer onSend={send} onStop={stop} streaming={streaming} />
+        {!home && composer("dock")}
       </main>
+
+      <SearchDialog open={searchOpen} sessions={sessions} onPick={selectChat} onClose={() => setSearchOpen(false)} />
+      <SettingsDialog
+        open={settingsOpen}
+        email={user?.email ?? ""}
+        theme={theme.pref}
+        onTheme={theme.setPref}
+        onClose={() => setSettingsOpen(false)}
+      />
     </div>
   );
 }

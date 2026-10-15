@@ -1,12 +1,17 @@
 @import "tailwindcss";
 
-/* Follows the OS theme. No toggle — one less thing to maintain, and the
-   agent's output is text-heavy so contrast is what actually matters.
+/* Themes are chosen in the UI (dark by default, light, or follow the OS) and
+   resolved to data-theme="dark" | "light" on <html> before first paint by the
+   inline script in layout.tsx. Tailwind's `dark:` variant follows the same
+   attribute, so components and tokens can never disagree.
    NOTE: `@theme` maps the utility names (bg-bg, text-fg-muted, …) onto real
-   CSS variables. It must NOT be nested inside @media — Tailwind v4 hoists
-   such a block out of the media query, which silently makes the dark palette
-   unconditional. So the light/dark switch lives in plain :root rules below. */
+   CSS variables. It must NOT be nested inside a selector or @media — Tailwind
+   v4 hoists it out, which silently makes one palette unconditional. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 @theme {
+  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
   --color-bg: var(--c-bg);
   --color-surface: var(--c-surface);
   --color-surface-2: var(--c-surface-2);
@@ -14,29 +19,49 @@
   --color-fg: var(--c-fg);
   --color-fg-muted: var(--c-fg-muted);
   --color-accent: var(--c-accent);
+  --color-link: var(--c-link);
+
+  /* GujjuTours brand. Read from the client's website; confirm the exact
+     values with the client before launch. */
+  --color-brand-blue: #2b7fc8;
+  --color-brand-blue-dark: #1f5f9e;
+  --color-brand-red: #e8503a;
+  --color-brand-black: #0b0b0f;
+  --color-rating: #ffc107;
+  --color-success: #1e9e5a;
+
+  /* The sidebar is black in both themes, as in the reference layout. */
+  --color-sidebar: #0b0b0f;
+  --color-sidebar-2: #1b1b22;
+  --color-sidebar-border: #26262e;
+  --color-sidebar-fg: #f3f3f5;
+  --color-sidebar-muted: #9a9aa6;
 }
 
-:root {
-  color-scheme: light dark;
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --c-bg: #0b0b0f;
+  --c-surface: #16161c;
+  --c-surface-2: #20202a;
+  --c-border: #2a2a33;
+  --c-fg: #f3f3f5;
+  --c-fg-muted: #a1a1ab;
+  --c-accent: #2b7fc8;
+  --c-link: #5aa2e0;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
   --c-bg: #ffffff;
-  --c-surface: #f7f7f8;
-  --c-surface-2: #ececef;
-  --c-border: #e2e2e5;
-  --c-fg: #1a1a1c;
-  --c-fg-muted: #6b6b73;
-  --c-accent: #2563eb;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --c-bg: #1a1a1c;
-    --c-surface: #232326;
-    --c-surface-2: #2e2e33;
-    --c-border: #38383d;
-    --c-fg: #ececef;
-    --c-fg-muted: #a0a0a8;
-    --c-accent: #60a5fa;
-  }
+  --c-surface: #f6f7f9;
+  --c-surface-2: #eceef2;
+  --c-border: #e2e4e9;
+  --c-fg: #0b0b0f;
+  --c-fg-muted: #5b5f6a;
+  --c-accent: #2b7fc8;
+  /* Brand blue is 4.3:1 on white; links use the darker shade for AA. */
+  --c-link: #1f5f9e;
 }
 
 html,
@@ -49,6 +74,41 @@ body {
   color: var(--color-fg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* Home state glow: brand blue from the top, brand red from the bottom,
+   fading into the canvas. The on-brand version of the reference's gradient. */
+.hero-glow {
+  background:
+    radial-gradient(60% 45% at 50% 18%, color-mix(in srgb, var(--color-brand-blue) 45%, transparent), transparent 70%),
+    radial-gradient(70% 50% at 50% 100%, color-mix(in srgb, var(--color-brand-red) 55%, transparent), transparent 70%),
+    var(--color-bg);
+}
+:root[data-theme="light"] .hero-glow {
+  background:
+    radial-gradient(60% 45% at 50% 18%, color-mix(in srgb, var(--color-brand-blue) 22%, transparent), transparent 70%),
+    radial-gradient(70% 50% at 50% 100%, color-mix(in srgb, var(--color-brand-red) 22%, transparent), transparent 70%),
+    var(--color-bg);
+}
+
+/* Horizontal strips that scroll by swipe, wheel, drag or arrows, with no
+   visible scrollbar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* --- Markdown from the agent -------------------------------------------
@@ -103,7 +163,7 @@ ul.ui-list {
 .md ul.ui-list > li + li { margin-top: 0; }
 
 .md a {
-  color: var(--color-accent);
+  color: var(--color-link);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -306,4 +366,10 @@ ul.ui-list {
   display: inline-block;
   width: 0.5ch;
   animation: caret 1s step-end infinite;
+}
+
+/* Thin dark scrollbar for the black sidebar's chat list. */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-sidebar-border) transparent;
 }
