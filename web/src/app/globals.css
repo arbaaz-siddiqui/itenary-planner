@@ -1,12 +1,18 @@
 @import "tailwindcss";
 
-/* Follows the OS theme. No toggle — one less thing to maintain, and the
-   agent's output is text-heavy so contrast is what actually matters.
+/* Themes are chosen in the UI (dark by default, light, or follow the OS) and
+   resolved to data-theme="dark" | "light" on <html> before first paint by the
+   inline script in layout.tsx. Tailwind's `dark:` variant follows the same
+   attribute, so components and tokens can never disagree.
    NOTE: `@theme` maps the utility names (bg-bg, text-fg-muted, …) onto real
-   CSS variables. It must NOT be nested inside @media — Tailwind v4 hoists
-   such a block out of the media query, which silently makes the dark palette
-   unconditional. So the light/dark switch lives in plain :root rules below. */
+   CSS variables. It must NOT be nested inside a selector or @media — Tailwind
+   v4 hoists it out, which silently makes one palette unconditional. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 @theme {
+  --font-sans: var(--font-sans-face), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-display-face), var(--font-sans-face), ui-sans-serif, system-ui, sans-serif;
+
   --color-bg: var(--c-bg);
   --color-surface: var(--c-surface);
   --color-surface-2: var(--c-surface-2);
@@ -14,29 +20,59 @@
   --color-fg: var(--c-fg);
   --color-fg-muted: var(--c-fg-muted);
   --color-accent: var(--c-accent);
+  --color-link: var(--c-link);
+
+  /* GujjuTours brand. Read from the client's website; confirm the exact
+     values with the client before launch. */
+  --color-brand-blue: #2b7fc8;
+  --color-brand-blue-dark: #1f5f9e;
+  --color-brand-red: #e8503a;
+  --color-brand-black: #0b0b0f;
+  --color-rating: #ffc107;
+  --color-success: #1e9e5a;
+
+  /* Black in the dark theme, as in the reference; light in the light theme. */
+  --color-sidebar: var(--c-sidebar);
+  --color-sidebar-2: var(--c-sidebar-2);
+  --color-sidebar-border: var(--c-sidebar-border);
+  --color-sidebar-fg: var(--c-sidebar-fg);
+  --color-sidebar-muted: var(--c-sidebar-muted);
 }
 
-:root {
-  color-scheme: light dark;
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --c-bg: #0b0b0f;
+  --c-surface: #16161c;
+  --c-surface-2: #20202a;
+  --c-border: #2a2a33;
+  --c-fg: #f3f3f5;
+  --c-fg-muted: #a1a1ab;
+  --c-accent: #2b7fc8;
+  --c-link: #5aa2e0;
+  --c-sidebar: #0b0b0f;
+  --c-sidebar-2: #1b1b22;
+  --c-sidebar-border: #26262e;
+  --c-sidebar-fg: #f3f3f5;
+  --c-sidebar-muted: #9a9aa6;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
   --c-bg: #ffffff;
-  --c-surface: #f7f7f8;
-  --c-surface-2: #ececef;
-  --c-border: #e2e2e5;
-  --c-fg: #1a1a1c;
-  --c-fg-muted: #6b6b73;
-  --c-accent: #2563eb;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --c-bg: #1a1a1c;
-    --c-surface: #232326;
-    --c-surface-2: #2e2e33;
-    --c-border: #38383d;
-    --c-fg: #ececef;
-    --c-fg-muted: #a0a0a8;
-    --c-accent: #60a5fa;
-  }
+  --c-surface: #f6f7f9;
+  --c-surface-2: #eceef2;
+  --c-border: #e2e4e9;
+  --c-fg: #0b0b0f;
+  --c-fg-muted: #5b5f6a;
+  --c-accent: #2b7fc8;
+  /* Brand blue is 4.3:1 on white; links use the darker shade for AA. */
+  --c-link: #1f5f9e;
+  --c-sidebar: #f6f7f9;
+  --c-sidebar-2: #e9ecf1;
+  --c-sidebar-border: #e2e4e9;
+  --c-sidebar-fg: #0b0b0f;
+  --c-sidebar-muted: #5b5f6a;
 }
 
 html,
@@ -44,11 +80,195 @@ body {
   height: 100%;
 }
 
+/* Headings take the display face everywhere: page titles, the hero, card
+   and detail titles, dialog titles. */
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
 body {
   background: var(--color-bg);
   color: var(--color-fg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* Home state background, after the reference: colour arrives in curved bands
+   (a dome rising from the bottom), not flat stripes. One large ellipse from
+   the top centre runs black, GujjuTours blue, a violet blend, magenta,
+   GujjuTours red and a sunset orange. The fine grain in ::after breaks up the
+   8-bit steps a wide gradient otherwise shows as visible banding. */
+.hero-glow {
+  position: relative;
+  isolation: isolate;
+  background: radial-gradient(
+    ellipse 135% 118% at 50% -18%,
+    #0b0b0f 0%,
+    #0b0b0f 30%,
+    #0f2440 38%,
+    #1d5ea6 45%,
+    #2b7fc8 50%,
+    #5a6fd0 55%,
+    #8c5fc6 60%,
+    #c04fa6 66%,
+    #e2477c 72%,
+    #e8503a 80%,
+    #f26a2e 89%,
+    #f78a3c 100%
+  );
+}
+:root[data-theme="light"] .hero-glow:not(.hero-glow-fixed) {
+  background: radial-gradient(
+    ellipse 135% 118% at 50% -18%,
+    #ffffff 0%,
+    #ffffff 30%,
+    #e6f0fa 38%,
+    #b8d6f2 45%,
+    #8fbfeb 50%,
+    #a9b4ee 55%,
+    #c6a9e6 60%,
+    #e7a3cc 66%,
+    #f6a2b4 72%,
+    #f8a796 80%,
+    #f9b685 89%,
+    #fbc78f 100%
+  );
+}
+.hero-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.09;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* The one orchestrated moment: the home screen settles in once on load. */
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes hero-bloom {
+  from {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.hero-bloom {
+  animation: hero-bloom 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.hero-rise {
+  animation: hero-rise 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--rise-delay, 0ms);
+}
+
+/* The auth wordmark lifts into place once, a beat after the gradient blooms. */
+@keyframes word-rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.word-rise {
+  animation: word-rise 900ms cubic-bezier(0.16, 1, 0.3, 1) 150ms both;
+}
+
+/* Menus drop from their trigger: quick, small, and from the top edge. */
+@keyframes select-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.select-pop {
+  transform-origin: top center;
+  animation: select-pop 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Travel loader: each icon holds the centre for one slot of the cycle. It
+   glides in from its own side (--from-x/--from-y), rests, then shrinks away
+   in place for the next. 0.75s per icon. */
+@keyframes travel-turn {
+  0% {
+    opacity: 0;
+    transform: translate(var(--from-x), var(--from-y)) scale(0.85);
+  }
+  9%,
+  20% {
+    opacity: 1;
+    transform: none;
+  }
+  25%,
+  100% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+.travel-loader-icon {
+  opacity: 0;
+  animation: travel-turn calc(var(--n) * 750ms) cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  animation-delay: calc(var(--i) * 750ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .travel-loader-icon {
+    animation: none !important;
+  }
+  .travel-loader-icon:first-child {
+    opacity: 1;
+  }
+}
+
+/* Tactile press for buttons: a small physical push, nothing more. */
+.press {
+  transition: transform 120ms ease-out, background-color 150ms ease-out, color 150ms ease-out,
+    border-color 150ms ease-out, opacity 150ms ease-out;
+}
+.press:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+/* Horizontal strips that scroll by swipe, wheel, drag or arrows, with no
+   visible scrollbar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* --- Markdown from the agent -------------------------------------------
@@ -103,7 +323,7 @@ ul.ui-list {
 .md ul.ui-list > li + li { margin-top: 0; }
 
 .md a {
-  color: var(--color-accent);
+  color: var(--color-link);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -143,50 +363,156 @@ ul.ui-list {
 }
 
 /* --- Ordinary prose tables ---------------------------------------------
-   A glossary or a day-plan table. Wrapper scrolls; the table itself may
-   exceed the column. Result comparisons do NOT come through here — see
-   .md-result-table below. */
+   A day plan, a menu, a comparison. A quiet card: soft header in the muted
+   ink, generous rows, the first column as the row's name, figures aligned
+   right in tabular digits, prices in the strong ink. Long text wraps (a day
+   plan is sentences, not codes); only a genuinely wide table scrolls. On
+   phones each row becomes its own small card, every value labelled with its
+   column. Result comparisons do NOT come through here: see .md-result-table
+   below. */
 .md-table-wrap {
   overflow-x: auto;
   max-width: 100%;
-  margin-top: 0.85rem;
+  margin-top: 0.9rem;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  /* Momentum scroll on iOS + a hint that there's more to the right. */
+  border-radius: 16px;
+  background: var(--color-surface);
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+.md-table-wrap::-webkit-scrollbar {
+  height: 6px;
+}
+.md-table-wrap::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--color-border);
+}
+.md-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+.md-table-wrap:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-brand-blue) 55%, transparent);
+  outline-offset: 2px;
 }
 
 .md-table-wrap table {
-  border-collapse: collapse;
-  width: max-content;
-  min-width: 100%;
-  font-size: 0.86rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 
 .md-table-wrap th,
 .md-table-wrap td {
-  border-bottom: 1px solid var(--color-border);
-  padding: 0.5rem 0.7rem;
+  padding: 0.75rem 1rem;
   text-align: left;
   vertical-align: top;
-  white-space: nowrap;
+  min-width: 7rem;
+  max-width: 22rem;
 }
 
-.md-table-wrap th {
-  background: var(--color-surface-2);
+.md-table-wrap thead th {
+  background: color-mix(in srgb, var(--color-surface-2) 70%, transparent);
+  color: var(--color-fg-muted);
+  font-size: 0.78rem;
   font-weight: 600;
-  position: sticky;
-  top: 0;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--color-border);
 }
 
-.md-table-wrap tr:last-child td {
+.md-table-wrap tbody td {
+  color: color-mix(in srgb, var(--color-fg) 82%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  transition: background-color 150ms ease-out;
+}
+.md-table-wrap tbody tr:last-child td {
   border-bottom: 0;
 }
+.md-table-wrap tbody tr:hover td {
+  background: color-mix(in srgb, var(--color-surface-2) 45%, transparent);
+}
 
-/* Digits line up column-wise in price tables. */
-.md-table-wrap td {
+/* The first column names the row. */
+.md-table-wrap tbody td:first-child {
+  color: var(--color-fg);
+  font-weight: 600;
+}
+
+.md-table-wrap td[data-kind="num"],
+.md-table-wrap td[data-kind="price"] {
+  text-align: right;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+.md-table-wrap td[data-kind="price"] {
+  color: var(--color-fg);
+  font-weight: 600;
+}
+
+@media (max-width: 639px) {
+  .md-table-wrap {
+    overflow: visible;
+    border: 0;
+    background: none;
+  }
+  .md-table-wrap table,
+  .md-table-wrap tbody,
+  .md-table-wrap tr,
+  .md-table-wrap td {
+    display: block;
+    width: 100%;
+  }
+  .md-table-wrap thead {
+    display: none;
+  }
+  .md-table-wrap tbody tr {
+    margin-bottom: 0.6rem;
+    padding: 0.35rem 0;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    background: var(--color-surface);
+  }
+  .md-table-wrap tbody tr:hover td {
+    background: none;
+  }
+  .md-table-wrap tbody td {
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+    max-width: none;
+    min-width: 0;
+    padding: 0.45rem 0.9rem;
+    border-bottom: 0;
+    text-align: right;
+    white-space: normal;
+  }
+  .md-table-wrap td[data-kind] {
+    white-space: normal;
+  }
+  .md-table-wrap tbody td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    max-width: 45%;
+    color: var(--color-fg-muted);
+    font-weight: 500;
+    font-size: 0.8rem;
+    text-align: left;
+  }
+  /* The row's name is the card's title, unlabelled. */
+  .md-table-wrap tbody td:first-child {
+    padding-top: 0.6rem;
+    padding-bottom: 0.55rem;
+    margin-bottom: 0.2rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+    text-align: left;
+    font-size: 0.95rem;
+  }
+  .md-table-wrap tbody td:first-child::before {
+    content: none;
+  }
 }
 
 /* --- Result comparisons -------------------------------------------------
@@ -201,7 +527,10 @@ ul.ui-list {
 .md-result-table table {
   border-collapse: collapse;
   width: 100%;
-  table-layout: fixed;
+  /* auto, not fixed: a fixed layout split the width by percentages, so a long
+     price header ("Total price (private transfer included)") held on one line
+     pushed the table past the bubble and cut the option names off. */
+  table-layout: auto;
   font-size: 0.82rem;
 }
 
@@ -231,7 +560,7 @@ ul.ui-list {
 
 /* The name column carries the most text, so give it the most room. */
 .md-result-table th[data-name] {
-  width: 34%;
+  min-width: 12rem;
   font-weight: 600;
 }
 
@@ -240,9 +569,15 @@ ul.ui-list {
 .md-result-table th[data-price],
 .md-result-table td[data-price] {
   text-align: right;
-  white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  width: 16%;
+}
+/* The figure never breaks; its header may wrap onto two lines. */
+.md-result-table td[data-price] {
+  white-space: nowrap;
+}
+.md-result-table thead th[data-price] {
+  white-space: normal;
+  min-width: 7rem;
 }
 
 .md-result-table td[data-price] {
@@ -306,4 +641,144 @@ ul.ui-list {
   display: inline-block;
   width: 0.5ch;
   animation: caret 1s step-end infinite;
+}
+
+/* Thin dark scrollbar for the black sidebar's chat list. */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-sidebar-border) transparent;
+}
+
+/* Skeleton shimmer for cards and photos that are still on their way. */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-2) 0%,
+    color-mix(in srgb, var(--color-surface-2) 55%, var(--color-fg) 8%) 50%,
+    var(--color-surface-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* Cards fade in one by one, 60ms apart, once their row is ready. */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.card-in {
+  animation: card-in 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+
+/* The chat column sits on the same rounded panel as the home screen, with
+   the brand colour kept as a low glow along the bottom, so starting a chat
+   continues the page instead of dropping to a blank black screen. */
+.chat-canvas {
+  background:
+    radial-gradient(ellipse 90% 55% at 50% 118%, rgb(232 80 58 / 0.22), transparent 70%),
+    radial-gradient(ellipse 70% 45% at 0% 100%, rgb(43 127 200 / 0.18), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 100% 0%, rgb(43 127 200 / 0.1), transparent 70%),
+    var(--color-surface);
+}
+:root[data-theme="light"] .chat-canvas {
+  background:
+    radial-gradient(ellipse 90% 55% at 50% 118%, rgb(232 80 58 / 0.12), transparent 70%),
+    radial-gradient(ellipse 70% 45% at 0% 100%, rgb(43 127 200 / 0.12), transparent 70%),
+    var(--color-surface);
+}
+
+/* Detail panel slides in from the right (up from the bottom on phones);
+   dialogs pop in. Both answer the user's own action. */
+@keyframes panel-in-right {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes panel-in-up {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes pop {
+  from {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.panel-in {
+  animation: panel-in-up 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@media (min-width: 640px) {
+  .panel-in {
+    animation-name: panel-in-right;
+  }
+}
+.panel-pop {
+  animation: pop 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Home to chat: the gradient fades out over the chat, the thread rises in,
+   and the composer settles at the bottom. One 700ms hand-over. */
+@keyframes glow-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.glow-out {
+  animation: glow-out 650ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.chat-enter {
+  animation: hero-rise 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 120ms;
+}
+.dock-enter {
+  animation: hero-rise 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 60ms;
+}
+
+/* A new status line eases in, so steps replace each other without a jolt. */
+@keyframes status-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.status-in {
+  animation: status-in 220ms ease-out both;
 }

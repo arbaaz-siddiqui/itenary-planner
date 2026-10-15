@@ -67,7 +67,7 @@ def tours() -> ToolResult:
                     "Duration": "6 hours",
                     "Transfer": "Sharing ₹1,793 · Private ₹11,569 (vehicle, up to 6)",
                     "Cancellation": "Free until 24 hours before",
-                    "Start times": "Flexible — no fixed start time",
+                    "Start times": "Flexible, no fixed start time",
                     "Add-ons": "2 add-ons: Quad Bike, Camel Ride",
                 },
             ),
@@ -86,7 +86,7 @@ def tours() -> ToolResult:
                     "Duration": "7 hours",
                     "Transfer": "Sharing ₹2,640 · Private ₹13,900 (vehicle, up to 6)",
                     "Cancellation": "Free until 48 hours before",
-                    "Start times": "Flexible — no fixed start time",
+                    "Start times": "Flexible, no fixed start time",
                 },
             ),
             Row(

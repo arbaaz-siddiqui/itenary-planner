@@ -78,6 +78,44 @@ def _recommended_first(options: list) -> list:
     return sorted(options, key=lambda o: (not o.is_recommended, o.price_per_adult_inr))
 
 
+def _party_totals_line(rows: list[dict[str, Any]], party: str, top: int = 3) -> str:
+    """'**Total for 2 adults:** A from ₹9,780.77, B ₹3,660, C ₹3,800.'"""
+    parts = [
+        f"{r.get('name')} {r['party_total_display'].split(' total for ')[0]}"
+        for r in rows[:top]
+        if r.get("name") and r.get("party_total_display") and " total for " in r["party_total_display"]
+    ]
+    if not parts:
+        return ""
+    return f"**Total for {party}:** " + ", ".join(parts) + "."
+
+
+def _party_total(o: Any, adults: int, child_ages: list[int] | None) -> str:
+    """What the customer's whole party pays for this row, ready to quote.
+
+    The cards show a price per person; the reply should say what the party
+    pays. Built here so the model never multiplies: from the supplier's own
+    party totals when the row has them (cheapest transfer type), else the
+    per-adult ticket times the adults. A ticket-only row with children has no
+    honest total without the child rate, so it says so instead.
+    """
+    from core import format_inr
+    from mcp_tools.tour_pricing import party_label
+
+    party = party_label(adults, child_ages or [])
+    totals = [
+        float(p.get("total_inr") or p.get("price_inr") or 0)
+        for p in (getattr(o, "transfer_prices", None) or [])
+        if isinstance(p, dict)
+    ]
+    totals = [t for t in totals if t > 0]
+    if totals:
+        return f"from {format_inr(min(totals))} total for {party}"
+    if child_ages:
+        return f"{format_inr(o.price_per_adult_inr)} per adult; child price on request"
+    return f"{format_inr(round(o.price_per_adult_inr * adults, 2))} total for {party}"
+
+
 def _attach_transfer_prices(
     options: list, travel_date: str, adults: int, child_ages: list[int] | None = None
 ) -> None:
@@ -440,13 +478,14 @@ def _impl(
             )
             d["cancellation_display"] = o.cancellation_display
             d["price_display"] = o.price_display
+            d["party_total_display"] = _party_total(o, int(adults), child_ages)
             d["timeslots"] = getattr(o, "timeslots", [])
             d["is_slot_based"] = bool(getattr(o, "timeslots", []))
             d["slots_display"] = (
                 f"{len(o.timeslots)} start times: "
                 + ", ".join(x["time"] for x in o.timeslots[:6])
                 + (" …" if len(o.timeslots) > 6 else "")
-                if getattr(o, "timeslots", []) else "Flexible — no fixed start time"
+                if getattr(o, "timeslots", []) else "Flexible, no fixed start time"
             )
             option_dicts.append(d)
 
@@ -484,10 +523,18 @@ def _impl(
             # Pre-built table. The model rendered 5 of 13 rows even when told
             # the exact count, so the row count is no longer its decision.
             "table_markdown": _tours_table(options),
+            # The cards show a price per person; this line tells the customer
+            # what their whole party pays, quoted as built here.
+            "party_totals_markdown": _party_totals_line(
+                option_dicts, party_label(int(adults), [int(a) for a in child_ages or []])
+            ),
             "agent_instructions": (
                 (
                     f"`table_markdown` is the finished table for all "
-                    f"{len(options)} options — PASTE IT VERBATIM into your reply. "
+                    f"{len(options)} options — PASTE IT VERBATIM into your reply, "
+                    f"and right after it paste `party_totals_markdown` verbatim "
+                    f"(the cards show per-person prices; that line gives the "
+                    f"party total). "
                     f"Do not rebuild it, shorten it, or drop rows from it. "
                     f"BUILD A TABLE WITH EXACTLY {len(options)} ROWS — one per "
                     f"entry in `options`, in order, none skipped. Count them "

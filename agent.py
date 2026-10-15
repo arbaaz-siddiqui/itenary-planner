@@ -18,6 +18,7 @@ import re
 import sqlite3
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -358,6 +359,48 @@ def _supersede_earlier_searches(state: dict[str, Any]) -> dict[str, Any]:
     return {"llm_input_messages": out}
 
 
+_INLINE_CALL = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\((.*?)\)?\s*(?:<\|?\s*tool[ _]call\s*\|?>)?\s*$", re.S)
+_TEMPLATE_JUNK = re.compile(r"<\|?\s*\"?\s*\|?>|<\|[^>]*\|>")
+
+
+def _coerce_scalar(value: str) -> Any:
+    v = value.strip().strip("\"'").strip()
+    if re.fullmatch(r"-?\d+", v):
+        return int(v)
+    if re.fullmatch(r"-?\d+\.\d+", v):
+        return float(v)
+    if v.lower() in ("true", "false"):
+        return v.lower() == "true"
+    return v
+
+
+def repair_inline_tool_call(call: dict[str, Any]) -> dict[str, Any] | None:
+    """A call whose arguments were written into its NAME, made runnable.
+
+    Some models emit `get_tour_details(tour id:53632)<tool call|>` as the tool
+    name with empty arguments. No tool has that name, so the call failed, the
+    step line showed the raw text, and the agent told the customer it had a
+    technical problem. The name is the real tool; the parentheses hold
+    `key:value` (or `key=value`) pairs. Returns None when nothing needs fixing.
+    """
+    name = str(call.get("name") or "")
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        return None
+    m = _INLINE_CALL.match(_TEMPLATE_JUNK.sub("", name))
+    if not m:
+        return None
+    base, inner = m.group(1), m.group(2) or ""
+    args = dict(call.get("args") or {}) if isinstance(call.get("args"), dict) else {}
+    for part in re.split(r",(?=\s*[A-Za-z_][A-Za-z0-9_ ]*\s*[:=])", inner):
+        if not re.search(r"[:=]", part):
+            continue
+        key, _, value = re.split(r"([:=])", part, maxsplit=1)
+        key = re.sub(r"\s+", "_", key.strip())
+        if key and key not in args:
+            args[key] = _coerce_scalar(value)
+    return {**call, "name": base, "args": args}
+
+
 def _split_concatenated_args(state: dict[str, Any]) -> dict[str, Any] | None:
     """Split a tool call whose arguments are two JSON objects stuck together.
 
@@ -386,7 +429,18 @@ def _split_concatenated_args(state: dict[str, Any]) -> dict[str, Any] | None:
     decoder = json.JSONDecoder()
     fixed: list[dict[str, Any]] = []
     changed = False
+    calls: list[dict[str, Any]] = []
     for call in [*raw_calls, *invalid]:
+        repaired_call = repair_inline_tool_call(call)
+        if repaired_call is not None:
+            changed = True
+            logging.getLogger("agent.turn").warning(
+                "repaired inline tool call %r -> %s(%s)", call.get("name"),
+                repaired_call["name"], repaired_call["args"],
+            )
+            call = repaired_call
+        calls.append(call)
+    for call in calls:
         args = call.get("args")
         # A recoverable call carries its arguments as an unparsed string.
         text = args if isinstance(args, str) else None
@@ -690,15 +744,42 @@ def extract_tool_calls(response: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def extract_search_options(response: dict[str, Any]) -> dict[str, Any]:
+    from mcp_tools.ui_payload import full_result
+
     for tc in reversed(extract_tool_calls(response)):
         parsed = _coerce_to_dict(tc.get("output"))
         if isinstance(parsed, dict) and isinstance(parsed.get("options"), list):
+            # The model saw a slim copy; the cards get the full one.
+            parsed = full_result(parsed)
             return {
                 "kind": _kind_from_tool_name(tc.get("tool_name") or ""),
                 "options": parsed["options"],
                 "raw": parsed,
             }
     return {"kind": None, "options": [], "raw": None}
+
+
+def extract_all_search_options(response: dict[str, Any]) -> list[dict[str, Any]]:
+    """One card group per kind of result this turn produced, in order.
+
+    A reply often covers two things at once (hotels and the airport transfer
+    to them). Taking only the last search left the hotels without cards. The
+    latest search of each kind wins, so a refined search replaces the first.
+    """
+    from mcp_tools.ui_payload import full_result
+
+    by_kind: dict[str, dict[str, Any]] = {}
+    for tc in extract_tool_calls(response):
+        parsed = _coerce_to_dict(tc.get("output"))
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("options"), list):
+            continue
+        parsed = full_result(parsed)
+        if not parsed.get("options"):
+            continue
+        kind = _kind_from_tool_name(tc.get("tool_name") or "")
+        by_kind.pop(kind, None)  # re-insert so order follows the latest search
+        by_kind[kind] = {"kind": kind, "options": parsed["options"], "raw": parsed}
+    return list(by_kind.values())
 
 
 def _kind_from_tool_name(name: str) -> str:
@@ -1346,10 +1427,13 @@ def _customer_part(text: str) -> str:
     day" on the next turn was refused for having no date. A marker with no
     customer text after it yields "".
     """
-    if not is_internal_marker(text):
-        return text
-    _, sep, rest = text.partition("\n\n")
-    return rest if sep else ""
+    # Several context blocks can lead one message (remembered facts, then the
+    # Plan mode instruction), so strip them all.
+    while is_internal_marker(text):
+        _, sep, text = text.partition("\n\n")
+        if not sep:
+            return ""
+    return text
 
 
 def is_internal_marker(text: object) -> bool:
@@ -1432,6 +1516,11 @@ class StreamResult:
         self.messages: list[Any] = []
         self.tool_event_log: list[dict[str, Any]] = []
         self.latency_seconds: float = 0.0
+        # Called whenever a node finishes (a tool was chosen, a tool returned).
+        # Text tokens are yielded, but a turn spends most of its time in tools
+        # and yields nothing then; this is how a caller shows each step the
+        # moment it happens instead of when the next token arrives.
+        self.on_update: Callable[[], None] | None = None
 
     @property
     def response(self) -> dict[str, Any]:
@@ -1518,6 +1607,11 @@ def stream_and_log(
                 for m in msgs or []:
                     holder.messages.append(m)
                     _record_tool_events(m, node_name, holder)
+            if holder.on_update is not None:
+                try:
+                    holder.on_update()
+                except Exception:  # progress is cosmetic; never fail the turn over it
+                    logging.getLogger("agent.turn").debug("on_update failed", exc_info=True)
         return tokens
 
     def _clear_thread() -> None:

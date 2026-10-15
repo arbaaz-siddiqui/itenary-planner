@@ -21,12 +21,27 @@ from .db import get_pool
 
 
 # ------------------------------------------------------------------ users
-def create_user(email: str, password_hash: str) -> dict[str, Any]:
+def create_user(
+    email: str, password_hash: str, first_name: str = "", last_name: str = ""
+) -> dict[str, Any]:
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "INSERT INTO users (email, password_hash) VALUES (%s, %s) "
-            "RETURNING id, email, created_at",
-            (email.strip(), password_hash),
+            "INSERT INTO users (email, password_hash, first_name, last_name) "
+            "VALUES (%s, %s, %s, %s) "
+            "RETURNING id, email, first_name, last_name, created_at",
+            (email.strip(), password_hash, first_name.strip(), last_name.strip()),
+        )
+        return cur.fetchone()
+
+
+def update_user_name(user_id: str, first_name: str, last_name: str) -> dict[str, Any] | None:
+    """Set the customer's name. Accounts made before names were asked for have
+    empty ones, and the home screen greets by first name."""
+    with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "UPDATE users SET first_name = %s, last_name = %s WHERE id = %s "
+            "RETURNING id, email, first_name, last_name, created_at",
+            (first_name.strip(), last_name.strip(), user_id),
         )
         return cur.fetchone()
 
@@ -36,7 +51,7 @@ def find_user_by_email(email: str) -> dict[str, Any] | None:
     # instead of creating a second account with a split history.
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "SELECT id, email, password_hash, created_at FROM users "
+            "SELECT id, email, first_name, last_name, password_hash, created_at FROM users "
             "WHERE lower(email) = lower(%s)",
             (email.strip(),),
         )
@@ -46,7 +61,8 @@ def find_user_by_email(email: str) -> dict[str, Any] | None:
 def find_user_by_id(user_id: str) -> dict[str, Any] | None:
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "SELECT id, email, created_at FROM users WHERE id = %s", (user_id,)
+            "SELECT id, email, first_name, last_name, created_at FROM users WHERE id = %s",
+            (user_id,),
         )
         return cur.fetchone()
 
@@ -147,7 +163,7 @@ def list_messages(session_id: str, include_tool_calls: bool = False) -> list[dic
     # `options` IS loaded with the transcript, unlike tool_calls: the cards are
     # part of the reply the customer is reading, and without them every tour
     # image disappeared on reload while the text stayed.
-    cols = "id, role, content, created_at, options"
+    cols = "id, role, content, created_at, options, feedback"
     if include_tool_calls:
         cols += ", tool_calls"
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -157,6 +173,33 @@ def list_messages(session_id: str, include_tool_calls: bool = False) -> list[dic
             (session_id,),
         )
         return cur.fetchall()
+
+
+def set_feedback(message_id: str, user_id: str, value: int | None) -> bool:
+    """Rate one assistant reply in one of the user's own chats. False if not theirs."""
+    with get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE chat_messages m SET feedback = %s FROM chat_sessions s "
+            "WHERE m.id = %s AND m.session_id = s.id AND s.user_id = %s "
+            "AND m.role = 'assistant'",
+            (value, message_id, user_id),
+        )
+        return cur.rowcount == 1
+
+
+def delete_last_reply(session_id: str) -> None:
+    """Remove the newest assistant reply of a chat, before it is regenerated.
+
+    Without this a regenerated answer was stored next to the one it replaced,
+    and the question once per attempt, so a reload showed both.
+    """
+    with get_pool().connection() as conn:
+        conn.execute(
+            "DELETE FROM chat_messages WHERE id = ("
+            "SELECT id FROM chat_messages WHERE session_id = %s AND role = 'assistant' "
+            "ORDER BY created_at DESC LIMIT 1)",
+            (session_id,),
+        )
 
 
 def get_message_tool_calls(message_id: str) -> list[dict[str, Any]]:

@@ -577,6 +577,7 @@ def _parse_hotel(
         cheapest_board=cheapest.mapped_meal_name or cheapest.meal_name,
         cheapest_room_supplier=cheapest.supplier_name,
         has_free_cancellation=cheapest.is_free_cancellation,
+        image_urls=hotel_image_urls(hotel_id_int),
     )
 
 
@@ -763,6 +764,10 @@ _CDN_PREFIXES = ("/tour-images/", "/hotel-images/", "/restaurant-images/")
 # CDN serves it under `/uploads/{guid}/TourMedia/...` -- without that prefix it
 # answers 403. Confirmed by reading the URLs the client's own website uses.
 _CDN_UPLOADS_MARKERS = ("/TourMedia/", "/HotelMedia/", "/RestaurantMedia/")
+# Any tenant media folder: `/{guid}/PackageMedia/`, `/{guid}/TransferVehicleMedia/`
+# and whatever the supplier adds next. Listing folders one by one left package
+# and transfer photos on the API host, which answers 404 for all of them.
+_TENANT_MEDIA = re.compile(r"/[0-9a-f]{8}-[0-9a-f-]{27}/[a-z]+media/", re.IGNORECASE)
 
 
 def _cdn_url(path: str) -> str | None:
@@ -773,9 +778,27 @@ def _cdn_url(path: str) -> str | None:
     # and a case-sensitive test left every restaurant and dish image pointing
     # at the API host, which answers 404.
     lowered = path.lower()
-    if any(m.lower() in lowered for m in _CDN_UPLOADS_MARKERS):
+    if any(m.lower() in lowered for m in _CDN_UPLOADS_MARKERS) or _TENANT_MEDIA.search(path):
         return MEDIA_CDN_BASE + "/uploads" + path
     return None
+
+
+# Hotel photos are not in any supplier response (checked 2026-09-11), but the
+# CDN holds them by hotel id at /hotel-images/{id}/{n}.webp, which is exactly
+# what gujjutours.com renders. Verified 2026-10-15: 21 photos per hotel for
+# every id tried, 404 past that and for unknown ids.
+HOTEL_PHOTOS_SHOWN = 8
+
+
+def hotel_image_urls(hotel_id: Any, count: int = HOTEL_PHOTOS_SHOWN) -> list[str]:
+    """The hotel's CDN photos, first one is the cover. Empty for a bad id."""
+    try:
+        hid = int(hotel_id)
+    except (TypeError, ValueError):
+        return []
+    if hid <= 0:
+        return []
+    return [f"{MEDIA_CDN_BASE}/hotel-images/{hid}/{n}.webp" for n in range(1, count + 1)]
 
 
 def _resolve_image_url(image_path: Any, base_url: str) -> str:
@@ -1741,7 +1764,7 @@ def _parse_hotel_static_record(h: Any) -> dict[str, Any] | None:
             _first_present(h, "Description", "description", "HotelDescription", "ShortDescription")
         ),
         "facilities": facilities,
-        "image_urls": image_urls,
+        "image_urls": image_urls or hotel_image_urls(hotel_id),
         "phone": str(_first_present(h, "Phone", "PhoneNo", "phone", "ContactNo") or ""),
     }
 

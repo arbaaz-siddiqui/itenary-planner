@@ -631,3 +631,19 @@ class TestDateIsOptional:
 
         assert SUPPLIER_TZ.utcoffset(None) == timedelta(hours=4)
         assert supplier_today() == datetime.now(timezone(timedelta(hours=4))).date()
+
+
+def test_veg_as_a_cuisine_matches_the_restaurant_type():
+    # The agent passed cuisine="Veg" for "Veg restaurants in Dubai". Only one
+    # menu has a "Vegetables" section, so cuisines alone matched one of nine
+    # pure-veg restaurants and the reply had a single card.
+    from types import SimpleNamespace
+
+    from mcp_tools.search_restaurants import _apply_filters
+
+    rows = [
+        SimpleNamespace(restaurant_id=i, name=f"R{i}", cuisines=c, tags=[], veg_type="Vegetarian", dishes=[])
+        for i, c in enumerate([["Vegetables"], ["Punjabi"], ["South Indian"]])
+    ]
+    got, _ = _apply_filters(rows, restaurant_name="", cuisine="Veg", dish="", feature="")
+    assert len(got) == 3

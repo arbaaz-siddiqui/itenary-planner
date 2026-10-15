@@ -5,6 +5,17 @@
 export interface User {
   id: string;
   email: string;
+  /** Empty for accounts created before sign-up asked for a name. */
+  first_name?: string;
+  last_name?: string;
+}
+
+/** Travel defaults from Settings; the agent reads them at the start of a chat. */
+export interface Preferences {
+  origin_city?: string;
+  usual_party_size?: number | null;
+  diet?: "" | "Veg" | "Jain" | "Vegan";
+  nationality?: string;
 }
 
 export interface ChatSession {
@@ -37,7 +48,7 @@ export interface ToolCall {
 
 export type OptionKind = "tours" | "hotels" | "flights" | "restaurants";
 
-/** An option card. Keys are kind-dependent; see components/OptionCards.tsx. */
+/** An option card. Keys are kind-dependent; see components/cards/Cards.tsx. */
 export type OptionItem = Record<string, unknown>;
 
 export interface OptionGroup {
@@ -64,6 +75,8 @@ export interface Message {
    * refreshing the page dropped every card and every tour image with it.
    */
   options?: OptionGroup[];
+  /** The customer's thumbs up / down on an assistant reply. */
+  feedback?: "up" | "down" | null;
   /** Client-side only: streaming/errored state for the live bubble. */
   pending?: boolean;
   error?: string | null;
