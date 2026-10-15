@@ -11,6 +11,7 @@ import { useTheme } from "@/lib/theme";
 import { displayFirstName, serviceById, type ServiceId } from "@/lib/services";
 import { Sidebar } from "@/components/Sidebar";
 import { BrandLogo } from "@/components/BrandLogo";
+import { TravelLoader } from "@/components/TravelLoader";
 import { MessageList } from "@/components/MessageList";
 import { Composer, type ComposerHandle, type ComposerMode } from "@/components/Composer";
 import { HomeHero } from "@/components/HomeHero";
@@ -581,8 +582,8 @@ export default function ChatPage() {
 
   if (booting) {
     return (
-      <main className="grid min-h-dvh place-items-center bg-bg">
-        <p className="text-sm text-fg-muted">Loading…</p>
+      <main className="grid min-h-dvh place-items-center bg-bg" aria-busy>
+        <TravelLoader size="lg" label="Loading" />
       </main>
     );
   }
