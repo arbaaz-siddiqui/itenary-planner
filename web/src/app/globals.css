@@ -110,7 +110,7 @@ body {
     #f78a3c 100%
   );
 }
-:root[data-theme="light"] .hero-glow {
+:root[data-theme="light"] .hero-glow:not(.hero-glow-fixed) {
   background: radial-gradient(
     ellipse 135% 118% at 50% -18%,
     #ffffff 0%,
