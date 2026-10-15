@@ -11,6 +11,6 @@ The full project guide for coding agents is in AGENTS.md: product, layout, agent
 - Fix root causes; no hardcoded prices, rates or ids; keep changes backward compatible.
 - Prices: quote supplier figures, never compute them in prompts or UI; cards show per-person or per-unit prices, replies give the party total from the result.
 - UI copy: sentence case, no em dashes, lucide icons only, `formatInr` for money.
-- Account data in the browser uses per-account storage keys (`userKey`).
+- Account data (saved cards, pins, settings, chats) lives in Postgres behind owner-scoped queries; never in localStorage. Tool state kept between calls is keyed by conversation (`rules.current_thread()`).
 - Before calling work done: relevant pytest files; `cd web && npm run typecheck && npm test`; for UI, look at it at a phone width and a desktop width.
 - Client verification reports are DOCX only.

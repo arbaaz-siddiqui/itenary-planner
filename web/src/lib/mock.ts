@@ -7,8 +7,10 @@ import type {
   ChatSession,
   Message,
   OptionGroup,
+  SavedCardOut,
   StreamEvent,
   ToolCall,
+  UiSettings,
   User,
 } from "./types";
 
@@ -18,6 +20,8 @@ interface MockStore {
   user: User | null;
   sessions: ChatSession[];
   messages: Record<string, Message[]>;
+  saved?: SavedCardOut[];
+  settings?: UiSettings;
 }
 
 const MOCK_USER: User = { id: "u_1", email: "demo@example.com" };
@@ -157,6 +161,47 @@ export const mockApi = {
     db().messages[s.id] = [];
     commit();
     return s;
+  },
+
+  async updateSession(id: string, patch: { title?: string; pinned?: boolean }): Promise<ChatSession> {
+    await delay(100);
+    const s = db().sessions.find((x) => x.id === id);
+    if (!s) throw Object.assign(new Error("Session not found"), { status: 404 });
+    Object.assign(s, patch);
+    commit();
+    return s;
+  },
+
+  async listSavedCards(): Promise<{ cards: SavedCardOut[] }> {
+    await delay(80);
+    return { cards: db().saved ?? [] };
+  },
+
+  async saveCard(id: string, kind: string, item: Record<string, unknown>): Promise<void> {
+    await delay(80);
+    const s = db();
+    s.saved = [{ id, kind, item, saved_at: nowISO() }, ...(s.saved ?? []).filter((c) => c.id !== id)].slice(0, 50);
+    commit();
+  },
+
+  async unsaveCard(id: string): Promise<void> {
+    await delay(80);
+    const s = db();
+    s.saved = (s.saved ?? []).filter((c) => c.id !== id);
+    commit();
+  },
+
+  async getSettings(): Promise<{ settings: UiSettings }> {
+    await delay(50);
+    return { settings: db().settings ?? {} };
+  },
+
+  async setSettings(patch: UiSettings): Promise<{ settings: UiSettings }> {
+    await delay(50);
+    const s = db();
+    s.settings = { ...(s.settings ?? {}), ...patch };
+    commit();
+    return { settings: s.settings };
   },
 
   async renameSession(id: string, title: string): Promise<ChatSession> {

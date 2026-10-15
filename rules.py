@@ -991,6 +991,21 @@ def set_conversation_text(text: str) -> None:
     _CONVERSATION_TEXT.set((text or "").lower())
 
 
+# Which conversation (LangGraph thread) the current turn belongs to, set once
+# per turn next to the conversation text. Tools that keep anything between
+# calls key it by this, so one customer's state can never be read in another
+# customer's chat on the same server process.
+_CURRENT_THREAD: ContextVar[str] = ContextVar("current_thread", default="")
+
+
+def set_current_thread(thread_id: str) -> None:
+    _CURRENT_THREAD.set(str(thread_id or ""))
+
+
+def current_thread() -> str:
+    return _CURRENT_THREAD.get()
+
+
 def customer_said(value: str) -> bool:
     """True if the customer's own words contain `value`.
 

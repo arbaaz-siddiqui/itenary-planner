@@ -80,7 +80,7 @@ def create_session(user_id: str, title: str = "New chat") -> dict[str, Any]:
         cur.execute(
             "INSERT INTO chat_sessions (user_id, title, thread_id) "
             "VALUES (%s, %s, %s) "
-            "RETURNING id, title, thread_id, created_at, updated_at",
+            "RETURNING id, title, thread_id, pinned, created_at, updated_at",
             (user_id, title, thread_id),
         )
         return cur.fetchone()
@@ -89,7 +89,7 @@ def create_session(user_id: str, title: str = "New chat") -> dict[str, Any]:
 def list_sessions(user_id: str) -> list[dict[str, Any]]:
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "SELECT id, title, thread_id, created_at, updated_at "
+            "SELECT id, title, thread_id, pinned, created_at, updated_at "
             "FROM chat_sessions WHERE user_id = %s "
             "ORDER BY updated_at DESC",
             (user_id,),
@@ -105,7 +105,7 @@ def get_session(session_id: str, user_id: str) -> dict[str, Any] | None:
     """
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "SELECT id, user_id, title, thread_id, created_at, updated_at "
+            "SELECT id, user_id, title, thread_id, pinned, created_at, updated_at "
             "FROM chat_sessions WHERE id = %s AND user_id = %s",
             (session_id, user_id),
         )
@@ -113,11 +113,25 @@ def get_session(session_id: str, user_id: str) -> dict[str, Any] | None:
 
 
 def rename_session(session_id: str, user_id: str, title: str) -> dict[str, Any] | None:
+    return update_session(session_id, user_id, title=title)
+
+
+def update_session(
+    session_id: str, user_id: str, *, title: str | None = None, pinned: bool | None = None
+) -> dict[str, Any] | None:
+    """Rename and/or pin one of the user's own chats. None if it is not theirs.
+
+    Pinning does not touch updated_at (the trigger fires on messages only), so
+    pinning a chat never reorders the rest of the list.
+    """
+    new_title = (title.strip() or "New chat") if title is not None else None
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "UPDATE chat_sessions SET title = %s WHERE id = %s AND user_id = %s "
-            "RETURNING id, title, thread_id, created_at, updated_at",
-            (title.strip() or "New chat", session_id, user_id),
+            "UPDATE chat_sessions SET "
+            "title = COALESCE(%s, title), pinned = COALESCE(%s, pinned) "
+            "WHERE id = %s AND user_id = %s "
+            "RETURNING id, title, thread_id, pinned, created_at, updated_at",
+            (new_title, pinned, session_id, user_id),
         )
         return cur.fetchone()
 
@@ -202,13 +216,22 @@ def delete_last_reply(session_id: str) -> None:
         )
 
 
-def get_message_tool_calls(message_id: str) -> list[dict[str, Any]]:
-    """The debug payload for one message, fetched only when the panel opens."""
+def get_message_tool_calls(message_id: str, user_id: str) -> list[dict[str, Any]] | None:
+    """The debug payload for one message, fetched only when the panel opens.
+
+    Scoped to the owner in the query itself, like get_session: None when the
+    message is not in one of this user's chats. It used to look the message up
+    by id alone, so any signed-in account holding a message id could read
+    another account's searches.
+    """
     with get_pool().connection() as conn:
         row = conn.execute(
-            "SELECT tool_calls FROM chat_messages WHERE id = %s", (message_id,)
+            "SELECT m.tool_calls FROM chat_messages m "
+            "JOIN chat_sessions s ON s.id = m.session_id "
+            "WHERE m.id = %s AND s.user_id = %s",
+            (message_id, user_id),
         ).fetchone()
-    return row[0] if row else []
+    return row[0] if row else None
 
 
 # ------------------------------------------------------------ user memory
@@ -237,3 +260,67 @@ def merge_memory(user_id: str, facts: dict[str, Any]) -> dict[str, Any]:
             (user_id, json.dumps(facts)),
         )
         return cur.fetchone()["facts"]
+
+
+# ------------------------------------------------------------ saved cards
+# The heart on a result card. Capped per user so a long-lived account cannot
+# grow the sidebar (or the table) without bound; the oldest fall off first.
+SAVED_CARDS_LIMIT = 50
+
+
+def list_saved_cards(user_id: str) -> list[dict[str, Any]]:
+    """The user's saved cards, newest first."""
+    with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT card_id, kind, item, created_at FROM saved_cards "
+            "WHERE user_id = %s ORDER BY created_at DESC LIMIT %s",
+            (user_id, SAVED_CARDS_LIMIT),
+        )
+        return cur.fetchall()
+
+
+def save_card(user_id: str, card_id: str, kind: str, item: dict[str, Any]) -> None:
+    """Save (or re-save, moving it to the top) one card, then trim to the cap."""
+    with get_pool().connection() as conn:
+        conn.execute(
+            "INSERT INTO saved_cards (user_id, card_id, kind, item) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (user_id, card_id) DO UPDATE "
+            "SET kind = EXCLUDED.kind, item = EXCLUDED.item, created_at = now()",
+            (user_id, card_id, kind, json.dumps(item)),
+        )
+        conn.execute(
+            "DELETE FROM saved_cards WHERE user_id = %s AND card_id NOT IN ("
+            "SELECT card_id FROM saved_cards WHERE user_id = %s "
+            "ORDER BY created_at DESC LIMIT %s)",
+            (user_id, user_id, SAVED_CARDS_LIMIT),
+        )
+
+
+def unsave_card(user_id: str, card_id: str) -> bool:
+    with get_pool().connection() as conn:
+        cur = conn.execute(
+            "DELETE FROM saved_cards WHERE user_id = %s AND card_id = %s",
+            (user_id, card_id),
+        )
+        return cur.rowcount > 0
+
+
+# ------------------------------------------------------------ UI settings
+def get_ui_settings(user_id: str) -> dict[str, Any]:
+    """Screen preferences (theme, sidebar). Not read by the agent."""
+    with get_pool().connection() as conn:
+        row = conn.execute(
+            "SELECT ui_settings FROM users WHERE id = %s", (user_id,)
+        ).fetchone()
+    return row[0] if row else {}
+
+
+def merge_ui_settings(user_id: str, settings: dict[str, Any]) -> dict[str, Any]:
+    """Shallow-merge in one statement, like merge_memory."""
+    with get_pool().connection() as conn:
+        row = conn.execute(
+            "UPDATE users SET ui_settings = ui_settings || %s WHERE id = %s "
+            "RETURNING ui_settings",
+            (json.dumps(settings), user_id),
+        ).fetchone()
+    return row[0] if row else {}

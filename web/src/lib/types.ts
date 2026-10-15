@@ -21,6 +21,8 @@ export interface Preferences {
 export interface ChatSession {
   id: string;
   title: string;
+  /** Stored on the server with the chat, so it follows the account. */
+  pinned?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -110,3 +112,17 @@ export type Segment =
       result?: unknown;
       status: "running" | "done" | "error";
     };
+
+/** Screen preferences stored on the account (server: users.ui_settings). */
+export interface UiSettings {
+  theme?: "dark" | "light" | "system";
+  sidebar_collapsed?: boolean;
+}
+
+/** A hearted card as the server returns it. */
+export interface SavedCardOut {
+  id: string;
+  kind: string;
+  item: Record<string, unknown>;
+  saved_at: string;
+}

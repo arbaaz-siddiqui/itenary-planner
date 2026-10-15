@@ -1,62 +1,48 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { CardRef } from "./cardActions";
 
 /**
- * useState that survives a reload, for UI conveniences only (sidebar
- * collapsed, pinned chats, saved cards). Storage can be blocked or empty, so
- * every read and write is guarded and the default always works.
+ * Account data (saved cards, pinned chats, screen settings) is stored on the
+ * server per account. Older builds kept it in this browser's localStorage,
+ * first under one key shared by every account, then under per-account keys.
  *
- * Anything that belongs to an account must use a per-account key (see
- * `userKey`): the browser is shared by every account that signs in on it.
- * A `null` key holds the default and stores nothing, for the moment before
- * the account is known. Switching keys never carries the previous key's
- * value over: a key with nothing stored starts from the default.
+ * `takeLocalAccountData` hands back what this browser still holds for THIS
+ * account, so it can be uploaded once, and deletes every copy: this
+ * account's, the shared ones, and any other account's. After it runs the
+ * browser holds no account data at all.
  */
-export function usePersisted<T>(key: string | null, initial: T) {
-  const [value, setValue] = useState<T>(initial);
-  const initialRef = useRef(initial);
-  const keyRef = useRef(key);
-  keyRef.current = key;
+const SHARED_KEYS = ["saved-cards", "pinned-chats"];
+const PER_ACCOUNT_PREFIXES = ["saved-cards:", "pinned-chats:"];
 
-  useEffect(() => {
-    let next = initialRef.current;
-    if (key) {
+export function takeLocalAccountData(userId: string): { saved: CardRef[]; pinned: string[] } {
+  const out: { saved: CardRef[]; pinned: string[] } = { saved: [], pinned: [] };
+  try {
+    const store = window.localStorage;
+    const read = <T,>(key: string): T | null => {
+      const raw = store.getItem(key);
+      if (raw == null) return null;
       try {
-        const raw = window.localStorage.getItem(key);
-        if (raw != null) next = JSON.parse(raw) as T;
+        return JSON.parse(raw) as T;
       } catch {
-        /* unreadable or blocked: keep the default */
+        return null;
       }
+    };
+    const mine = read<CardRef[]>(`saved-cards:${userId}`);
+    if (Array.isArray(mine)) out.saved = mine.filter((c) => c && typeof c.id === "string" && c.item);
+    const pins = read<string[]>(`pinned-chats:${userId}`);
+    if (Array.isArray(pins)) out.pinned = pins.filter((x) => typeof x === "string");
+
+    const doomed: string[] = [...SHARED_KEYS];
+    for (let i = 0; i < store.length; i++) {
+      const k = store.key(i);
+      if (k && PER_ACCOUNT_PREFIXES.some((p) => k.startsWith(p))) doomed.push(k);
     }
-    setValue(next);
-  }, [key]);
-
-  const set = useCallback((next: T | ((prev: T) => T)) => {
-    setValue((prev) => {
-      const v = typeof next === "function" ? (next as (p: T) => T)(prev) : next;
-      const k = keyRef.current;
-      if (k) {
-        try {
-          window.localStorage.setItem(k, JSON.stringify(v));
-        } catch {
-          /* blocked: lasts for this page only */
-        }
-      }
-      return v;
-    });
-  }, []);
-
-  return [value, set] as const;
+    doomed.forEach((k) => store.removeItem(k));
+    // Sidebar state moved to the account too.
+    store.removeItem("sidebar-collapsed");
+  } catch {
+    /* storage blocked: nothing held, nothing to clear */
+  }
+  return out;
 }
-
-/** A storage key scoped to one account, or null until the account is known. */
-export function userKey(name: string, userId: string | null | undefined): string | null {
-  return userId ? `${name}:${userId}` : null;
-}
-
-/**
- * Keys written before storage was scoped per account. Whoever's data they
- * hold, it must not show to the next account on this browser.
- */
-export const LEGACY_SHARED_KEYS = ["saved-cards", "pinned-chats"];

@@ -830,8 +830,8 @@ class TestPdfReusesThePlan:
         import agent_tools
         from agent_tools import generate_itinerary_pdf_tool
 
-        saved = agent_tools._LAST_PLAN
-        agent_tools._LAST_PLAN = {}
+        saved = dict(agent_tools._LAST_PLANS)
+        agent_tools._LAST_PLANS.clear()
         try:
             out = generate_itinerary_pdf_tool.invoke(
                 {
@@ -844,7 +844,33 @@ class TestPdfReusesThePlan:
             )
             assert out.get("error_type") == "MissingDayPlans"
         finally:
-            agent_tools._LAST_PLAN = saved
+            agent_tools._LAST_PLANS.update(saved)
+
+    def test_a_plan_from_another_conversation_is_never_reused(self) -> None:
+        """The cached plan is per conversation. It used to be one dict for the
+        whole server, so a PDF in one customer's chat could pick up the plan
+        just built in another customer's."""
+        import agent_tools
+        from agent_tools import generate_itinerary_pdf_tool, plan_itinerary_tool
+        from rules import set_current_thread
+
+        set_current_thread("customer-a")
+        plan_itinerary_tool.invoke(
+            {"start_date": "2026-12-01", "nights": 5, "adults": 2,
+             "tours": [{"name": "Abu Dhabi City Tour from Dubai"}]}
+        )
+        assert agent_tools._last_plan().get("days")
+
+        set_current_thread("customer-b")
+        try:
+            assert agent_tools._last_plan() == {}
+            out = generate_itinerary_pdf_tool.invoke(
+                {"destination": "Dubai", "start_date": "2026-12-01", "end_date": "2026-12-06",
+                 "nights": 5, "party_summary": "2 adults"}
+            )
+            assert out.get("error_type") == "MissingDayPlans"
+        finally:
+            set_current_thread("")
 
     def test_stale_plan_for_other_dates_is_not_reused(self) -> None:
         """A plan for a different trip must not leak into this PDF."""

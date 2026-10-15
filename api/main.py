@@ -128,8 +128,30 @@ class SessionCreate(BaseModel):
     title: str | None = None
 
 
-class SessionRename(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
+class SessionUpdate(BaseModel):
+    """Rename and/or pin a chat. Either field may be left out."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    pinned: bool | None = None
+
+
+class SavedCard(BaseModel):
+    """One hearted result card, stored as the customer saw it."""
+
+    kind: str = Field(min_length=1, max_length=40)
+    item: dict[str, Any]
+
+
+class UiSettings(BaseModel):
+    """Screen preferences that follow the account across devices."""
+
+    theme: Literal["dark", "light", "system"] | None = None
+    sidebar_collapsed: bool | None = None
+
+
+_UI_KEYS = ("theme", "sidebar_collapsed")
+# One saved card is one option payload; this bounds a single save.
+_SAVED_ITEM_MAX_BYTES = 64_000
 
 
 class ChatRequest(BaseModel):
@@ -244,6 +266,53 @@ async def update_me(
     return {"user": _user_out(updated)}
 
 
+# ----------------------------------------------------- saved cards, settings
+@app.get("/me/saved-cards")
+async def get_saved_cards(user: dict = Depends(auth.current_user)) -> dict[str, Any]:
+    return {
+        "cards": [
+            {"id": r["card_id"], "kind": r["kind"], "item": r["item"],
+             "saved_at": r["created_at"].isoformat()}
+            for r in repository.list_saved_cards(str(user["id"]))
+        ]
+    }
+
+
+@app.put("/me/saved-cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def put_saved_card(
+    card_id: str, body: SavedCard, user: dict = Depends(auth.current_user)
+) -> Response:
+    if len(card_id) > 300:
+        raise HTTPException(status_code=422, detail="Card id too long")
+    if len(json.dumps(body.item)) > _SAVED_ITEM_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Card too large to save")
+    repository.save_card(str(user["id"]), card_id, body.kind, body.item)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.delete("/me/saved-cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_saved_card(card_id: str, user: dict = Depends(auth.current_user)) -> Response:
+    # Idempotent: unsaving a card that is already gone is not an error.
+    repository.unsave_card(str(user["id"]), card_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/me/settings")
+async def get_ui_settings(user: dict = Depends(auth.current_user)) -> dict[str, Any]:
+    s = repository.get_ui_settings(str(user["id"]))
+    return {"settings": {k: s[k] for k in _UI_KEYS if k in s}}
+
+
+@app.patch("/me/settings")
+async def patch_ui_settings(
+    body: UiSettings, user: dict = Depends(auth.current_user)
+) -> dict[str, Any]:
+    changes = body.model_dump(exclude_none=True)
+    uid = str(user["id"])
+    s = repository.merge_ui_settings(uid, changes) if changes else repository.get_ui_settings(uid)
+    return {"settings": {k: s[k] for k in _UI_KEYS if k in s}}
+
+
 # --------------------------------------------------------------- sessions
 @app.get("/chat/sessions")
 async def get_sessions(user: dict = Depends(auth.current_user)) -> list[dict[str, Any]]:
@@ -260,9 +329,11 @@ async def post_session(
 
 @app.patch("/chat/sessions/{session_id}")
 async def patch_session(
-    session_id: str, body: SessionRename, user: dict = Depends(auth.current_user)
+    session_id: str, body: SessionUpdate, user: dict = Depends(auth.current_user)
 ) -> dict[str, Any]:
-    s = repository.rename_session(session_id, str(user["id"]), body.title)
+    s = repository.update_session(
+        session_id, str(user["id"]), title=body.title, pinned=body.pinned
+    )
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
     return _session_out(s)
@@ -329,11 +400,14 @@ async def rate_message(
 
 @app.get("/chat/messages/{message_id}/tool-calls")
 async def get_tool_calls(
-    message_id: str, _user: dict = Depends(auth.current_user)
+    message_id: str, user: dict = Depends(auth.current_user)
 ) -> list[dict[str, Any]]:
     """Debug payload for one message, fetched only when the panel opens —
-    these reach 200KB+ for a tour search."""
-    return repository.get_message_tool_calls(message_id)
+    these reach 200KB+ for a tour search. Only for the owner of the chat."""
+    calls = repository.get_message_tool_calls(message_id, str(user["id"]))
+    if calls is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return calls
 
 
 @app.get("/tours/{tour_id}/options/{option_id}/details")
@@ -773,6 +847,7 @@ def _session_out(s: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(s["id"]),
         "title": s["title"],
+        "pinned": bool(s.get("pinned")),
         "created_at": s["created_at"].isoformat(),
         "updated_at": s["updated_at"].isoformat(),
     }
