@@ -6,7 +6,7 @@ import { Menu, SquarePen } from "lucide-react";
 import { api, isUnauthorized, MOCK_MODE } from "@/lib/api";
 import type { ChatSession, Message, OptionGroup, User } from "@/lib/types";
 import { useStreamSegments } from "@/lib/useStreamSegments";
-import { usePersisted } from "@/lib/usePersisted";
+import { LEGACY_SHARED_KEYS, usePersisted, userKey } from "@/lib/usePersisted";
 import { useTheme } from "@/lib/theme";
 import { displayFirstName, serviceById, type ServiceId } from "@/lib/services";
 import { Sidebar } from "@/components/Sidebar";
@@ -43,9 +43,10 @@ export default function ChatPage() {
   /** Which bubble the live segments belong to. */
   const [liveId, setLiveId] = useState<string | null>(null);
 
-  // Shell state. Collapsed and pinned are per-browser conveniences.
+  // Shell state. Collapsed is a per-browser preference; pinned chats and
+  // saved cards belong to the account, so their keys carry the user id.
   const [collapsed, setCollapsed] = usePersisted("sidebar-collapsed", false);
-  const [pinnedList, setPinnedList] = usePersisted<string[]>("pinned-chats", []);
+  const [pinnedList, setPinnedList] = usePersisted<string[]>(userKey("pinned-chats", user?.id), []);
   const pinned = useMemo(() => new Set(pinnedList), [pinnedList]);
   const [service, setService] = useState<ServiceId | null>(null);
   const [mode, setMode] = useState<ComposerMode>("ask");
@@ -54,8 +55,8 @@ export default function ChatPage() {
   const theme = useTheme();
   const composerRef = useRef<ComposerHandle>(null);
 
-  // Cards: saved with the heart (per browser), and the one open in detail.
-  const [saved, setSaved] = usePersisted<CardRef[]>("saved-cards", []);
+  // Cards: saved with the heart (per account), and the one open in detail.
+  const [saved, setSaved] = usePersisted<CardRef[]>(userKey("saved-cards", user?.id), []);
   const [detail, setDetail] = useState<CardRef | null>(null);
   const detailPushed = useRef(false);
   const [nameLater, setNameLater] = useState(false);
@@ -90,6 +91,13 @@ export default function ChatPage() {
       try {
         const { user } = await api.me();
         if (!live) return;
+        // Unscoped keys from before per-account storage would show one
+        // account's saved cards to the next; drop them.
+        try {
+          LEGACY_SHARED_KEYS.forEach((k) => window.localStorage.removeItem(k));
+        } catch {
+          /* blocked storage: nothing to clear */
+        }
         setUser(user);
         setBooting(false);
 
