@@ -612,13 +612,11 @@ export default function ChatPage() {
       setSettingsOpen(true);
     },
     onLogout: logout,
-    themeResolved: theme.resolved,
     saved,
     onOpenSaved: (c: CardRef) => {
       setDrawerOpen(false);
       openCard(c);
     },
-    onToggleTheme: () => theme.setPref(theme.resolved === "dark" ? "light" : "dark"),
   };
 
   const composer = (variant: "hero" | "dock") => (

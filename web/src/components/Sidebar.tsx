@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   HelpCircle,
   LogOut,
-  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -13,7 +12,6 @@ import {
   Plus,
   Search,
   Settings,
-  Sun,
   Trash2,
   X,
 } from "lucide-react";
@@ -177,8 +175,6 @@ export interface SidebarProps {
   onTogglePin: (id: string) => void;
   onSettings: () => void;
   onLogout: () => void;
-  themeResolved: "dark" | "light";
-  onToggleTheme: () => void;
   /** Cards saved with the heart, newest first. */
   saved: CardRef[];
   onOpenSaved: (card: CardRef) => void;
@@ -329,12 +325,6 @@ export function Sidebar(p: SidebarProps) {
       </nav>
 
       <div className={`shrink-0 space-y-0.5 border-t border-sidebar-border py-2 ${collapsed ? "px-2" : "px-3"}`}>
-        {item(
-          "theme",
-          p.themeResolved === "dark" ? "Light theme" : "Dark theme",
-          p.themeResolved === "dark" ? Sun : Moon,
-          p.onToggleTheme,
-        )}
         {item("settings", "Settings", Settings, p.onSettings)}
         {item("help", "Help", HelpCircle, () => window.open("https://www.gujjutours.com/en/contact-us", "_blank", "noopener"))}
         <div className={`flex items-center gap-2.5 rounded-lg py-1.5 ${collapsed ? "justify-center" : "px-2.5"}`}>
