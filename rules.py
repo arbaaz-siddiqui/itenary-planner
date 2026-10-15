@@ -825,6 +825,49 @@ def compute_hotel_block_cost(
 # =============================================================================
 # === BUDGET — deterministic line-item trip total
 # =============================================================================
+def cancellation_breakdown(lines: list[dict[str, object]]) -> dict[str, object]:
+    """Split a package into what a cancellation refunds and what it loses.
+
+    Each line is {"label", "amount_inr", "refund_pct"}: 100 for a fully
+    refundable item, 0 for a non-refundable one, anything between for a
+    partial refund. Decimal arithmetic, rounded to the paisa once per line, so
+    refunded + lost always equals the package total exactly. The model used to
+    do this sum itself and was off by Rs 1 on both sides.
+    """
+    from decimal import ROUND_HALF_UP, Decimal
+
+    paisa = Decimal("0.01")
+    out_lines: list[dict[str, object]] = []
+    refunded = lost = total = Decimal("0")
+    for line in lines or []:
+        if not isinstance(line, dict):
+            continue
+        try:
+            amount = Decimal(str(line.get("amount_inr") or 0)).quantize(paisa, ROUND_HALF_UP)
+            pct = Decimal(str(line.get("refund_pct") if line.get("refund_pct") is not None else 0))
+        except Exception:  # noqa: BLE001 -- a bad line is skipped, not guessed
+            continue
+        pct = min(max(pct, Decimal("0")), Decimal("100"))
+        back = (amount * pct / 100).quantize(paisa, ROUND_HALF_UP)
+        gone = amount - back
+        refunded += back
+        lost += gone
+        total += amount
+        out_lines.append({
+            "label": str(line.get("label") or "Item"),
+            "amount_inr": float(amount),
+            "refund_pct": float(pct),
+            "refunded_inr": float(back),
+            "lost_inr": float(gone),
+        })
+    return {
+        "lines": out_lines,
+        "total_inr": float(total),
+        "refunded_inr": float(refunded),
+        "lost_inr": float(lost),
+    }
+
+
 def sum_trip_total(line_items: list[dict[str, object]]) -> dict[str, object]:
     """Sum named line items into ONE inclusive trip total, deterministically.
 

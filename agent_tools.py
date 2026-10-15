@@ -24,6 +24,7 @@ from rules import (
     price_group,
     resolve_party,
     sum_trip_total,
+    cancellation_breakdown,
 )
 
 
@@ -365,6 +366,26 @@ def sum_trip_total_tool(line_items: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+@tool
+def cancellation_breakdown_tool(lines: list[dict[str, Any]]) -> dict[str, Any]:
+    """What the customer gets back, and loses, if they cancel the package.
+
+    USE THIS whenever the customer asks what a cancellation refunds or costs.
+    One line per package component, with the amount you quoted and the refund
+    its OWN policy gives on that date: {"label": "Flights", "amount_inr":
+    99365.87, "refund_pct": 0}. Policies come from the results: the flight's
+    refundable label, the hotel's cancellation_display, the tour's
+    cancellation terms, the visa's refund_policy (visas are non-refundable once
+    submitted: 0). Quote refunded_inr and lost_inr exactly; never add them up
+    yourself. Final amounts are confirmed by the booking team.
+    """
+    result = cancellation_breakdown(lines)
+    result["refunded_display"] = format_inr(result["refunded_inr"])
+    result["lost_display"] = format_inr(result["lost_inr"])
+    result["total_display"] = format_inr(result["total_inr"])
+    return result
+
+
 # CLIENT_PLACEHOLDER: review and expand
 DESTINATION_TIPS: dict[str, dict[str, Any]] = {
     "dubai": {
@@ -624,6 +645,44 @@ def _tour_facts_lookup(title: str, travel_date: str) -> dict[str, Any]:
     return {"price": price, "duration": duration, "timeslots": slots}
 
 
+def _flight_block(o: dict[str, Any]) -> dict[str, Any]:
+    """The facts of one flight fare, as search_flights computed them.
+
+    Durations are the supplier's journey times (they span time zones, so the
+    clock difference is wrong), baggage is the confirmed allowance, and the
+    refund label is the fare's own.
+    """
+    out_leg = o.get("outbound") or {}
+    in_leg = o.get("inbound") or {}
+
+    def leg(d: dict[str, Any]) -> str:
+        nums = ", ".join(str(n) for n in d.get("flight_numbers") or [])
+        times = f"{d.get('departure_time', '')}-{d.get('arrival_time', '')}".strip("-")
+        return " ".join(x for x in (nums, times) if x)
+
+    block = {
+        "airline": o.get("airline"),
+        "price_inr": o.get("price_inr"),
+        "outbound": leg(out_leg),
+        "outbound_duration": o.get("duration_display") or out_leg.get("duration_display"),
+        "return": leg(in_leg),
+        "return_duration": o.get("duration_return_display") or in_leg.get("duration_display"),
+        "baggage": o.get("baggage_display"),
+        "refundable": o.get("is_refundable_label"),
+        "fare_ref": o.get("fare_ref"),
+    }
+    block = {k: v for k, v in block.items() if v}
+    block["summary"] = "; ".join(
+        x for x in (
+            block.get("airline"),
+            f"out {block['outbound']} ({block['outbound_duration']})" if block.get("outbound") else "",
+            f"back {block['return']} ({block['return_duration']})" if block.get("return") else "",
+            block.get("baggage"), block.get("refundable"),
+        ) if x
+    )
+    return block
+
+
 def _tour_price_lookup(title: str, travel_date: str) -> float:
     """Per-adult price for a tour named in a plan. 0.0 when unmatched."""
     return float(_tour_facts_lookup(title, travel_date).get("price") or 0.0)
@@ -643,9 +702,10 @@ def plan_itinerary_tool(
     hotel_total_inr: float = 0.0,
     visa_per_adult_inr: float = 0.0,
     transfer_total_inr: float = 0.0,
-    fill_days: bool = True,
+    fill_days: bool = False,
     origin_city: str = "",
     destination_city: str = "Dubai",
+    flight_fare_ref: str = "",
 ) -> dict[str, Any]:
     """Build a VALIDATED day-by-day itinerary with real times.
 
@@ -665,10 +725,14 @@ def plan_itinerary_tool(
     Args:
         start_date: arrival date, ISO yyyy-mm-dd
         nights: nights booked (days = nights + 1)
-        tours: the tours the customer wants, each:
+        tours: the tours IN THE PACKAGE, each:
             {"name": str,
+             "date": "yyyy-mm-dd",                    # the date you priced it for
              "duration": "0-Days 2-Hours 0-Minutes"   # from search_tours
              "timeslots": [...]}                      # from get_tour_timeslots
+            Pass `date` for every tour you quoted a price for: the tour is then
+            placed on that day and priced for that day, so the plan and the
+            price agree. Without it the tool picks the day.
             Pass `timeslots` whenever you have them — without them the tour is
             scheduled by duration alone and may be placed at an unbookable time.
         arrival_time: flight landing time "HH:MM" — pass it, it drives the rest rule
@@ -686,6 +750,14 @@ def plan_itinerary_tool(
         transfer_total_inr: total transfer price you showed, if any.
         origin_city: departure city, only needed as a fallback if you cannot
             pass flight_total_inr.
+        flight_fare_ref: the `fare_ref` of the flight you showed (from
+            search_flights). The plan then carries THAT fare's price, flight
+            numbers, times, durations, baggage and refundability in `flight`;
+            quote those, never work a duration out from the clock times.
+        fill_days: False unless the customer asked you to fill free days.
+            When True, catalogue tours are added, priced into the total and
+            named in `auto_filled_tours`; say they were added. Never put an
+            activity in the day plan that is not in this tool's output.
 
     Returns:
         {days: [{day_number, date, label, items: [{start, end, title, kind,
@@ -820,6 +892,25 @@ def plan_itinerary_tool(
             if out.get("error"):
                 return out
 
+    # THE FLIGHT THAT WAS SHOWN. Its price, and the duration, baggage and
+    # refundability the model otherwise wrote freehand ("1h 55m" both ways,
+    # "0kg") when asked for flight details inside a package.
+    flight_block: dict[str, Any] = {}
+    if flight_fare_ref:
+        from flight_cache import find_option
+
+        shown = find_option(flight_fare_ref)
+        if shown:
+            flight_block = _flight_block(shown)
+            if not flight_total_inr and shown.get("price_inr"):
+                flight_total_inr = float(shown["price_inr"])
+        else:
+            flight_block = {"note": (
+                "The fare shown earlier has expired from the search cache, so its "
+                "price may have changed. Run search_flights again for these dates "
+                "and quote the fresh fare."
+            )}
+
     # COST THE TRIP HERE. Left to itself the model wrote an "ESTIMATED TOTAL"
     # table with a guessed tours line — twice, differing by Rs 3,000, and both
     # UNDER the real figure by Rs 15-18k (it guessed ~25,000/~28,000 when the
@@ -849,7 +940,14 @@ def plan_itinerary_tool(
             )
             _opts = [o for o in (_f.get("options") or []) if o.get("price_inr")]
             if _opts:
-                flight_total_inr = min(float(o["price_inr"]) for o in _opts)
+                _cheapest = min(_opts, key=lambda o: float(o["price_inr"]))
+                flight_total_inr = float(_cheapest["price_inr"])
+                if not flight_block:
+                    from flight_cache import find_option
+
+                    flight_block = _flight_block(
+                        find_option(str(_cheapest.get("fare_ref") or "")) or _cheapest
+                    )
                 # Say so loudly: this is a FRESH fare, not the one on screen.
                 _lookup_notes.append(
                     "flights: re-searched because flight_total_inr was not "
@@ -915,6 +1013,7 @@ def plan_itinerary_tool(
     scheduled: list[dict[str, Any]] = []
     seen: set[str] = set()
     for day in out.get("days") or []:
+        day_date = str(day.get("date") or start_date)
         for item in day.get("items") or []:
             if item.get("kind") != "tour":
                 continue
@@ -938,11 +1037,14 @@ def plan_itinerary_tool(
             # total then read "Tours: pricing to be confirmed" while the trip
             # total silently excluded them. Looking the price up here means a
             # bare name still produces a correct total.
+            # Priced for the day it is scheduled on, not the arrival date: tour
+            # rates vary by date, and the two used to differ.
             if per_adult <= 0 and title:
-                per_adult = _tour_price_lookup(title, start_date)
+                per_adult = _tour_price_lookup(title, day_date)
             scheduled.append(
                 {
                     "tour": title,
+                    "date": day_date,
                     "per_adult_inr": round(per_adult, 2),
                     "group_inr": round(per_adult * pax, 2),
                 }
@@ -968,6 +1070,36 @@ def plan_itinerary_tool(
         "total_inr": out.get("total_inr"),
         "cost_breakdown": out.get("cost_breakdown") or {},
     })
+    # An airport transfer the package does not pay for must not read as part of
+    # it. The scheduler always draws the arrival transfer; say when it is extra.
+    if not components["transfers"]:
+        for day in out.get("days") or []:
+            for item in day.get("items") or []:
+                if item.get("kind") == "transfer":
+                    item["title"] = f"{item.get('title') or 'Airport transfer'} (not included in the package price)"
+                    item["included"] = False
+
+    # One list of what the customer is paying for, each with its date, built
+    # from the same numbers as the total. The day plan and this list come from
+    # one call, so they cannot disagree.
+    lines: list[dict[str, Any]] = []
+    if components["flights"]:
+        lines.append({"item": "Flights", "date": start_date, "amount_inr": components["flights"],
+                      **({"detail": flight_block.get("summary")} if flight_block.get("summary") else {})})
+    if components["hotel"]:
+        lines.append({"item": f"Hotel{f' ({hotel_name})' if hotel_name else ''}", "date": start_date,
+                      "amount_inr": components["hotel"]})
+    for s in scheduled:
+        if s["group_inr"]:
+            lines.append({"item": s["tour"], "date": s["date"], "amount_inr": s["group_inr"]})
+    if components["visa"]:
+        lines.append({"item": "Visa", "date": start_date, "amount_inr": components["visa"]})
+    if components["transfers"]:
+        lines.append({"item": "Airport transfers", "date": start_date, "amount_inr": components["transfers"]})
+    out["package_lines"] = lines
+    if flight_block:
+        out["flight"] = flight_block
+
     out["auto_filled_tours"] = auto_filled
     out["tour_costs"] = scheduled
     out["cost_breakdown"] = components
@@ -1314,6 +1446,7 @@ def _build_all_tools() -> list[BaseTool]:
         # Rs 13,290.34 booking. Kept defined for existing callers.
         compute_hotel_block_cost_tool,
         sum_trip_total_tool,
+        cancellation_breakdown_tool,
         apply_selection_tool,
         compute_remaining_budget_tool,
         get_destination_tips_tool,

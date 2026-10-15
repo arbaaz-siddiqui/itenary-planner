@@ -623,6 +623,9 @@ class TestAutoFillDays:
             "tours": self.THIN,
             "arrival_time": "05:25",
             "departure_time": "15:00",
+            # Auto-fill is opt-in (customer asked to fill free days); these
+            # tests are about what it does once asked.
+            "fill_days": True,
         }
         args.update(kw)
         return plan_itinerary_tool.invoke(args)
@@ -729,6 +732,7 @@ class TestNoFreeDaysEver:
             "tours": self.ONE_TOUR,
             "arrival_time": "05:25",
             "departure_time": "20:50",
+            "fill_days": True,  # opt-in, see TestAutoFillDays
         }
         args.update(kw)
         return plan_itinerary_tool.invoke(args)

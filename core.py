@@ -505,6 +505,8 @@ class HotelOption(BaseModel):
     hotel_id: int
     hotel_name: str
     area: str = ""
+    # The broader part of the city the area belongs to (Al Muteena -> Deira).
+    district: str = ""
     price_inr: float
     per_night_inr: float
     nights: int = 1
@@ -994,6 +996,21 @@ class VisaOption(BaseModel):
     # headline adult-Normal fare for back-compat; this carries the full matrix.
     fares: list[VisaFare] = Field(default_factory=list)
     child_price_inr: float = 0.0
+    # The visa's published policy, as gujjutours.com shows it (parsed from the
+    # supplier's own cancellationPolicies + process-step text, never written by
+    # us). None = the supplier said nothing, so nothing may be claimed.
+    refundable: bool | None = None
+    refund_policy: str = ""
+    # Processing time per tier as the website states it ("Normal": "2–4
+    # Working Days", "Express": "24–48 Hours"). The per-rate supplier field
+    # says otherwise ("3-4 Working Days", "1 Working Day"); the customer reads
+    # the website, so this wins wherever it is present.
+    track_times: dict[str, str] = Field(default_factory=dict)
+    express_note: str = ""
+    apply_before_text: str = ""
+    processing_counted_from: str = ""
+    weekend_days: list[str] = Field(default_factory=list)
+    holidays: list[str] = Field(default_factory=list)
 
     @property
     def price_display(self) -> str:
@@ -1004,6 +1021,8 @@ class VisaOption(BaseModel):
     @property
     def processing_display(self) -> str:
         """Never claim '0 days'. The supplier often returns an empty string."""
+        if self.track_times.get("Normal"):
+            return self.track_times["Normal"]
         if self.processing_time_text:
             return self.processing_time_text
         if self.processing_days > 0:
@@ -1028,7 +1047,9 @@ class VisaOption(BaseModel):
                 by_tier.setdefault(f.process_type or "Normal", []).append(f)
         lines: list[str] = []
         for tier, fares in by_tier.items():
-            proc = next((f.processing_time_text for f in fares if f.processing_time_text), "")
+            proc = self.track_times.get(tier) or next(
+                (f.processing_time_text for f in fares if f.processing_time_text), ""
+            )
             head = f"{tier} ({proc})" if proc else tier
             pax = " · ".join(f"{f.pax_type} {f.price_display}" for f in fares)
             lines.append(f"{head}: {pax}")

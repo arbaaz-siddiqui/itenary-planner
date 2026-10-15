@@ -131,3 +131,69 @@ def list_destinations() -> list[str]:
         for c in cities.values()
         if isinstance(c, dict) and c.get("country_name") != "India"
     ]
+
+
+# ------------------------------------------------------------- Dubai areas
+@lru_cache(maxsize=1)
+def _load_dubai_areas() -> dict[str, Any]:
+    with (REFERENCE_DATA_ROOT / "dubai_areas.json").open(encoding="utf-8") as f:
+        return json.load(f)  # type: ignore[no-any-return]
+
+
+def _km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    import math
+
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    a = (math.sin((p2 - p1) / 2) ** 2
+         + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lng2 - lng1) / 2) ** 2)
+    return 2 * 6371.0 * math.asin(math.sqrt(a))
+
+
+def resolve_dubai_area(
+    address: str | None, lat: float | None = None, lng: float | None = None
+) -> tuple[str, str]:
+    """(area, district) for a Dubai hotel, or ("", "") when it cannot be told.
+
+    The supplier gives no locality field, only a free-text address and
+    coordinates, so "is it in Deira?" was left to the model, which guessed.
+    The address wins when it names a locality (longest alias, so "bur dubai"
+    beats "dubai"); otherwise the nearest neighbourhood centre within the
+    radius decides. Beyond the radius we say nothing rather than guess.
+    """
+    data = _load_dubai_areas()
+    areas = data.get("areas") or []
+    text = f" {(address or '').lower()} "
+    best: tuple[int, dict[str, Any]] | None = None
+    for a in areas:
+        for alias in a.get("aliases") or []:
+            if f" {alias}" in text or f"{alias} " in text or f",{alias}" in text:
+                if best is None or len(alias) > best[0]:
+                    best = (len(alias), a)
+    if best:
+        return best[1]["area"], best[1]["district"]
+    try:
+        la, lo = float(lat), float(lng)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "", ""
+    radius = float(data.get("radius_km") or 2.5)
+    near = min(areas, key=lambda a: _km(la, lo, a["lat"], a["lng"]), default=None)
+    if near and _km(la, lo, near["lat"], near["lng"]) <= radius:
+        return near["area"], near["district"]
+    return "", ""
+
+
+def area_matches(requested: str, area: str, district: str) -> bool:
+    """Does a hotel in (area, district) satisfy a customer's "in <requested>"?
+
+    "Deira" accepts every Deira locality (Al Rigga, Port Saeed...); "Al Rigga"
+    accepts only Al Rigga. Aliases count, so "Marina" finds Dubai Marina.
+    """
+    want = (requested or "").strip().lower()
+    if not want:
+        return True
+    for a in _load_dubai_areas().get("areas") or []:
+        names = {a["area"].lower(), *(x.lower() for x in a.get("aliases") or [])}
+        if want in names:
+            want = a["area"].lower()
+            break
+    return want in {(area or "").lower(), (district or "").lower()}

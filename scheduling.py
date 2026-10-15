@@ -425,6 +425,16 @@ def build_itinerary(
     # recommended-first still decides between tours of similar length.
     ordered = [t for t in (tours or []) if isinstance(t, dict)]
     ordered.sort(key=lambda t: -_activity_minutes(t, p))
+    # A tour priced for a particular date goes on THAT day, placed before the
+    # free-floating ones so they cannot take its slot. The Desert Safari was
+    # priced for 3 October and scheduled on 5 October; the customer would have
+    # paid one date's rate for another date's booking.
+    index_of = {d.date: i for i, d in enumerate(days)}
+
+    def _pinned(t: dict[str, Any]) -> int | None:
+        return index_of.get(str(t.get("date") or "")[:10])
+
+    ordered.sort(key=lambda t: _pinned(t) is None)
 
     # Tours per day so far — used to SPREAD the trip rather than front-load it.
     # Greedy first-fit put three tours on arrival day and left four days empty,
@@ -453,6 +463,9 @@ def build_itinerary(
             range(len(days)),
             key=lambda i: (_booked_min(i) >= p.target_activity_min_per_day, i),
         )
+        pin = _pinned(tour)
+        if pin is not None:
+            order = [pin]
         for idx in order:
             day = days[idx]
             # Don't stack activities onto the departure day.
@@ -477,6 +490,9 @@ def build_itinerary(
             break
         if not placed:
             title = str(tour.get("name") or tour.get("title") or "Tour").strip()
+            if pin is not None and not reasons:
+                reasons = [f"day {days[pin].day_number}: {days[pin].date}, the date it was "
+                           "priced for, is the arrival-rest or departure day or already full"]
             excluded.append(
                 ExcludedItem(
                     title=title,
