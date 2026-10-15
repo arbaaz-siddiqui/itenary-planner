@@ -9,6 +9,7 @@ The registry combines plain tools + the 7 MCP tools into ALL_TOOLS.
 from __future__ import annotations
 
 from functools import lru_cache
+from collections import OrderedDict
 from typing import Any
 
 from langchain_core.tools import BaseTool, tool
@@ -511,8 +512,27 @@ def build_trip_schedule_tool(days: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 # Last itinerary built by plan_itinerary_tool, so the PDF can reuse its day
-# plan rather than erroring and forcing the model to retry.
-_LAST_PLAN: dict[str, Any] = {}
+# plan rather than erroring and forcing the model to retry. Kept PER
+# CONVERSATION: it used to be one module-level dict for the whole server, so a
+# PDF in one customer's chat could pick up the plan just built in another's.
+_LAST_PLANS: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
+_LAST_PLANS_MAX = 500
+
+
+def _last_plan() -> dict[str, Any]:
+    from rules import current_thread
+
+    return _LAST_PLANS.get(current_thread(), {})
+
+
+def _remember_plan(plan: dict[str, Any]) -> None:
+    from rules import current_thread
+
+    key = current_thread()
+    _LAST_PLANS[key] = plan
+    _LAST_PLANS.move_to_end(key)
+    while len(_LAST_PLANS) > _LAST_PLANS_MAX:
+        _LAST_PLANS.popitem(last=False)
 
 
 def _end_date_for(start_date: str, nights: int) -> str:
@@ -940,15 +960,14 @@ def plan_itinerary_tool(
     }
     # Cache for generate_itinerary_pdf_tool: the day plan it needs already
     # exists here, so a PDF request should never bounce on MissingDayPlans.
-    global _LAST_PLAN
-    _LAST_PLAN = {
+    _remember_plan({
         "days": out.get("days") or [],
         "start_date": start_date,
         "nights": nights,
         "adults": pax,
         "total_inr": out.get("total_inr"),
         "cost_breakdown": out.get("cost_breakdown") or {},
-    }
+    })
     out["auto_filled_tours"] = auto_filled
     out["tour_costs"] = scheduled
     out["cost_breakdown"] = components
@@ -1125,12 +1144,13 @@ def generate_itinerary_pdf_tool(
     # Refuse rather than ship a hollow PDF: this returns an actionable error the
     # model can immediately retry, instead of a link the customer will complain
     # about. Only enforced for multi-night trips, where a schedule is the point.
+    last_plan = _last_plan()
     if not (day_plans or []) and (nights or 0) >= 1:
         # Reuse the plan we just built rather than bouncing the call. The model
         # otherwise burns a full round-trip re-sending a schedule it already
         # produced — which happened on every single PDF request.
-        cached = (_LAST_PLAN or {}).get("days") or []
-        _cached_start = str((_LAST_PLAN or {}).get("start_date") or "")
+        cached = last_plan.get("days") or []
+        _cached_start = str(last_plan.get("start_date") or "")
         _asked_start = str(start_date or "")
         # Same trip if the dates agree, or if the caller simply did not pass one
         # (the common case) and the night count still matches.
@@ -1138,7 +1158,7 @@ def generate_itinerary_pdf_tool(
             _cached_start == _asked_start
             # No date passed: the only plan in play is the one just built.
             or (not _asked_start
-                and int((_LAST_PLAN or {}).get("nights") or -1) == int(nights or -2))
+                and int(last_plan.get("nights") or -1) == int(nights or -2))
         )
         if _same_trip:
             day_plans = [
@@ -1149,7 +1169,7 @@ def generate_itinerary_pdf_tool(
             if not start_date:
                 start_date = _cached_start
             if nights is None:
-                nights = (_LAST_PLAN or {}).get("nights")
+                nights = last_plan.get("nights")
     if not (day_plans or []) and (nights or 0) >= 1:
         return {
             "error": True,
@@ -1168,9 +1188,9 @@ def generate_itinerary_pdf_tool(
 
     # Backfill end times the model dropped. It sends `start` only, so without
     # this the PDF shows "09:45" where the chat showed "09:45-11:45".
-    if day_plans and (_LAST_PLAN or {}).get("days"):
+    if day_plans and last_plan.get("days"):
         _ends: dict[tuple[str, str], str] = {}
-        for _d in _LAST_PLAN["days"]:
+        for _d in last_plan["days"]:
             for _it in _d.get("items") or []:
                 _t = str(_it.get("title") or "").strip().lower()
                 _st = str(_it.get("start") or "").strip()

@@ -1161,10 +1161,16 @@ def invoke_and_log(
 ) -> dict[str, Any]:
     # Injection guard runs in code, not in the prompt: a matched message never
     # reaches the model, never enters the checkpoint, and costs zero tokens.
-    from rules import detect_prompt_injection, injection_reply, set_conversation_text
+    from rules import (
+        detect_prompt_injection,
+        injection_reply,
+        set_conversation_text,
+        set_current_thread,
+    )
 
     # Tools need the customer's own words to tell an invented departure
     # city from a real one -- all of them, not just this message.
+    set_current_thread(thread_id)
     set_conversation_text(
         _customer_words(agent, {"configurable": {"thread_id": thread_id}}, user_message))
 
@@ -1556,7 +1562,14 @@ def stream_and_log(
 
     # Same code-level injection guard as invoke_and_log: Streamlit streams, so
     # without this the model would already be leaking before any post-check.
-    from rules import detect_prompt_injection, injection_reply, set_conversation_text
+    from rules import (
+        detect_prompt_injection,
+        injection_reply,
+        set_conversation_text,
+        set_current_thread,
+    )
+
+    set_current_thread(thread_id)
 
     set_conversation_text(
         _customer_words(agent, {"configurable": {"thread_id": thread_id}}, user_message))

@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Menu, SquarePen } from "lucide-react";
 import { api, isUnauthorized, MOCK_MODE } from "@/lib/api";
-import type { ChatSession, Message, OptionGroup, User } from "@/lib/types";
+import type { ChatSession, Message, OptionGroup, OptionItem, UiSettings, User } from "@/lib/types";
 import { useStreamSegments } from "@/lib/useStreamSegments";
-import { LEGACY_SHARED_KEYS, usePersisted, userKey } from "@/lib/usePersisted";
-import { useTheme } from "@/lib/theme";
+import { takeLocalAccountData } from "@/lib/usePersisted";
+import { useTheme, type ThemePref } from "@/lib/theme";
 import { displayFirstName, serviceById, type ServiceId } from "@/lib/services";
 import { Sidebar } from "@/components/Sidebar";
 import { BrandLogo } from "@/components/BrandLogo";
@@ -43,11 +43,11 @@ export default function ChatPage() {
   /** Which bubble the live segments belong to. */
   const [liveId, setLiveId] = useState<string | null>(null);
 
-  // Shell state. Collapsed is a per-browser preference; pinned chats and
-  // saved cards belong to the account, so their keys carry the user id.
-  const [collapsed, setCollapsed] = usePersisted("sidebar-collapsed", false);
-  const [pinnedList, setPinnedList] = usePersisted<string[]>(userKey("pinned-chats", user?.id), []);
-  const pinned = useMemo(() => new Set(pinnedList), [pinnedList]);
+  // Shell state. Pinned chats, saved cards and screen settings belong to the
+  // account and live in the database, so they follow the customer to any
+  // device and never show to another account on the same browser.
+  const [collapsed, setCollapsedState] = useState(false);
+  const pinned = useMemo(() => new Set(sessions.filter((s) => s.pinned).map((s) => s.id)), [sessions]);
   const [service, setService] = useState<ServiceId | null>(null);
   const [mode, setMode] = useState<ComposerMode>("ask");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -55,8 +55,8 @@ export default function ChatPage() {
   const theme = useTheme();
   const composerRef = useRef<ComposerHandle>(null);
 
-  // Cards: saved with the heart (per account), and the one open in detail.
-  const [saved, setSaved] = usePersisted<CardRef[]>(userKey("saved-cards", user?.id), []);
+  // Cards: saved with the heart (stored per account), and the one open in detail.
+  const [saved, setSaved] = useState<CardRef[]>([]);
   const [detail, setDetail] = useState<CardRef | null>(null);
   const detailPushed = useRef(false);
   const [nameLater, setNameLater] = useState(false);
@@ -91,18 +91,36 @@ export default function ChatPage() {
       try {
         const { user } = await api.me();
         if (!live) return;
-        // Unscoped keys from before per-account storage would show one
-        // account's saved cards to the next; drop them.
-        try {
-          LEGACY_SHARED_KEYS.forEach((k) => window.localStorage.removeItem(k));
-        } catch {
-          /* blocked storage: nothing to clear */
-        }
         setUser(user);
         setBooting(false);
 
-        const list = await api.listSessions();
+        // Account data from the server. Anything this browser still holds from
+        // before it moved there (this account's own copy) is uploaded once and
+        // removed; other accounts' copies are only removed.
+        const local = takeLocalAccountData(user.id);
+        const [savedRes, settingsRes, firstList] = await Promise.all([
+          api.listSavedCards().catch(() => ({ cards: [] })),
+          api.getSettings().catch(() => ({ settings: {} as UiSettings })),
+          api.listSessions(),
+        ]);
         if (!live) return;
+        let list = firstList;
+        const known = new Set(savedRes.cards.map((c) => c.id));
+        const toUpload = local.saved.filter((c) => !known.has(c.id));
+        await Promise.allSettled(toUpload.map((c) => api.saveCard(c.id, c.kind, c.item)));
+        const toPin = local.pinned.filter((id) => list.some((s) => s.id === id && !s.pinned));
+        if (toPin.length) {
+          await Promise.allSettled(toPin.map((id) => api.setSessionPinned(id, true)));
+          list = list.map((s) => (toPin.includes(s.id) ? { ...s, pinned: true } : s));
+        }
+        if (!live) return;
+        setSaved([
+          ...savedRes.cards.map((c) => ({ id: c.id, kind: c.kind as CardRef["kind"], item: c.item as OptionItem })),
+          ...toUpload,
+        ]);
+        const st = settingsRes.settings;
+        if (typeof st.sidebar_collapsed === "boolean") setCollapsedState(st.sidebar_collapsed);
+        if (st.theme) theme.setPref(st.theme);
         setSessions(list);
         setSessionsLoading(false);
 
@@ -292,10 +310,7 @@ export default function ChatPage() {
   const cardActions: CardActions = {
     open: openCard,
     isSaved: (id) => saved.some((c) => c.id === id),
-    toggleSave: (card) =>
-      setSaved((list) =>
-        list.some((c) => c.id === card.id) ? list.filter((c) => c.id !== card.id) : [card, ...list].slice(0, 50),
-      ),
+    toggleSave: (card) => void toggleSave(card),
     book: bookCard,
   };
 
@@ -339,7 +354,6 @@ export default function ChatPage() {
     const results = await Promise.allSettled(sessions.map((x) => api.deleteSession(x.id)));
     const failed = sessions.filter((_, i) => results[i].status === "rejected");
     setSessions(failed);
-    setPinnedList([]);
     setActiveId(null);
     setMessages([]);
     if (failed.length) throw new Error(failed.length + " chats were not deleted");
@@ -372,8 +386,41 @@ export default function ChatPage() {
     setActiveId(id);
   }
 
-  function togglePin(id: string) {
-    setPinnedList((list) => (list.includes(id) ? list.filter((x) => x !== id) : [id, ...list]));
+  async function togglePin(id: string) {
+    const next = !sessions.find((s) => s.id === id)?.pinned;
+    setSessions((list) => list.map((s) => (s.id === id ? { ...s, pinned: next } : s)));
+    try {
+      await api.setSessionPinned(id, next);
+    } catch (e) {
+      setSessions((list) => list.map((s) => (s.id === id ? { ...s, pinned: !next } : s)));
+      setBanner(e instanceof Error ? e.message : "Could not pin the chat");
+    }
+  }
+
+  /** Heart a card or take it back; saved on the account, rolled back on failure. */
+  async function toggleSave(card: CardRef) {
+    const was = saved.some((c) => c.id === card.id);
+    setSaved((list) => (was ? list.filter((c) => c.id !== card.id) : [card, ...list].slice(0, 50)));
+    try {
+      if (was) await api.unsaveCard(card.id);
+      else await api.saveCard(card.id, card.kind, card.item);
+    } catch (e) {
+      setSaved((list) => (was ? [card, ...list] : list.filter((c) => c.id !== card.id)));
+      setBanner(e instanceof Error ? e.message : "Could not save the card");
+    }
+  }
+
+  function setCollapsed(update: (prev: boolean) => boolean) {
+    setCollapsedState((prev) => {
+      const next = update(prev);
+      void api.setSettings({ sidebar_collapsed: next }).catch(() => {});
+      return next;
+    });
+  }
+
+  function setThemeChoice(next: ThemePref) {
+    theme.setPref(next);
+    void api.setSettings({ theme: next }).catch(() => {});
   }
 
   async function renameChat(id: string, title: string) {
@@ -391,7 +438,6 @@ export default function ChatPage() {
     const prev = sessions;
     const remaining = prev.filter((x) => x.id !== id);
     setSessions(remaining);
-    setPinnedList((list) => list.filter((x) => x !== id));
     if (id === activeId) setActiveId(remaining[0]?.id ?? null);
     try {
       await api.deleteSession(id);
@@ -761,7 +807,7 @@ export default function ChatPage() {
         user={user}
         onUser={setUser}
         theme={theme.pref}
-        onTheme={theme.setPref}
+        onTheme={setThemeChoice}
         onExport={exportChat}
         onClearAll={clearAllChats}
         canExport={messages.length > 0}

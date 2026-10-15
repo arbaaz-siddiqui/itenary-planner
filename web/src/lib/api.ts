@@ -3,7 +3,16 @@
 
 import { mockApi } from "./mock";
 import { parseSSE } from "./sse";
-import type { ChatSession, Message, Preferences, StreamEvent, TourDetailSection, User } from "./types";
+import type {
+  ChatSession,
+  Message,
+  Preferences,
+  SavedCardOut,
+  StreamEvent,
+  TourDetailSection,
+  UiSettings,
+  User,
+} from "./types";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 export const MOCK_MODE = process.env.NEXT_PUBLIC_MOCK_MODE === "true";
@@ -138,6 +147,39 @@ export const api = {
           method: "PATCH",
           body: JSON.stringify({ title }),
         }),
+
+  setSessionPinned: (id: string, pinned: boolean): Promise<ChatSession> =>
+    MOCK_MODE
+      ? mockApi.updateSession(id, { pinned })
+      : request(`/chat/sessions/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ pinned }),
+        }),
+
+  // --- account data: saved cards, screen settings (stored per account) ---
+  listSavedCards: (): Promise<{ cards: SavedCardOut[] }> =>
+    MOCK_MODE ? mockApi.listSavedCards() : request("/me/saved-cards"),
+
+  saveCard: (id: string, kind: string, item: Record<string, unknown>): Promise<void> =>
+    MOCK_MODE
+      ? mockApi.saveCard(id, kind, item)
+      : request(`/me/saved-cards/${encodeURIComponent(id)}`, {
+          method: "PUT",
+          body: JSON.stringify({ kind, item }),
+        }),
+
+  unsaveCard: (id: string): Promise<void> =>
+    MOCK_MODE
+      ? mockApi.unsaveCard(id)
+      : request(`/me/saved-cards/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  getSettings: (): Promise<{ settings: UiSettings }> =>
+    MOCK_MODE ? mockApi.getSettings() : request("/me/settings"),
+
+  setSettings: (settings: UiSettings): Promise<{ settings: UiSettings }> =>
+    MOCK_MODE
+      ? mockApi.setSettings(settings)
+      : request("/me/settings", { method: "PATCH", body: JSON.stringify(settings) }),
 
   deleteSession: (id: string): Promise<void> =>
     MOCK_MODE

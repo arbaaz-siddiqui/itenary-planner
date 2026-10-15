@@ -177,11 +177,13 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
 | POST | `/auth/register` (201), `/auth/login`, `/auth/logout` (204) | `register` takes `first_name`, `last_name` and signs in |
 | GET/PATCH | `/auth/me` | current user; PATCH updates names |
 | GET/PATCH | `/me/preferences` | `origin_city`, `usual_party_size`, `diet`, `nationality` ↔ `user_memory.facts` (empty value clears) |
-| GET/POST | `/chat/sessions`; PATCH/DELETE `/chat/sessions/{id}` | ordered by `updated_at DESC` |
+| GET/POST | `/chat/sessions`; PATCH/DELETE `/chat/sessions/{id}` | ordered by `updated_at DESC`; PATCH takes `title` and/or `pinned` |
+| GET | `/me/saved-cards`; PUT/DELETE `/me/saved-cards/{card_id}` | hearted cards per account (`saved_cards`, ≤ 50, PUT body `{kind, item}`) |
+| GET/PATCH | `/me/settings` | `{theme, sidebar_collapsed}` in `users.ui_settings` |
 | GET | `/chat/sessions/{id}/messages` | includes `options` and `feedback` |
 | GET | `/chat/sessions/{id}/status` → `{busy}`; POST `.../cancel` (204) | detached turns |
 | POST | `/chat/messages/{id}/feedback` | `up`/`down`/null → 1/-1/NULL |
-| GET | `/chat/messages/{id}/tool-calls` | the tool calls behind a reply (args, results) |
+| GET | `/chat/messages/{id}/tool-calls` | the tool calls behind a reply (args, results); owner only |
 | GET | `/tours/{tour_id}/options/{option_id}/details?supplier_id=` | tour option detail for the panel |
 | POST | `/chat/stream` | SSE turn: `{session_id, message, mode: "ask"|"plan", regenerate}` |
 
@@ -196,7 +198,24 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
 - Cookies: `samesite=none; secure` when `COOKIE_SECURE` is set, or unset and `CORS_ORIGINS` contains https; otherwise `lax`. `CORS_ORIGINS` must list exact origins (e.g. `http://localhost:3000`), never `*`.
 - Boot logs (does not raise) a missing `SESSION_SECRET` or a failed migration, so `/health` stays green: check logs or `/health/db`.
 
-**Migrations** (`migrations/`, idempotent SQL, no version table): `001_init` (users, chat_sessions, chat_messages, user_memory), `002_message_options`, `003_accounts` (names, session_epoch), `004_turns`, `005_artifacts_and_trip_state` (column `trip_window`; `window` is reserved), `006_message_feedback`. Add new ones as `007_*.sql`, written to be re-runnable.
+**Migrations** (`migrations/`, idempotent SQL, no version table): `001_init` (users, chat_sessions, chat_messages, user_memory), `002_message_options`, `003_accounts` (names, session_epoch), `004_turns`, `005_artifacts_and_trip_state` (column `trip_window`; `window` is reserved), `006_message_feedback`, `007_user_saved_pins_settings` (`chat_sessions.pinned`, `saved_cards`, `users.ui_settings`). Add new ones as `008_*.sql`, written to be re-runnable.
+
+**Data ownership (no leaks).** Every query that touches account data puts `user_id` in its WHERE clause (or joins through `chat_sessions.user_id`), so a missing check returns nothing rather than someone else's row; by-id endpoints return 404 for another account's ids. Where data lives:
+
+| Data | Store |
+|---|---|
+| Account, names | `users` |
+| Chats, pinned flag | `chat_sessions` |
+| Messages, the cards (full option items) behind each reply, feedback, tool calls | `chat_messages` |
+| Travel preferences and facts the agent remembers | `user_memory.facts` |
+| Saved (hearted) cards | `saved_cards` |
+| Theme, sidebar collapsed | `users.ui_settings` |
+| Agent working state | LangGraph checkpoint tables, keyed by the session's unique `thread_id` |
+| Itinerary PDFs | files under `ITINERARY_DIR`, served at `/itinerary/{id}.pdf` by unguessable id (public by design) |
+
+The browser keeps no account data. `localStorage` holds only the theme as a first-paint cache (`theme-pref`) and the last open chat id (used only if it is in the signed-in account's own list). Never add account data to `localStorage`; add a column or table and an owner-scoped endpoint. In-process state that tools keep between calls must be keyed by conversation (`rules.current_thread()`), never module-global: `agent_tools._LAST_PLANS` is the example.
+
+`artifacts`, `trip_state` and `turns` (migrations 004, 005) are created but not yet used by any code.
 
 ---
 
@@ -256,7 +275,7 @@ Next.js 15.5, React 19.1, Tailwind v4 (`@tailwindcss/postcss`, no `tailwind.conf
 - `api.ts`: the only network boundary (`credentials: "include"`, `ApiError`, `isUnauthorized`, mock branch on every call). `sse.ts`: POST SSE parser.
 - `types.ts`, `contract.ts` (TS mirror, used only by its test so far).
 - `cards.ts` (`kindOf`, safe readers `str`/`num`/`strList`/`objList`/`obj`, `formatInr`, `imagesOf`, `titleOf`, `idOf`, `KIND_LABEL`), `cardRefs.ts` (`toCardRefs`, `KIND_TAG="__kind"`, drops identical flights), `cardActions.tsx` (context: open, isSaved, toggleSave, book), `optionMatch.ts` (name matching), `resultTable.ts` (hast table parser).
-- `usePersisted.ts` + `userKey(name, userId)`: localStorage state. Anything belonging to an account (saved cards, pinned chats) MUST use a `userKey`; the browser is shared by every account that signs in on it. Only pure UI preferences (sidebar collapsed, theme) are per browser.
+- `usePersisted.ts`: now only `takeLocalAccountData(userId)`, a one-time migration that uploads this account's saved cards and pins left in localStorage by older builds and deletes every account-data key. Account data lives on the server (§7).
 - `segments.ts` + `useStreamSegments.ts` (streaming reducer, 1.2 s idle "Thinking"), `services.ts` (7 services, quick starts, `displayFirstName`), `sessionGroups.ts`, `plainSymbols.ts`, `theme.ts` + `themeBoot.ts`, `mock.ts`.
 
 ---
@@ -270,7 +289,7 @@ Next.js 15.5, React 19.1, Tailwind v4 (`@tailwindcss/postcss`, no `tailwind.conf
 3. Send: optimistic user bubble + pending draft; `api.stream` events feed `useStreamSegments`; `options` events attach card groups to the draft; `done` settles and adopts the server `message_id` and content.
 4. `stop()` cancels on the server; `detach()` (switching chats, new chat) only stops listening and the server finishes the turn.
 5. Cards: groups render as carousels (flights as a list). A markdown table whose rows name results becomes those cards instead of a table. `optionFor` matches row names to option items: exact normalised name, then a unique prefix, then a unique shortened name; when several items share a name the row's own price (±1 against `price_inr`, `price_per_adult_inr`, `per_night_inr`, `price_per_person_inr`, `total_inr`) and then its position pick the item. Groups already shown by a table are not drawn again below it. A table without a price column (packages) still becomes cards when at least half its rows match results.
-6. Actions: regenerate (re-sends with `regenerate: true`), thumbs (optimistic, server-saved), edit (prefills composer), heart (saved cards in localStorage under a per-account key, ≤ 50), Book (sends a booking message), "Ask the agent" (prefills "About the {kind} {title}: "). Opening a card sets `?view={kind}&id={cardId}`; Back closes it.
+6. Actions: regenerate (re-sends with `regenerate: true`), thumbs (optimistic, server-saved), edit (prefills composer), heart (saved cards stored on the account via `/me/saved-cards`, ≤ 50, optimistic with rollback), Book (sends a booking message), "Ask the agent" (prefills "About the {kind} {title}: "). Opening a card sets `?view={kind}&id={cardId}`; Back closes it.
 
 ### Look and feel
 
