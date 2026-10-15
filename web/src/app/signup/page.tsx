@@ -97,7 +97,7 @@ export default function SignupPage() {
         </>
       }
     >
-      <form onSubmit={onSubmit} className="space-y-4" noValidate>
+      <form onSubmit={onSubmit} className="space-y-4 [@media(max-height:820px)]:space-y-3" noValidate>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-3">
           <Field
             ref={firstRef}

@@ -30,7 +30,7 @@ export function AuthShell({
 }) {
   const narrow = useNarrow();
   return (
-    <main className="relative flex min-h-dvh overflow-hidden bg-bg">
+    <main className="relative flex h-dvh overflow-hidden bg-bg">
       {/* Phones only: the reel fades in behind the heading. Desktop keeps
           the plain black page, and never mounts (or downloads) the video. */}
       {narrow && (
@@ -41,16 +41,19 @@ export function AuthShell({
           <Reel className="h-full w-full" />
         </div>
       )}
-      <section className="relative flex w-full flex-col px-5 pt-10 pb-6 sm:px-10 sm:pt-12 lg:w-[46%] lg:max-w-[640px] lg:px-14">
+      {/* The page itself never scrolls (no window scrollbar beside the
+          gradient card); if the form outgrows a short or zoomed window, only
+          this column scrolls, with its bar hidden. */}
+      <section className="no-scrollbar relative flex w-full flex-col overflow-y-auto px-5 pt-10 pb-6 sm:px-10 sm:pt-12 lg:w-[46%] lg:max-w-[640px] lg:px-14 [@media(max-height:820px)]:pt-6 [@media(max-height:820px)]:pb-4">
         <div className="relative flex">
           <BrandLogo />
         </div>
-        <div className="relative flex flex-1 items-center py-10">
+        <div className="relative flex flex-1 items-center py-10 [@media(max-height:820px)]:py-5">
           <div className="hero-rise mx-auto w-full max-w-[380px]">
             <h1 className="text-[30px] leading-tight font-semibold text-fg">{title}</h1>
             <p className="mt-2 text-sm leading-relaxed text-fg-muted">{subtitle}</p>
-            <div className="mt-8">{children}</div>
-            {footer && <div className="mt-8 text-sm text-fg-muted">{footer}</div>}
+            <div className="mt-8 [@media(max-height:820px)]:mt-5">{children}</div>
+            {footer && <div className="mt-8 text-sm text-fg-muted [@media(max-height:820px)]:mt-5">{footer}</div>}
           </div>
         </div>
         </section>
@@ -80,7 +83,7 @@ export function AuthShell({
               </text>
             </svg>
             <p className="mt-6 max-w-[420px] text-sm leading-relaxed text-white/80">
-              Flights, hotels, tours and visas, planned in one conversation and priced live.
+              Flights, hotels, tours and visas, planned in one conversation.
             </p>
           </div>
         </div>

@@ -64,7 +64,7 @@ export default function LoginPage() {
         </>
       }
     >
-      <form onSubmit={onSubmit} className="space-y-4">
+      <form onSubmit={onSubmit} className="space-y-4 [@media(max-height:820px)]:space-y-3">
         <Field
           ref={emailRef}
           label="Email"
