@@ -1287,7 +1287,11 @@ def _build_all_tools() -> list[BaseTool]:
         resolve_party_tool,
         check_floor_tool,
         price_group_tool,
-        transfer_quote_tool,
+        # transfer_quote_tool is retired from the agent: search_tours and
+        # get_tour_options now carry the supplier's own grand total per
+        # transfer type, so there is nothing left to add up -- and adding a
+        # transfer to a ticket is exactly how Rs 16,689 was quoted for a
+        # Rs 13,290.34 booking. Kept defined for existing callers.
         compute_hotel_block_cost_tool,
         sum_trip_total_tool,
         apply_selection_tool,

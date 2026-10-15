@@ -231,20 +231,19 @@ def _impl(
             i, row = pair
             # Any query word present counts as relevant here (ranking only);
             # spelling variants count too ("Kathiyawadi" / "Kathhiyawadi").
-            hits = match_fraction(query, str(row.get("name", ""))) > 0
+            share = match_fraction(query, str(row.get("name", "")))
             # City first: sorting on name alone put Abu Dhabi desert safaris
             # above Dubai ones, undoing the scoping directly above.
             off_city = (
                 0 if not city_filter
                 else (0 if city_filter in str(row.get("city", "")).lower() else 1)
             )
-            # Then the supplier's own order, which is a BETTER signal than the
-            # name: this response cannot tell a bookable tour from an empty one
-            # (totalAvailableServices reads 2 for both), and preferring the
-            # shortest exact name promoted "Burj Khalifa Tickets" (28482, zero
-            # variants) over "At The Top, Burj Khalifa" (28488, 14 priced
-            # variants). Only demote rows that do not match the query at all.
-            return (off_city, 0 if hits else 1, i)
+            # Then how much of the query the name carries: "Dubai Desert
+            # Safari by Gujjutours" must beat "Dubai Desert Safari" when the
+            # customer named the former. Ties keep the supplier's order; a
+            # tie between a sellable and an empty listing (both Burj rows
+            # carry every query word) is settled by _first_bookable_tour.
+            return (off_city, -round(share, 2), i)
 
         hotel_results = [
             row for _i, row in sorted(enumerate(hotel_results), key=_relevance)
@@ -263,6 +262,12 @@ def _impl(
     if svc in _NAME_MATCH_REQUIRED:
         identity = without_words(query, city) if city else query
         best = next((r for r in in_scope if _names_query(r, identity, in_scope)), None)
+    elif svc == "tours":
+        best = _first_bookable_tour(in_scope or hotel_results)
+        # The bookable tour leads the list too, so results[0] and best_match
+        # never disagree.
+        if best is not None:
+            hotel_results = [best] + [r for r in hotel_results if r is not best]
     else:
         best = hotel_results[0] if hotel_results else None
 
@@ -310,6 +315,49 @@ def _impl(
     }
 
 
+# How many top-ranked tours to check for bookable options. The supplier's own
+# order puts the real product within the first few rows.
+_BOOKABLE_CHECK = 5
+
+
+def _first_bookable_tour(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The highest-ranked tour that actually has bookable options.
+
+    The autocomplete cannot tell a sellable tour from an empty listing
+    ("Burj Khalifa Tickets" 28482 and "At The Top, Burj Khalifa" 28488 both
+    read totalAvailableServices 2), and its order drifts: when 28482 came
+    first, get_tour_options returned nothing, the agent looped through
+    detail calls and the customer saw a raw recursion error. One options call
+    per candidate, in parallel, settles it. Falls back to the top row if the
+    check itself fails, so a supplier hiccup never empties the answer.
+    """
+    import concurrent.futures as cf
+    from datetime import timedelta
+
+    from booking_api.endpoints import call_tour_options
+    from core import supplier_today
+
+    candidates = [r for r in rows if r.get("id")][:_BOOKABLE_CHECK]
+    if not candidates:
+        return None
+    probe_date = (supplier_today() + timedelta(days=7)).isoformat()
+
+    def bookable(row: dict[str, Any]) -> bool | None:
+        try:
+            listed = call_tour_options(tour_id=int(row["id"]), travel_date=probe_date)
+        except Exception:  # noqa: BLE001 -- unknown, not "empty"
+            return None
+        return bool(((listed or {}).get("result") or {}).get("tourOptionlist"))
+
+    with cf.ThreadPoolExecutor(max_workers=len(candidates)) as ex:
+        verdicts = list(ex.map(bookable, candidates))
+    return next(
+        (row for row, ok in zip(candidates, verdicts, strict=True) if ok),
+        next((row for row, ok in zip(candidates, verdicts, strict=True) if ok is None),
+             candidates[0]),
+    )
+
+
 def _names_query(row: dict[str, Any], identity: str, rows: list[dict[str, Any]]) -> bool:
     """Is `row` the entity the customer named, not just a row that came back?
 
@@ -335,6 +383,7 @@ def _names_query(row: dict[str, Any], identity: str, rows: list[dict[str, Any]])
 
 
 from mcp_tools.result_cache import cache_impl
+
 lookup_entity_tool = tool(cache_impl("lookup_entity")(_impl))
 lookup_entity_tool.name = "lookup_entity"
 mcp.tool(name="lookup_entity")(_impl)

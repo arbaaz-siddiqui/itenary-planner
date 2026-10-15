@@ -49,8 +49,12 @@ def _run(adults: int) -> dict[str, dict]:
     # 100 AED a head, so the per-adult figure is stable and the group figure
     # visibly is not.
     rate = {"result": [{"rate": 100.0 * adults, "currencyCode": "AED"}]}
+    def no_description(**_k):
+        raise RuntimeError("offline")
+
     with patch("mcp_tools.tour_pricing.call_tour_options", lambda **k: raw), \
-         patch("mcp_tools.tour_pricing.call_tour_option_rate", lambda **k: rate):
+         patch("mcp_tools.tour_pricing.call_tour_option_rate", lambda **k: rate), \
+         patch("mcp_tools.tour_pricing.call_tour_option_description", no_description):
         out = tour_options(TOUR, DATE, adults)
     return {o["name"]: o for o in out.get("options") or []}
 
@@ -64,15 +68,17 @@ class TestPriceBasis:
         assert "per adult" not in majlis["price_display"].lower()
 
     @pytest.mark.parametrize("adults", [1, 2, 7])
-    def test_a_per_person_option_stays_per_adult(self, adults):
+    def test_a_per_person_option_is_a_party_total(self, adults):
+        # Every non-group row is quoted as the supplier's total for the whole
+        # party, never as a per-head figure the model then multiplies.
         rows = _run(adults)
         drinks = rows["2 Drinks Package - Per Person (Add-on)"]
-        assert drinks["price_basis"] == "per_adult"
-        assert "per adult" in drinks["price_display"].lower()
+        assert drinks["price_basis"] == "party_total"
+        assert f"total for {adults} adult" in drinks["price_display"]
 
-    def test_a_plain_variant_stays_per_adult(self):
+    def test_a_plain_variant_is_a_party_total(self):
         rows = _run(7)
-        assert rows["Dubai Desert Safari"]["price_basis"] == "per_adult"
+        assert rows["Dubai Desert Safari"]["price_basis"] == "party_total"
 
     def test_the_group_price_shown_is_what_the_supplier_bills(self):
         # Not divided down: the supplier charges the group item per guest, and
@@ -84,7 +90,7 @@ class TestPriceBasis:
         assert majlis["price_total_inr"] == pytest.approx(
             majlis["price_per_adult_inr"] * 7, abs=0.1
         )
-        assert "7 guest" in majlis["price_display"]
+        assert "7 adults" in majlis["price_display"]
 
     def test_the_group_row_warns_that_the_charge_is_per_guest(self):
         majlis = _run(7)["Private Majlis - Per Group up to 6 Guests (Add-on)"]

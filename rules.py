@@ -1004,6 +1004,61 @@ def customer_said(value: str) -> bool:
     return value.strip().lower().split()[0] in said
 
 
+# Any way a customer names a day: "22 Oct", "22/10", "2026-10-22", "the 5th",
+# "tomorrow", "next friday", "this weekend", "in december".
+_MONTHS = (
+    r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|june?|july?|"
+    r"aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+)
+_DATE_WORDS = re.compile(
+    rf"\b(?:{_MONTHS})\b"
+    # "may" is a month only beside a day number or after "in"/"of".
+    r"|\bmay\s+\d|\d(?:st|nd|rd|th)?\s+(?:of\s+)?may\b|\b(?:in|of)\s+may\b"
+    r"|\b\d{4}-\d{1,2}-\d{1,2}\b"
+    r"|\b\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?\b"
+    r"|\b\d{1,2}(?:st|nd|rd|th)\b"
+    r"|\b(?:today|tonight|tomorrow|tmrw|weekend|monday|tuesday|wednesday|"
+    r"thursday|friday|saturday|sunday)\b"
+    r"|\bnext (?:week|month)\b|\bday after\b",
+    re.IGNORECASE,
+)
+
+
+def customer_gave_date() -> bool:
+    """True if the customer has named a day anywhere in this conversation.
+
+    A dated search the customer never asked for quotes that day's prices as
+    if they were theirs: asked "how much is the desert safari", the agent
+    picked a date itself and quoted Rs 16,689. Fails open when there is no
+    conversation text, so a direct tool call is never blocked.
+    """
+    said = _CONVERSATION_TEXT.get()
+    return not said or bool(_DATE_WORDS.search(said))
+
+
+# The customer telling us to go ahead without a value: "any date", "not sure
+# yet", "just a rough price". Only this unlocks assume_missing.
+_WAIVED = re.compile(
+    r"\b(?:any ?(?:date|day|time)|anytime|whenever|not sure|unsure|"
+    r"(?:don'?t|do not|dont) know|not (?:decided|fixed|planned)|undecided|"
+    r"no (?:fixed )?dates?|flexible|search anyway|go ahead|doesn'?t matter|"
+    r"does not matter|rough(?:ly)?|approx(?:imate(?:ly)?)?|estimate|"
+    r"indicative|ballpark|you (?:pick|choose|decide))\b",
+    re.IGNORECASE,
+)
+
+
+def customer_waived_field() -> bool:
+    """True if the customer told us to proceed without a mandatory value.
+
+    `assume_missing=True` is the customer's escape hatch, not the model's: the
+    agent set it on its own, picked 1 Nov, and quoted a desert safari price
+    to a customer who had named no day. Fails open with no conversation text.
+    """
+    said = _CONVERSATION_TEXT.get()
+    return not said or bool(_WAIVED.search(said))
+
+
 def missing_search_fields(**fields: object) -> list[str]:
     """Names of mandatory fields the caller left blank.
 

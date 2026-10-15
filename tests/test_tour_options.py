@@ -2,7 +2,7 @@
 
 import pytest
 
-from mcp_tools.tour_pricing import tour_options, transfer_prices
+from mcp_tools.tour_pricing import tour_options
 from tests.factories import future_date
 
 
@@ -22,54 +22,102 @@ class TestVariantsAreExposed:
     def test_prices_are_totals_for_the_party(self, burj):
         assert burj["adults"] == 2
         for o in burj["options"]:
-            if o.get("price_total_inr"):
-                assert o["price_per_adult_inr"] == pytest.approx(
-                    o["price_total_inr"] / 2, abs=1
-                )
+            for p in o.get("prices") or []:
+                assert p["priced_for_pax"] in (1, 2)
+                assert p["total_display"].endswith(tuple("0123456789"))
 
 
-class TestTransferTiers:
-    """Tier prices come from `initialTransferRates`.
+class TestPartyTotals:
+    """Totals per transfer type are the supplier's own grand total.
 
-    `totalTransferRate` is the per-person ticket plus that tier's transfer, so
-    subtracting the Without-Transfer entry leaves the transfer itself. A tier
-    that costs nothing is not listed: "Included (Rs 0)" reads as a free
-    transfer and gives the customer nothing to act on.
+    Rebuilding them from a per-head ticket plus a per-vehicle transfer is how
+    the agent quoted Rs 16,689 for a booking gujjutours.com prices at
+    Rs 13,290.34, and how children were left out entirely.
     """
 
-    def _row(self, *, sharing_total, private_total, base=100.0):
-        return {"initialTransferRates": [
-            {"transferTypeId": 3, "transferTypeName": "Without Transfer",
-             "startingFromRate": 0, "totalTransferRate": base,
-             "currencyCode": "AED"},
-            {"transferTypeId": 1, "transferTypeName": "Sharing Transfer",
-             "startingFromRate": 0, "totalTransferRate": sharing_total,
-             "currencyCode": "AED"},
-            {"transferTypeId": 2, "transferTypeName": "Private Transfer",
-             "startingFromRate": private_total - base,
-             "totalTransferRate": private_total, "currencyCode": "AED"},
-        ]}
+    OPTION = {
+        "optionId": 222565,
+        "supplierId": 1,
+        "tourRestrictedTransferType": [{"transferTypeId": 3}],
+        "validateTourOption": [
+            {"transferTypeId": 1, "transferTypeName": "Sharing Transfer"},
+            {"transferTypeId": 3, "transferTypeName": "Without Transfer"},
+            {"transferTypeId": 2, "transferTypeName": "Private Transfer"},
+        ],
+    }
 
-    def test_a_tier_that_costs_nothing_is_not_listed(self):
-        row = self._row(sharing_total=100.0, private_total=100.0)
-        assert transfer_prices(row, 1) == []
+    def _fake_rate(self, calls, rates):
+        def fake(**kw):
+            calls.append(kw)
+            return {"result": [{
+                "rate": rates[(kw["transfer_id"], kw.get("vehicle_id", 0))],
+                "currencyCode": "AED",
+                "vehicleRates": [{"vehicleId": 4, "minPax": 1, "maxPax": 6}],
+            }]}
+        return fake
 
-    def test_a_paid_tier_survives_when_another_is_free(self):
-        row = self._row(sharing_total=100.0, private_total=292.61)
-        tiers = transfer_prices(row, 1)
-        assert [t["transfer_type"] for t in tiers] == ["Private Transfer"]
-        assert tiers[0]["price_inr"] > 0
+    def test_only_the_transfer_types_the_option_is_sold_with(self):
+        from mcp_tools.tour_pricing import offered_transfers
 
-    def test_sharing_scales_with_the_party_but_private_does_not(self):
-        # Sharing is per person; private is per vehicle, and startingFromRate
-        # already holds the whole-vehicle figure.
-        row = self._row(sharing_total=125.0, private_total=300.0)
-        one = {t["transfer_type"]: t["price_inr"] for t in transfer_prices(row, 1)}
-        four = {t["transfer_type"]: t["price_inr"] for t in transfer_prices(row, 4)}
-        assert four["Sharing Transfer"] == pytest.approx(
-            one["Sharing Transfer"] * 4, abs=2
-        )
-        assert four["Private Transfer"] == pytest.approx(one["Private Transfer"])
+        assert offered_transfers(self.OPTION) == [
+            (1, "Sharing Transfer"), (2, "Private Transfer")
+        ]
+
+    def test_the_supplier_rate_is_quoted_unchanged_with_children(self, monkeypatch):
+        import mcp_tools.tour_pricing as tp
+
+        calls: list = []
+        monkeypatch.setattr(tp, "call_tour_option_rate", self._fake_rate(
+            calls, {(1, 0): 409.2, (2, 0): 136.4, (2, 4): 576.4}))
+        monkeypatch.setattr(tp, "convert_supplier_price",
+                            lambda aed, **_: (round(aed * 26.1518, 2), "INR"))
+
+        got = tp.party_prices(53632, self.OPTION, "2026-10-22", 2, (5, 8))
+
+        assert {p["transfer_type"]: p["total_inr"] for p in got} == {
+            "Sharing Transfer": round(409.2 * 26.1518, 2),
+            "Private Transfer": round(576.4 * 26.1518, 2),
+        }
+        assert all(c["child_ages"] == (5, 8) for c in calls)
+        # Private re-priced with the vehicle the supplier named.
+        assert any(c["transfer_id"] == 2 and c["vehicle_id"] == 4 for c in calls)
+
+    def test_a_per_unit_option_is_priced_for_one_unit(self, monkeypatch):
+        import mcp_tools.tour_pricing as tp
+
+        quad = {
+            "optionId": 222612,
+            "supplierId": 1,
+            "restrictedRateType": [{"name": "Adult"}, {"name": "Child"}],
+            "tourRestrictedTransferType": [
+                {"transferTypeId": 1}, {"transferTypeId": 2}],
+            "validateTourOption": [
+                {"transferTypeId": 3, "rateTypeName": "Unit",
+                 "transferTypeName": "Without Transfer"}],
+        }
+        calls: list = []
+        monkeypatch.setattr(tp, "call_tour_option_rate",
+                            self._fake_rate(calls, {(3, 0): 60.5}))
+        assert tp.sold_per_unit(quad)
+        got = tp.party_prices(53632, quad, "2026-10-22", 4, (6,))
+        assert got[0]["priced_per"] == "unit"
+        assert calls[0]["units"] == 1 and calls[0]["child_ages"] == ()
+
+    def test_children_reach_the_supplier_payload(self):
+        from booking_api.endpoints import _tour_pax_details
+
+        assert _tour_pax_details(2, (5, 8)) == [
+            {"label": "adult", "value": "2", "age": ""},
+            {"label": "child", "value": "2", "age": "5,8"},
+        ]
+        assert _tour_pax_details(2, ()) == [
+            {"label": "adult", "value": "2", "age": ""}]
+
+    def test_the_party_is_named(self):
+        from mcp_tools.tour_pricing import party_label
+
+        assert party_label(2, (5, 8)) == "2 adults + 2 children (ages 5, 8)"
+        assert party_label(1) == "1 adult"
 
 
 class TestRoeCaching:
