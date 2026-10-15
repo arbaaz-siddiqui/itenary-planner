@@ -18,7 +18,7 @@ import {
   UtensilsCrossed,
 } from "lucide-react";
 import type { CardRef } from "@/lib/cardActions";
-import { formatInr, imagesOf, num, obj, objList, str, strList, titleOf } from "@/lib/cards";
+import { partyTotalNote, formatInr, imagesOf, num, obj, objList, str, strList, titleOf } from "@/lib/cards";
 import type { OptionItem } from "@/lib/types";
 import { SafeImage } from "../SafeImage";
 import { BookButton, CardShell, HeartButton, MetaLine, PriceTag, RatingPill, TagChips } from "./parts";
@@ -89,7 +89,7 @@ export function RestaurantCard({ card, eager }: CardProps) {
                 {str(o, "veg_type")}
               </p>
             )}
-            <PriceTag value={price} label="Per person" align="left" />
+            <PriceTag value={price} label="Per person" note={partyTotalNote(o)} align="left" />
           </div>
           <BookButton card={card} label="Book table" />
         </div>
@@ -128,7 +128,7 @@ export function TourCard({ card, eager }: CardProps) {
         {o.is_addon === true && <p className="text-xs text-fg-muted">Add-on: book with a main option</p>}
         {cancel && <p className={`text-xs ${free ? "text-success" : "text-fg-muted"}`}>{cancel}</p>}
         <div className="mt-auto flex items-end justify-between gap-3 pt-1">
-          <PriceTag value={price} label={priceLabel} align="left" />
+          <PriceTag value={price} label={priceLabel} note={partyTotalNote(o)} align="left" />
           <BookButton card={card} />
         </div>
       </div>
@@ -298,6 +298,7 @@ export function VisaCard({ card }: CardProps) {
           <PriceTag
             value={formatInr(num(o, "price_per_person_inr")) ?? "On request"}
             label="Per person"
+            note={partyTotalNote(o)}
             align="left"
           />
           <BookButton card={card} label="Apply" />

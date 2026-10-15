@@ -6,6 +6,7 @@ import { Carousel } from "./Carousel";
 import { CardCarousel } from "./cards/CardCarousel";
 import { toCardRefs } from "@/lib/cardRefs";
 import { oneCardPerOption } from "@/lib/optionMatch";
+import { withRowTotal } from "@/lib/cards";
 import type { OptionItem } from "@/lib/types";
 
 /**
@@ -215,7 +216,7 @@ export const ResultComparison = memo(function ResultComparison({
       return { row, item: optionFor?.(row.name, { price: row.price?.text ?? null, nth }) ?? null };
     }),
   );
-  const cards = toCardRefs(matched.flatMap((m) => (m.item ? [m.item] : [])));
+  const cards = toCardRefs(matched.flatMap((m) => (m.item ? [withRowTotal(m.item, m.row.price?.text)] : [])));
   const rest = matched.filter((m) => !m.item).map((m) => m.row);
 
   if (cards.length) {

@@ -476,3 +476,26 @@ def test_visa_party_total_for_a_family() -> None:
     # Express has no child fare, so no Express total is offered for this party.
     assert totals == [{"track": "Normal", "total_inr": 17713.08,
                        "display": "₹17,713.08 for 2 adults + 1 child (Normal)"}]
+
+
+def test_family_visa_total_is_added_when_missing() -> None:
+    import json
+
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from agent import _apply_reply_guards, _final_reply
+
+    out = {"options": [{"visa_type": "30 Days Single Entry Tourist Visa", "party_totals": [
+        {"track": "Normal", "total_inr": 17713.08, "display": "₹17,713.08 for 2 adults + 1 child (Normal)"},
+        {"track": "Express", "total_inr": 23713.08, "display": "₹23,713.08 for 2 adults + 1 child (Express)"},
+    ]}]}
+    r = {"messages": [
+        HumanMessage(content="Visa price for 2 adults and 1 child"),
+        AIMessage(content="", tool_calls=[{"name": "get_visa_info", "args": {}, "id": "v1"}]),
+        ToolMessage(content=json.dumps(out), tool_call_id="v1", name="get_visa_info"),
+        AIMessage(content="Here are the options. Express is ₹23,713.08 in total."),
+    ]}
+    _apply_reply_guards(r)
+    assert "₹17,713.08 for 2 adults + 1 child (Normal)" in _final_reply(r)
+    _apply_reply_guards(r)  # idempotent
+    assert _final_reply(r).count("17,713.08") == 1
