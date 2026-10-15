@@ -67,11 +67,12 @@ ignore = ["E501", "B008", "N818"]
 "scripts/**/*.py" = ["T20", "B005"]
 "surfaces/mcp_server.py" = ["E402"]
 "surfaces/streamlit_app.py" = ["RUF001", "SIM105"]
-"core.py" = ["UP042"]
+"core.py" = ["UP042", "RUF001", "RUF002"]
 "agent_tools.py" = ["RUF001"]
 "parsers.py" = ["B005"]
 "rules.py" = ["RUF001"]
 "itinerary_pdf.py" = ["RUF001"]
+"mcp_tools/restaurant_catalog.py" = ["RUF001"]
 
 [tool.ruff.format]
 quote-style = "double"

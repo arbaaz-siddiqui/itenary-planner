@@ -6,14 +6,8 @@ import { OptionCards } from "./OptionCards";
 import { ItineraryPdf } from "./ItineraryPdf";
 import { SegmentList } from "./SegmentList";
 import type { Message, OptionItem, Segment } from "@/lib/types";
+import { normaliseName, refersTo, sameName, shortenedFrom, tableRowNames } from "@/lib/optionMatch";
 
-/**
- * Key for matching a comparison-table row to its option card.
- *
- * The agent retypes the tour name into the table, so it can differ from the
- * option row by case, spacing, the recommended star, or a trailing marker.
- * Comparing on letters and digits alone is what makes the match hold.
- */
 /** A GFM table always renders a header separator row. */
 const SEPARATOR_ROW = /^[ 	]*\|?[ 	:|-]*-{3,}[ 	:|-]*\|/m;
 
@@ -23,10 +17,6 @@ const SEPARATOR_ROW = /^[ 	]*\|?[ 	:|-]*-{3,}[ 	:|-]*\|/m;
  * two-column glossary, which stays a plain table.
  */
 const PRICE_HEADER = /\|[^|]*(price|fare|total|rate)[^|]*\|/i;
-
-function normaliseName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "");
-}
 
 const Bubble = memo(function Bubble({
   m,
@@ -68,6 +58,7 @@ const Bubble = memo(function Bubble({
   // so it can differ by case, spacing or a trailing marker.
   const optionFor = useMemo(() => {
     const byName = new Map<string, OptionItem>();
+    const fullNames = new Map<string, OptionItem>();
     for (const group of m.options ?? []) {
       for (const item of group.items ?? []) {
         // Each kind names itself differently: tours `name`, hotels
@@ -77,11 +68,26 @@ const Bubble = memo(function Bubble({
         const name = [item.name, item.hotel_name, item.airline].find(
           (v): v is string => typeof v === "string" && v.trim() !== "",
         );
-        if (name) byName.set(normaliseName(name), item);
+        if (name) {
+          byName.set(normaliseName(name), item);
+          fullNames.set(name, item);
+        }
       }
     }
     if (!byName.size) return undefined;
-    return (name: string) => byName.get(normaliseName(name)) ?? null;
+    return (name: string) => {
+      const key = normaliseName(name);
+      const exact = byName.get(key);
+      if (exact) return exact;
+      // The agent shortens long supplier names ("Khandani Rajdhani" for
+      // "Khandani Rajdhani - Indian Restaurant in Karama"). Accept a prefix
+      // match only when it is unambiguous, so two similar names never swap.
+      const hits = [...byName.entries()].filter(([k]) => sameName(k, key));
+      if (hits.length === 1) return hits[0][1];
+      if (hits.length > 1) return null;
+      const short = [...fullNames.entries()].filter(([full]) => shortenedFrom(name, full));
+      return short.length === 1 ? short[0][1] : null;
+    };
   }, [m.options]);
 
   // When the reply already contains a RESULT comparison, those rows ARE the
@@ -94,6 +100,20 @@ const Bubble = memo(function Bubble({
   // glossary, which stays a plain table and leaves the cards to the group.
   const hasResultTable =
     SEPARATOR_ROW.test(m.content ?? "") && PRICE_HEADER.test(m.content ?? "");
+
+  // Only the cards the table actually shows are suppressed. A restaurant's
+  // menu is a priced table of DISHES: suppressing every card on "has a
+  // result table" hid the restaurant card, and with it every food photo.
+  const tableNames = useMemo(() => (hasResultTable ? tableRowNames(m.content ?? "") : []), [
+    hasResultTable,
+    m.content,
+  ]);
+  const notInTable = (item: OptionItem): boolean => {
+    const name = [item.name, item.hotel_name, item.airline].find(
+      (v): v is string => typeof v === "string" && v.trim() !== "",
+    );
+    return !name || !tableNames.some((row) => refersTo(row, name));
+  };
 
   const live = Boolean(segments) && m.pending;
   const shown: Segment[] =
@@ -122,10 +142,11 @@ const Bubble = memo(function Bubble({
           .slice(0, 1)
           .map((item, i) => <ItineraryPdf key={i} item={item} />)}
 
-        {!hasResultTable &&
-          m.options
-            ?.filter((g) => g.kind !== "itinerary_pdf")
-            .map((g, i) => <OptionCards key={i} group={g} />)}
+        {m.options
+          ?.filter((g) => g.kind !== "itinerary_pdf")
+          .map((g) => (hasResultTable ? { ...g, items: (g.items ?? []).filter(notInTable) } : g))
+          .filter((g) => g.items?.length)
+          .map((g, i) => <OptionCards key={i} group={g} />)}
 
         {m.error && (
           <p role="alert" className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-500">

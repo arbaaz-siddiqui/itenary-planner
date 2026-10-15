@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +33,16 @@ from core import (
 )
 
 FIXTURES_DIR = ROOT / "tests" / "fixtures"
+
+
+def future_date(days: int = 14) -> str:
+    """An ISO date `days` from today, for tests that call the live supplier.
+
+    The supplier rejects any date before today, so a literal date in a live
+    test goes stale and then fails as if the code were broken -- ten tests did
+    exactly that once their dates passed.
+    """
+    return (date.today() + timedelta(days=days)).isoformat()
 
 
 def load_fixture(relative_path: str) -> Any:

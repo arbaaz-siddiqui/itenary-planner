@@ -62,7 +62,7 @@ _TOOL_TTL = {
 
 # BUMP whenever a tool's output shape/semantics change — otherwise a fixed tool
 # keeps serving the pre-fix cached result for up to a full TTL.
-CACHE_EPOCH = 3  # bumped 2026-08-21: result shape + pricing changed
+CACHE_EPOCH = 4  # bumped 2026-10-14: restaurant results carry tags, menu, photos, distance
 
 _LOCK = threading.Lock()
 _CACHE: dict[str, tuple[Any, float]] = {}  # key -> (result, stored_at)

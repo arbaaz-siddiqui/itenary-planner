@@ -32,6 +32,7 @@ from core import (
     HotelStaticNormalizationError,
     InvalidSettingError,
     PenaltyInfo,
+    RestaurantDish,
     RestaurantNormalizationError,
     RestaurantOption,
     TourNormalizationError,
@@ -43,6 +44,7 @@ from core import (
     VisaNormalizationError,
     VisaOption,
     to_inr,
+    weekday_order,
 )
 from fx import convert_supplier_price, live_rate_map
 
@@ -663,7 +665,11 @@ def _cdn_url(path: str) -> str | None:
     """CDN URL for a media path, or None when it is not CDN-served."""
     if path.startswith(_CDN_PREFIXES):
         return MEDIA_CDN_BASE + path
-    if any(m in path for m in _CDN_UPLOADS_MARKERS):
+    # Case-insensitive: restaurant media arrives as ".../restaurantmedia/...",
+    # and a case-sensitive test left every restaurant and dish image pointing
+    # at the API host, which answers 404.
+    lowered = path.lower()
+    if any(m.lower() in lowered for m in _CDN_UPLOADS_MARKERS):
         return MEDIA_CDN_BASE + "/uploads" + path
     return None
 
@@ -829,28 +835,7 @@ def _parse_restaurant(
     # `review.reviewCount` is not a count — it is an HTML verdict, e.g.
     # "<p>Very Good</p>". Strip the markup and show it beside the number.
     review_label = _strip_html(review.get("reviewCount"))
-    # Per-meal windows from `restaurantMealTiming`. Each mealType carries one
-    # openingTiming row per weekday; identical hours across days collapse to a
-    # single range, and closed days are dropped.
-    meal_timings: list[dict[str, Any]] = []
-    for meal in r.get("restaurantMealTiming") or []:
-        if not isinstance(meal, dict):
-            continue
-        open_days = [
-            d for d in (meal.get("openingTiming") or [])
-            if isinstance(d, dict) and not d.get("isClosed")
-        ]
-        if not open_days:
-            continue
-        ranges = {
-            f"{str(d.get('openingTime') or '').strip()}-{str(d.get('closingTime') or '').strip()}"
-            for d in open_days
-        }
-        meal_timings.append({
-            "meal_type": str(meal.get("mealType") or "").strip(),
-            "hours": " / ".join(sorted(r for r in ranges if r != "-")),
-            "days": [str(d.get("weekDayName") or "").strip() for d in open_days],
-        })
+    meal_timings = _restaurant_meal_timings(r.get("restaurantMealTiming"))
     # Images: imageInfoList has full list; restaurantImagePath is primary thumbnail
     primary_img = _resolve_image_url(r.get("restaurantImagePath"), image_base_url)
     image_urls: list[str] = []
@@ -863,18 +848,23 @@ def _parse_restaurant(
             image_urls.append(url)
     if primary_img and primary_img not in image_urls:
         image_urls.insert(0, primary_img)
+    primary_cuisine = str(food_type.get("foodTypeName") or "").strip()
     return RestaurantOption(
         restaurant_id=restaurant_id,
         name=str(r.get("restaurantName") or "").strip(),
         price_per_adult_inr=price_inr,
         price_original=float(price or 0),
         currency_original=str(currency),
-        cuisine=str(food_type.get("foodTypeName") or ""),
+        cuisine=primary_cuisine,
+        cuisines=_restaurant_cuisines(primary_cuisine, r.get("restaurantFoodType")),
         veg_type=str(restaurant_type.get("restaurantTypeName") or ""),
+        tags=_split_labels(r.get("componentName")),
         full_address=_strip_html(address.get("fullAddress")),
+        area=_restaurant_area(address),
         city=str(address.get("city") or ""),
         opening_time=str(hours.get("openingTime") or ""),
         closing_time=str(hours.get("closingTime") or ""),
+        opening_hours=_restaurant_opening_hours(r.get("restaurantTiming")),
         seating_capacity=int(r.get("seatingCapacity") or 0),
         rating=rating,
         review_label=review_label,
@@ -884,7 +874,162 @@ def _parse_restaurant(
         image_urls=image_urls,
         latitude=latitude,
         longitude=longitude,
+        dishes=_restaurant_dishes(r.get("dishAndBuffetRates"), rates, image_base_url),
     )
+
+
+def _split_labels(value: Any) -> list[str]:
+    """"Pure Veg, Jain Friendly" -> ["Pure Veg", "Jain Friendly"], de-duplicated."""
+    out: list[str] = []
+    for part in str(value or "").split(","):
+        label = _strip_html(part)
+        if label and label.lower() not in {o.lower() for o in out}:
+            out.append(label)
+    return out
+
+
+def _restaurant_cuisines(primary: str, food_types: Any) -> list[str]:
+    """Every cuisine the restaurant serves, its primary one first.
+
+    The list endpoint carries only the primary `foodType`; the details call
+    adds `restaurantFoodType` with all of them. Reporting the primary alone is
+    how Atithi Veg -- pav bhaji, biryani, chaat, Chinese and pasta -- was
+    described to a customer as an Italian restaurant.
+    """
+    out: list[str] = [primary] if primary else []
+    for ft in food_types or []:
+        name = str((ft or {}).get("foodTypeName") or "").strip() if isinstance(ft, dict) else ""
+        if name and name.lower() not in {o.lower() for o in out}:
+            out.append(name)
+    return out
+
+
+#: An Open Location Code ("772R+QGR"): a map grid reference, not a place name.
+_PLUS_CODE_RE = re.compile(r"^[23456789CFGHJMPQRVWX]{2,8}\+[23456789CFGHJMPQRVWX]{0,3}$", re.I)
+
+
+def _restaurant_area(address: dict[str, Any]) -> str:
+    """The neighbourhood named in a supplier address.
+
+    Addresses arrive in Google's " - " form, most specific first:
+    "10 4A St - Al Karama - Dubai - United Arab Emirates". The area is the
+    last part before the city and country. Returns "" when nothing names one
+    ("772R+QGR - Dubai - ..." is a grid code, not an area).
+    """
+    full = _strip_html(address.get("fullAddress"))
+    if not full:
+        return ""
+    # City and country as the supplier spells them, so they can be dropped.
+    known = {
+        part.strip().lower()
+        for key in ("city", "cityNameDefault", "country", "countryNameDefault")
+        for part in str(address.get(key) or "").split(",")
+        if part.strip()
+    }
+    parts = [
+        p.strip() for p in full.split(" - ")
+        if p.strip() and p.strip().lower() not in known and not _PLUS_CODE_RE.match(p.strip())
+    ]
+    return parts[-1] if parts else ""
+
+
+def _restaurant_opening_hours(timings: Any) -> list[dict[str, Any]]:
+    """`restaurantTiming` as one row per weekday, in calendar order."""
+    rows: list[dict[str, Any]] = []
+    for t in timings or []:
+        if not isinstance(t, dict):
+            continue
+        day = str(t.get("weekDayName") or "").strip().title()
+        if not day:
+            continue
+        opens = str(t.get("openingTime") or "").strip()
+        closes = str(t.get("closingTime") or "").strip()
+        rows.append({
+            "day": day,
+            "hours": f"{opens}-{closes}" if opens and closes else "",
+            "closed": bool(t.get("isClosed")),
+        })
+    return sorted(rows, key=lambda row: weekday_order(row["day"]))
+
+
+def _restaurant_meal_timings(meals: Any) -> list[dict[str, Any]]:
+    """Per-meal windows from `restaurantMealTiming`.
+
+    Each mealType carries one openingTiming row per weekday. Days sharing the
+    same hours collapse into one entry; a meal served at different hours on
+    different days yields one entry per distinct window, each naming its days
+    -- merging them into one string lost which hours belonged to which day.
+    Closed days are dropped.
+    """
+    out: list[dict[str, Any]] = []
+    for meal in meals or []:
+        if not isinstance(meal, dict):
+            continue
+        meal_type = str(meal.get("mealType") or "").strip()
+        windows: dict[str, list[str]] = {}
+        for d in meal.get("openingTiming") or []:
+            if not isinstance(d, dict) or d.get("isClosed"):
+                continue
+            opens = str(d.get("openingTime") or "").strip()
+            closes = str(d.get("closingTime") or "").strip()
+            if not (opens and closes):
+                continue
+            windows.setdefault(f"{opens}-{closes}", []).append(
+                str(d.get("weekDayName") or "").strip()
+            )
+        for hours, days in windows.items():
+            out.append({
+                "meal_type": meal_type,
+                "hours": hours,
+                "days": sorted(days, key=weekday_order),
+            })
+    return out
+
+
+def _restaurant_dishes(
+    rates_raw: Any, rates: dict[str, float], image_base_url: str
+) -> list[RestaurantDish]:
+    """The priced menu (`dishAndBuffetRates`), adult and child price per item."""
+    dishes: list[RestaurantDish] = []
+    for dish in rates_raw or []:
+        if not isinstance(dish, dict) or not dish.get("dishName"):
+            continue
+        prices: dict[str, tuple[float | None, float, str, str]] = {}
+        for fi in dish.get("fareInfo") or []:
+            if not isinstance(fi, dict):
+                continue
+            pax = str(fi.get("paxType") or "").strip().lower()
+            currency = str(fi.get("currency") or "AED").strip()
+            amount = fi.get("price")
+            if pax and pax not in prices:
+                prices[pax] = (
+                    _safe_to_inr(amount, currency, rates),
+                    float(amount or 0),
+                    currency,
+                    str(fi.get("paxRateKey") or ""),
+                )
+        adult = prices.get("adult")
+        child = prices.get("child")
+        images = [
+            url for url in (
+                _resolve_image_url(img.get("imagePath"), image_base_url)
+                for img in dish.get("dishImages") or [] if isinstance(img, dict)
+            ) if url
+        ]
+        dishes.append(RestaurantDish(
+            dish_id=_safe_int(dish.get("dishId")),
+            name=str(dish.get("dishName")).strip(),
+            cuisine=str(dish.get("cuisineName") or "").strip(),
+            description=_strip_html(dish.get("description")),
+            adult_price_inr=adult[0] if adult else None,
+            child_price_inr=child[0] if child else None,
+            price_original=adult[1] if adult else 0.0,
+            currency_original=adult[2] if adult else "",
+            rate_key=str(dish.get("rateKey") or ""),
+            pax_rate_key=adult[3] if adult else "",
+            image_urls=images,
+        ))
+    return dishes
 
 
 # =============================================================================
