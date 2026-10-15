@@ -116,12 +116,18 @@ def call_flight_search(
     cabin: str = "Y",
     max_stops: int = 1,
     airline_code: str = "",
+    infants: int = 0,
+    infant_ages: list[int] | None = None,
 ) -> dict[str, Any]:
     """Search flights. Payload mirrors client's FlightSearch sample exactly.
 
     Args:
         airline_code: IATA code to filter by a single airline provider (e.g. "EK").
                       Empty string = all providers (default).
+        infants: Lap infants (under 2). Sent as INF, which the supplier prices
+                 at roughly Rs 800-3,200; sending a baby as CHD charged a full
+                 child fare (~Rs 30,000) and would book the wrong passenger type.
+        infant_ages: Age of each infant (0 or 1). Defaults to 1 per infant.
     """
     od_infos: list[dict[str, Any]] = [
         {
@@ -144,6 +150,10 @@ def call_flight_search(
     pax_quantities: list[dict[str, Any]] = [{"Code": "ADT", "Quantity": adults}]
     if children > 0:
         pax_quantities.append({"Code": "CHD", "Quantity": children})
+    if infants > 0:
+        pax_quantities.append({"Code": "INF", "Quantity": infants})
+    ages_of_infants = list(infant_ages or [])[:infants]
+    ages_of_infants += [1] * (infants - len(ages_of_infants))
 
     from settings import get_booking_api_settings
 
@@ -157,7 +167,7 @@ def call_flight_search(
         "PricingSourceType": "all",
         "PassengerTypeQuantities": pax_quantities,
         "childAge": ",".join(str(a) for a in (child_ages or [])),
-        "infantAge": "",
+        "infantAge": ",".join(str(a) for a in ages_of_infants),
         "Target": get_booking_api_settings().flight_target,
         "agentID": 0,
         "rateCategoryId": 0,

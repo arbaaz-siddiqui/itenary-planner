@@ -488,7 +488,10 @@ async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
     for group in option_groups:
         yield _sse("options", group)
 
-    yield _sse("done", {"message_id": str(saved["id"])})
+    # `content` is the reply as stored. It differs from what streamed when a
+    # guard corrected it (invented fares, a dead PDF link), and the browser
+    # adopts it so the live bubble matches what a reload would show.
+    yield _sse("done", {"message_id": str(saved["id"]), "content": reply})
 
 
 _ORIGIN_CITIES = (

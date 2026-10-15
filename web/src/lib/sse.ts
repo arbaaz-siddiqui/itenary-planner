@@ -116,7 +116,11 @@ export function parseFrame(raw: string): StreamEvent | null {
     case "error":
       return { type: "error", message: String(payload.message ?? "Unknown error") };
     case "done":
-      return { type: "done", message_id: String(payload.message_id ?? "") };
+      return {
+        type: "done",
+        message_id: String(payload.message_id ?? ""),
+        ...(typeof payload.content === "string" ? { content: payload.content } : {}),
+      };
     default:
       return null;
   }

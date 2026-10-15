@@ -437,12 +437,19 @@ class FlightOption(BaseModel):
     currency_original: str = "INR"
     base_fare_inr: float | None = None
     total_tax_inr: float | None = None
-    airline: str
+    airline: str  # every marketing carrier on the trip, e.g. "Air India + Flydubai"
     airline_code: str = ""
-    stops: int = 0
+    stops: int = 0  # outbound
+    stops_return: int = 0
     route_outbound: str = ""
     route_return: str = ""
-    duration_min: int = 0
+    duration_min: int = 0  # outbound door-to-door, layovers included
+    duration_return_min: int = 0
+    # Lowest cabin flown on any segment: Y economy, S premium, C business, F first.
+    cabin: str = ""
+    # The search's conversationId. Fare rules (flightdetails) return an empty
+    # body without it.
+    conversation_id: str = ""
     segments_outbound: list[FlightSegment] = Field(default_factory=list)
     segments_return: list[FlightSegment] = Field(default_factory=list)
     refundable: bool = False

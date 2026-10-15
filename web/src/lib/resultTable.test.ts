@@ -170,3 +170,21 @@ describe("looksNumeric", () => {
     expect(looksNumeric("Shared")).toBe(false);
   });
 });
+
+describe("in-cell line breaks", () => {
+  it("turns a literal <br> into separate parts, not text on the card", () => {
+    const parsed = parseResultTable(
+      table(
+        ["Airline", "Outbound", "Total Price (2 Adults)"],
+        [["Kuwait Airways", "03:50 → 12:35 (10h 15m) <br> 1 stop (KWI 3h 30m)<br/>Nos: 346, 671", "₹64,891.76"]],
+      ),
+    );
+    const outbound = parsed?.rows[0]?.rest[0]?.text ?? "";
+    expect(outbound).not.toMatch(/<br/i);
+    expect(splitParts(outbound)).toEqual([
+      "03:50 → 12:35 (10h 15m)",
+      "1 stop (KWI 3h 30m)",
+      "Nos: 346, 671",
+    ]);
+  });
+});

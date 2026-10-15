@@ -75,9 +75,20 @@ function childElements(node: Parents | undefined, ...tags: string[]): Element[] 
   return out;
 }
 
-/** Cell text, normalised: collapsed whitespace, star marker removed. */
+// The model breaks lines inside a table cell with "<br>" ("7h 05m <br> 1 stop").
+// Markdown renders no raw HTML, so it arrived as literal text on the card.
+const LINE_BREAK_RE = /<br\s*\/?>/gi;
+
+/**
+ * Cell text, normalised: collapsed whitespace, star marker removed, and an
+ * in-cell "<br>" turned into the part separator so it renders as a new line.
+ */
 function cellText(cell: Element): string {
-  return textOf(cell).replace(STAR_RE, "").replace(/\s+/g, " ").trim();
+  return textOf(cell)
+    .replace(STAR_RE, "")
+    .replace(LINE_BREAK_RE, " · ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**

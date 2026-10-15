@@ -201,6 +201,50 @@ function TourCard({ o }: { o: OptionItem }) {
   );
 }
 
+const CABINS: Record<string, string> = {
+  Y: "Economy",
+  S: "Premium economy",
+  C: "Business",
+  F: "First",
+};
+
+const stopsText = (n: number | null): string | null =>
+  n == null ? null : n === 0 ? "Non-stop" : `${n} stop${n > 1 ? "s" : ""}`;
+
+/**
+ * One leg: "08:25 → 14:00 · 7h 05m · 1 stop (DEL 1h 30m)".
+ *
+ * Durations come from the server, which adds the supplier's flying time to the
+ * layovers. Never derive one from the two clock times here: they are local
+ * times in different zones (AMD 04:25 → DXB 06:20 is 3h 25m, not 1h 55m).
+ */
+function Leg({ label, leg, route }: { label: string; leg: OptionItem; route: string | null }) {
+  const layovers = Array.isArray(leg.layovers)
+    ? (leg.layovers as unknown[]).filter((x): x is string => typeof x === "string")
+    : [];
+  const dep = str(leg, "departure_time");
+  const arr = str(leg, "arrival_time");
+  const flights = Array.isArray(leg.flight_numbers) ? (leg.flight_numbers as unknown[]).join(" + ") : null;
+  const stops = stopsText(num(leg, "stops"));
+  return (
+    <div className="mt-1.5 text-xs leading-relaxed">
+      <span className="font-medium text-fg">{label}</span>
+      <span className="text-fg-muted">
+        {" "}
+        {[
+          route,
+          flights,
+          dep && arr ? `${dep} → ${arr}` : null,
+          str(leg, "duration_display"),
+          stops && layovers.length ? `${stops} (${layovers.join(", ")})` : stops,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </span>
+    </div>
+  );
+}
+
 /** A dish the card can show: name, price and the supplier's own photo. */
 interface DishPhoto {
   name: string;
@@ -284,25 +328,54 @@ export function RestaurantCard({ o }: { o: OptionItem }) {
 }
 
 function FlightCard({ o }: { o: OptionItem }) {
-  const stops = num(o, "stops");
-  const mins = num(o, "duration_min");
-  const dur = mins ? `${Math.floor(mins / 60)}h ${mins % 60}m` : null;
+  const outbound = (o.outbound ?? null) as OptionItem | null;
+  const inbound = (o.inbound ?? null) as OptionItem | null;
+  const cabin = str(o, "cabin");
+  const refundable = o.refundable === true ? "✓ Refundable" : o.refundable === false ? "Non-refundable" : null;
+
+  // Results stored before per-leg summaries existed carry only the trip-level
+  // fields; keep rendering them the way they always rendered.
+  if (!outbound || !Object.keys(outbound).length) {
+    const mins = num(o, "duration_min");
+    return (
+      <article className="flex gap-3 rounded-xl border border-border bg-bg p-3">
+        <div className="min-w-0 flex-1">
+          <h4 className="truncate text-sm font-medium">{str(o, "airline") ?? "Flight"}</h4>
+          <Meta
+            items={[
+              str(o, "route_outbound"),
+              str(o, "route_return"),
+              stopsText(num(o, "stops")),
+              mins ? `${Math.floor(mins / 60)}h ${mins % 60}m` : null,
+              o.refundable === true ? "✓ Refundable" : null,
+            ]}
+          />
+        </div>
+        <Price value={inr(num(o, "price_inr"))} note="all pax" />
+      </article>
+    );
+  }
 
   return (
     <article className="flex gap-3 rounded-xl border border-border bg-bg p-3">
       <div className="min-w-0 flex-1">
-        <h4 className="truncate text-sm font-medium">{str(o, "airline") ?? "Flight"}</h4>
+        <h4 className="text-sm font-medium break-words">{str(o, "airline") ?? "Flight"}</h4>
+        <Leg label="Out" leg={outbound} route={str(o, "route_outbound")} />
+        {inbound && Object.keys(inbound).length > 0 && (
+          <Leg label="Back" leg={inbound} route={str(o, "route_return")} />
+        )}
         <Meta
           items={[
-            str(o, "route_outbound"),
-            str(o, "route_return"),
-            stops != null ? (stops === 0 ? "Non-stop" : `${stops} stop${stops > 1 ? "s" : ""}`) : null,
-            dur,
-            o.refundable === true ? "✓ Refundable" : null,
+            cabin ? (CABINS[cabin] ?? cabin) : null,
+            str(o, "baggage_display") ? `🧳 ${str(o, "baggage_display")}` : null,
+            refundable,
           ]}
         />
       </div>
-      <Price value={inr(num(o, "price_inr"))} note="all pax" />
+      <Price
+        value={inr(num(o, "price_inr"))}
+        note={num(o, "pax_count") ? `total, ${num(o, "pax_count")} pax` : "all pax"}
+      />
     </article>
   );
 }

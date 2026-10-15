@@ -561,6 +561,7 @@ def _replace_invented_results(response: dict[str, Any]) -> None:
         "check_out": "your check-out date",
         "travel_date": "your travel date",
         "adults": "how many adults are travelling",
+        "child_ages": "the age of each child",
     }
 
     fields: list[str] = []
@@ -1046,6 +1047,30 @@ def _repair_thread(agent: Any, config: dict[str, Any]) -> None:
         logger.warning("thread repair failed: %s", e)
 
 
+def _customer_words(agent: Any, config: dict[str, Any], user_message: str) -> str:
+    """Everything the customer has said in this thread, this message last.
+
+    The search tools refuse a departure city the customer never said. Checking
+    only the latest message refused the city they gave one message earlier:
+    "now show me business class for the same trip" was answered with a
+    NeedsCustomerInput for origin_city, and the model, holding a city it knew
+    was right and a refusal it could not explain, told the customer it had
+    "lost track of our previous conversation".
+    """
+    said: list[str] = []
+    try:
+        state = agent.get_state(config)
+        for m in (state.values or {}).get("messages") or []:
+            text = _message_content(m)
+            if (_message_role(m) in {"human", "user"} and isinstance(text, str)
+                    and not is_internal_marker(text)):
+                said.append(text)
+    except Exception:  # noqa: BLE001 -- no history is a fresh conversation
+        pass
+    said.append(user_message)
+    return "\n".join(said)
+
+
 def invoke_and_log(
     agent: Any,
     *,
@@ -1059,8 +1084,9 @@ def invoke_and_log(
     from rules import detect_prompt_injection, injection_reply, set_conversation_text
 
     # Tools need the customer's own words to tell an invented departure
-    # city from a real one.
-    set_conversation_text(user_message)
+    # city from a real one -- all of them, not just this message.
+    set_conversation_text(
+        _customer_words(agent, {"configurable": {"thread_id": thread_id}}, user_message))
 
     category = detect_prompt_injection(user_message)
     if category:
@@ -1095,9 +1121,10 @@ def invoke_and_log(
             {"messages": [{"role": "user", "content": user_message}]}, config
         )
     latency = time.perf_counter() - start
-    _replace_invented_results(response)
-    _strip_pdf_links(response)
-    _correct_unbuilt_pdf_claim(response)
+    model_reply = _final_reply(response)
+    _apply_reply_guards(response)
+    if _final_reply(response) != model_reply:
+        _save_final_reply(agent, config, response)
     # Colored per-turn timeline to the console: serving model, tools, [CACHED] tags.
     print_turn_timeline(
         surface=surface, user_message=user_message,
@@ -1116,6 +1143,128 @@ def invoke_and_log(
                                    surface=surface, thread_id=thread_id)
     _guard_empty_turn(response, surface=surface, thread_id=thread_id)
     return response
+
+
+def _apply_reply_guards(response: dict[str, Any]) -> None:
+    """Every correction a finished reply gets, in one place for both paths.
+
+    These only ran in invoke_and_log, so the streaming path -- the Next.js chat
+    the client tested -- showed invented fares and dead PDF links that the
+    Streamlit path would have caught.
+    """
+    _replace_invented_results(response)
+    _strip_pdf_links(response)
+    _correct_unbuilt_pdf_claim(response)
+
+
+def _final_reply(response: dict[str, Any]) -> str:
+    """The customer-facing text of the turn's last assistant message."""
+    for m in reversed((response or {}).get("messages") or []):
+        c = getattr(m, "content", None)
+        if (isinstance(c, str) and c.strip() and m.__class__.__name__ == "AIMessage"
+                and not getattr(m, "tool_calls", None) and not is_internal_marker(c)):
+            return c
+    return ""
+
+
+def _this_turn(messages: list[Any]) -> list[Any]:
+    """Messages produced after the latest human message.
+
+    invoke() returns the whole thread, so "did this turn call a tool" has to be
+    asked of this slice, not of the full history.
+    """
+    for i in range(len(messages) - 1, -1, -1):
+        if _message_role(messages[i]) in {"human", "user"}:
+            return list(messages[i + 1:])
+    return list(messages)
+
+
+# A reply announcing a lookup it never made. Asked for business-class options,
+# the model answered "One moment while I pull those premium options for you"
+# with no tool call and ended the turn; the customer waited for nothing and had
+# to ask again.
+_PROMISE = re.compile(
+    r"\b(one moment|just a moment|give me a (moment|second|minute)|hold on|"
+    r"let me (now |quickly )?(check|pull|search|find|look|get|fetch)|"
+    r"i(?:'ll| will) (now |quickly )?(check|pull|search|find|look|get|fetch)|"
+    r"(pulling|fetching|checking|searching) (up |for |those |the )?)",
+    re.IGNORECASE,
+)
+
+_ACT_NOW_MARKER = (
+    "[system] Your last reply said you would look something up, but no search "
+    "ran. If you have what you need, call the tools now and answer from their "
+    "results in this reply. If you need something from the customer first, ask "
+    "for it in one question. Do not announce the search again."
+)
+
+
+def _is_unfulfilled_promise(response: dict[str, Any]) -> bool:
+    """True when the reply ENDS on a promised lookup and shows no results.
+
+    Ending on the promise is what makes it unfulfilled: "here are your flights
+    — let me know if you want hotels" is a finished answer. Tool calls alone do
+    not settle it: told a 10-person search was over the 9-passenger limit (and
+    with the party tool having run fine), the model replied "I'll search for a
+    group of 9 first ... One moment while I pull those options." and ended.
+    """
+    turn = _this_turn((response or {}).get("messages") or [])
+    for call in extract_tool_calls({"messages": turn}):
+        out = _coerce_to_dict(call.get("output"))
+        if isinstance(out, dict) and not out.get("error") and out.get("options"):
+            return False
+    text = _final_reply({"messages": turn}).strip()
+    if not text:
+        return False
+    last = re.split(r"(?<=[.!?])\s+", text)[-1]
+    return bool(_PROMISE.search(last))
+
+
+# What the customer sees when a nudged retry still produced nothing to stand on.
+_COULD_NOT_FINISH = (
+    "I couldn't complete that search just now. Please ask me again and I'll run "
+    "it straight away."
+)
+
+
+def _retry_is_grounded(response: dict[str, Any]) -> bool:
+    """A nudged retry may be shown only if it looked something up or asked.
+
+    Nudged to finish a promised 10-passenger search, the model wrote a table of
+    flights that do not exist -- with no tool call behind it. A reply with no
+    lookup is acceptable only as a question back to the customer.
+    """
+    turn = _this_turn((response or {}).get("messages") or [])
+    if extract_tool_calls({"messages": turn}):
+        return True
+    return _final_reply({"messages": turn}).rstrip().endswith("?")
+
+
+def _save_final_reply(agent: Any, config: dict[str, Any], response: dict[str, Any]) -> None:
+    """Write the (possibly corrected) last reply back into the checkpoint.
+
+    The guards rewrite the reply the customer sees; without this the thread kept
+    the original, and the next turn read its own invented flights as history.
+    A message with the same id replaces the stored one.
+    """
+    for m in reversed((response or {}).get("messages") or []):
+        if m.__class__.__name__ == "AIMessage" and not getattr(m, "tool_calls", None):
+            if getattr(m, "id", None):
+                try:
+                    agent.update_state(config, {"messages": [m]})
+                except Exception as e:  # noqa: BLE001 — the reply shown is already right
+                    logging.getLogger("agent.turn").warning("could not save corrected reply: %s", e)
+            return
+
+
+def _set_final_reply(response: dict[str, Any], text: str) -> None:
+    """Replace the last assistant message's text in place."""
+    for m in reversed((response or {}).get("messages") or []):
+        c = getattr(m, "content", None)
+        if (isinstance(c, str) and m.__class__.__name__ == "AIMessage"
+                and not getattr(m, "tool_calls", None) and not is_internal_marker(c)):
+            m.content = text
+            return
 
 
 def _turn_is_dead(response: dict[str, Any]) -> bool:
@@ -1150,18 +1299,28 @@ def _recover_empty_turn(agent: Any, response: dict[str, Any], config: dict[str, 
 
     Certain phrasings ("2 adults 2 kids ages 6 and 9...") reproducibly make the
     model return an empty completion; a nudge recovers it. Stage 1 nudges it to
-    search, stage 2 to write up results it already has.
+    search, stage 2 to write up results it already has. A reply that only
+    promises a lookup it never made is not a usable reply either.
     """
     log = logging.getLogger("agent.turn")
     for _ in range(2):
-        if _has_prose(response):
+        promised = _is_unfulfilled_promise(response)
+        if _has_prose(response) and not promised:
             return response
-        nudge = _NO_DATA_MARKER if _turn_is_dead(response) else _WRITE_UP_MARKER
+        if promised:
+            nudge = _ACT_NOW_MARKER
+        else:
+            nudge = _NO_DATA_MARKER if _turn_is_dead(response) else _WRITE_UP_MARKER
         log.warning("empty turn — nudge retry surface=%s thread=%s", surface, thread_id)
         try:
             retry = agent.invoke({"messages": [{"role": "user", "content": nudge}]}, config)
         except Exception:  # noqa: BLE001 — keep what we have on retry failure
             return response
+        if promised and not _retry_is_grounded(retry):
+            log.warning("nudged retry made no lookup — not shown thread=%s", thread_id)
+            _set_final_reply(retry, _COULD_NOT_FINISH)
+            _save_final_reply(agent, config, retry)
+            return retry
         response = retry
     return response
 
@@ -1292,7 +1451,8 @@ def stream_and_log(
     # without this the model would already be leaking before any post-check.
     from rules import detect_prompt_injection, injection_reply, set_conversation_text
 
-    set_conversation_text(user_message)
+    set_conversation_text(
+        _customer_words(agent, {"configurable": {"thread_id": thread_id}}, user_message))
 
     if detect_prompt_injection(user_message):
         from langchain_core.messages import AIMessage, HumanMessage
@@ -1377,29 +1537,45 @@ def stream_and_log(
         ):
             yield from _process_chunk(mode, chunk)
 
-    # Same empty-turn recovery as invoke_and_log — some phrasings make the
-    # model emit nothing; retry once with a nudge instead of an empty bubble.
-    if _turn_is_dead(holder.response):
+    # Same recovery as invoke_and_log: a turn that emitted nothing, or only
+    # promised a lookup it never made, is retried once with a nudge. The
+    # promise has already streamed, so the real answer is appended to it.
+    dead = _turn_is_dead(holder.response)
+    if dead or _is_unfulfilled_promise(holder.response):
         logging.getLogger("agent.turn").warning(
-            "empty turn (stream) — retrying once thread=%s", thread_id
+            "%s (stream) — retrying once thread=%s",
+            "empty turn" if dead else "unfulfilled promise", thread_id,
         )
         try:
             retry = agent.invoke(
-                {"messages": [{"role": "user", "content": _NO_DATA_MARKER}]}, config
+                {"messages": [{"role": "user",
+                               "content": _NO_DATA_MARKER if dead else _ACT_NOW_MARKER}]},
+                config,
             )
-            if not _turn_is_dead(retry):
-                holder.messages = list(retry.get("messages") or [])
-                for m in reversed(holder.messages):
-                    c = getattr(m, "content", None)
-                    if (isinstance(c, str) and c.strip()
-                            and m.__class__.__name__ == "AIMessage"
-                            and not getattr(m, "tool_calls", None)
-                            and not is_internal_marker(c)):
-                        holder.text = c
-                        yield c
-                        break
+            if not dead and not _retry_is_grounded(retry):
+                logging.getLogger("agent.turn").warning(
+                    "nudged retry made no lookup — not shown thread=%s", thread_id)
+                _set_final_reply(retry, _COULD_NOT_FINISH)
+                _save_final_reply(agent, config, retry)
+            reply = _final_reply({"messages": _this_turn(list(retry.get("messages") or []))})
+            if reply:
+                holder.messages = [*holder.messages,
+                                   *_this_turn(list(retry.get("messages") or []))]
+                joined = f"\n\n{reply}" if holder.text else reply
+                holder.text += joined
+                yield joined
         except Exception:  # noqa: BLE001 — the surface fallback handles it
             pass
+
+    # Corrections apply here too; the caller sends `holder.text` as the final
+    # reply so a corrected answer replaces what streamed.
+    last_before = _final_reply(holder.response)
+    _apply_reply_guards(holder.response)
+    last_after = _final_reply(holder.response)
+    if last_after != last_before:
+        _save_final_reply(agent, config, holder.response)
+        holder.text = (holder.text.replace(last_before, last_after)
+                       if last_before and last_before in holder.text else last_after)
 
     holder.latency_seconds = time.perf_counter() - start
     log_turn(

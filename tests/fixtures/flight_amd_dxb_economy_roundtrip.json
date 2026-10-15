@@ -1,0 +1,2862 @@
+{
+ "id": "6ace17fc1764bf839d1ebfac",
+ "createdAt": "2026-10-13T11:37:32.1087658Z",
+ "success": true,
+ "isCompleted": true,
+ "conversationId": "19cf02e0-3e8c-4fcb-9764-583b8c2d345c",
+ "chunkIndex": 0,
+ "totalChunks": 1,
+ "data": {
+  "seoDetails": {
+   "title": "Ahmedabad To Dubai",
+   "description": "Ahmedabad To Dubai",
+   "keywords": "Ahmedabad To Dubai",
+   "canonicalUrl": "",
+   "ogTitle": "Ahmedabad To Dubai",
+   "ogDescription": "Ahmedabad To Dubai",
+   "ogKeywords": "Ahmedabad To Dubai",
+   "ogUrl": "",
+   "ogImage": "",
+   "ogType": "",
+   "ogSiteName": "",
+   "ogLocale": "",
+   "twitterTitle": "Ahmedabad To Dubai",
+   "twitterDescription": "Ahmedabad To Dubai",
+   "twitterKeywords": "Ahmedabad To Dubai",
+   "twitterUrl": "",
+   "twitterImage": "",
+   "twitterType": "",
+   "twitterSiteName": "",
+   "twitterLocale": "",
+   "redirectType": 0,
+   "schema": {
+    "collectionPage": {
+     "@context": "https://schema.org",
+     "@type": "CollectionPage",
+     "name": "Ahmedabad To Dubai  Flights",
+     "description": "Book Ahmedabad To Dubai flight tickets with instant confirmation. Get Ahmedabad To Dubai flight deals now.",
+     "url": "",
+     "inLanguage": "",
+     "isPartOf": {
+      "@type": "WebSite",
+      "name": "",
+      "url": ""
+     },
+     "about": {
+      "@type": "FlightReservation",
+      "reservationFor": {
+       "@type": "Flight",
+       "departureAirport": {
+        "@type": "Airport",
+        "name": "Ahmedabad",
+        "iataCode": "AMD"
+       },
+       "arrivalAirport": {
+        "@type": "Airport",
+        "name": "Dubai",
+        "iataCode": "DXB"
+       }
+      }
+     },
+     "primaryImageOfPage": {
+      "@type": "ImageObject",
+      "url": "/Flightlogos/AI.svg"
+     }
+    },
+    "flightOffersItemList": {
+     "@context": "https://schema.org",
+     "@type": "ItemList",
+     "name": "Ahmedabad To Dubai Flight Offers",
+     "itemListOrder": "https://schema.org/ItemListOrderAscending",
+     "numberOfItems": 343,
+     "itemListElement": [
+      {
+       "@type": "ListItem",
+       "position": 1,
+       "item": {
+        "@type": "Flight",
+        "name": "Ahmedabad To Dubai",
+        "flightNumber": "1117",
+        "airline": {
+         "@type": "Airline",
+         "name": "Air India Limited",
+         "iataCode": "AI"
+        },
+        "departureAirport": {
+         "@type": "Airport",
+         "name": "Ahmedabad",
+         "iataCode": "AMD"
+        },
+        "arrivalAirport": {
+         "@type": "Airport",
+         "name": "Dubai",
+         "iataCode": "DXB"
+        },
+        "departureTime": "08:25:00",
+        "arrivalTime": "14:00:00",
+        "estimatedFlightDuration": "110",
+        "offers": {
+         "@type": "Offer",
+         "price": "64555.6927607566",
+         "priceCurrency": "INR",
+         "url": "",
+         "availability": "https://schema.org/InStock",
+         "validFrom": "",
+         "priceValidUntil": ""
+        }
+       }
+      }
+     ]
+    },
+    "tripSchema": {
+     "@context": "https://schema.org",
+     "@type": "Trip",
+     "name": "Ahmedabad To Dubai Flights",
+     "description": "Book Ahmedabad To Dubai flight tickets with instant confirmation. Get Ahmedabad To Dubai flight deals now.",
+     "url": "",
+     "itinerary": [
+      {
+       "@type": "Place",
+       "name": "Ahmedabad",
+       "address": {
+        "@type": "PostalAddress",
+        "addressLocality": "Ahmedabad",
+        "addressCountry": "India"
+       }
+      },
+      {
+       "@type": "Place",
+       "name": "Dubai",
+       "address": {
+        "@type": "PostalAddress",
+        "addressLocality": "Dubai",
+        "addressCountry": "United Arab Emirates"
+       }
+      }
+     ],
+     "provider": {
+      "@type": "TravelAgency",
+      "name": "",
+      "url": ""
+     },
+     "offers": {
+      "@type": "AggregateOffer",
+      "lowPrice": "64555.6927607566",
+      "highPrice": "617259.103810531",
+      "priceCurrency": "INR",
+      "offerCount": "343",
+      "url": "",
+      "availability": "https://schema.org/InStock"
+     }
+    }
+   }
+  },
+  "flightSearchRequestData": {
+   "originDestinationInformations": [
+    {
+     "departureDateTime": "20-10-2026",
+     "originLocationCode": "AMD",
+     "destinationLocationCode": "DXB"
+    },
+    {
+     "departureDateTime": "26-10-2026",
+     "originLocationCode": "DXB",
+     "destinationLocationCode": "AMD"
+    }
+   ],
+   "travelPreferences": {
+    "maxStopsQuantity": 2,
+    "cabinPreference": "Y",
+    "airTripType": "return"
+   },
+   "pricingSourceType": "all",
+   "passengerTypeQuantities": [
+    {
+     "code": "ADT",
+     "quantity": 2
+    }
+   ],
+   "childAge": "",
+   "infantAge": "",
+   "target": "test",
+   "agentID": 0,
+   "rateCategoryId": 0,
+   "supplierTime": "6",
+   "supplierId": 0,
+   "suppliers": [],
+   "isMobile": 0,
+   "airlineName": "",
+   "isStudentFare": false,
+   "isSeniorCitizenFare": false,
+   "isArmedForceFare": false,
+   "searchCurrency": "USD"
+  },
+  "pricedItineraries": [
+   {
+    "itinerarySourceCode": "MiQkNDckJFBLRmFyZSQkMTljZjAyZTAtM2U4Yy00ZmNiLTk3NjQtNTgzYjhjMmQzNDVjJCRpVFdDMi9RakthN2p0V2wyR2hPVGp2WGFCaFdZL2NFelc4cVppdG5EcjNIWWVXWEhON3RiN2NMMG8yeFNmVFc3dHFhQnJTZ0tJM1ZxaWNzcUQrdGMrQXQxZURJRWwreTZqTjdCZ2xhZmJ3ZlFQS2ZnVXpINlhjUzh0NXUxU3YvQSt3ZnlFSU1GZTRpbkhUampET2pvOENqYksyVWRPQXZRL2ZiWjV1WUVXUnpvLzhIMDJjNERuWE1CR240ZEpLWEZad3VjS1JxaWFvSW11eWRFSml5c2U0TWtlcFhUTGN5ZmQxMzZ0Y2c0VlVPTi9sRitjUU9iY2tRd25kYi9UZXcrNmJYMzg2Y0Q3dG5qNFpuMHR1SThiUkZaakVXRUdPVzYxMkZtTHVYTEZ6VHkrQnV6OHdhODVvVERCZUlUbXdVVk5PRW1RYVRzYXpxTUgvRG9ZQjlzcy84amdFQXdUTXU0a2VLSXJBL1ZHWXpCWXZIQ0orbXpHL1VJeUJvMVlMVGI=",
+    "airItineraryPricingInfo": {
+     "fareSourceCode": "MiQkNDckJFBLRmFyZSQkMTljZjAyZTAtM2U4Yy00ZmNiLTk3NjQtNTgzYjhjMmQzNDVjJCRpVFdDMi9RakthN2p0V2wyR2hPVGp2WGFCaFdZL2NFelc4cVppdG5EcjNIWWVXWEhON3RiN2NMMG8yeFNmVFc3dHFhQnJTZ0tJM1ZxaWNzcUQrdGMrQXQxZURJRWwreTZqTjdCZ2xhZmJ3ZlFQS2ZnVXpINlhjUzh0NXUxU3YvQSt3ZnlFSU1GZTRpbkhUampET2pvOENqYksyVWRPQXZRL2ZiWjV1WUVXUnpvLzhIMDJjNERuWE1CR240ZEpLWEZad3VjS1JxaWFvSW11eWRFSml5c2U0TWtlcFhUTGN5ZmQxMzZ0Y2c0VlVPTi9sRitjUU9iY2tRd25kYi9UZXcrNmJYMzg2Y0Q3dG5qNFpuMHR1SThiUkZaakVXRUdPVzYxMkZtTHVYTEZ6VHkrQnV6OHdhODVvVERCZUlUbXdVVk5PRW1RYVRzYXpxTUgvRG9ZQjlzcy84amdFQXdUTXU0a2VLSXJBL1ZHWXpCWXZIQ0orbXpHL1VJeUJvMVlMVGI=",
+     "fareType": "public",
+     "isRefundable": "refundable",
+     "corporateId": null,
+     "itinTotalFare": {
+      "baseFare": {
+       "amount": 41445.3799891395,
+       "currencyCode": "INR"
+      },
+      "totalTax": {
+       "amount": 43504.753480962674,
+       "currencyCode": "INR"
+      },
+      "totalFare": {
+       "amount": 84950.13347010218,
+       "currencyCode": "INR"
+      }
+     },
+     "ptC_FareBreakdowns": [
+      {
+       "baggageInfo": [
+        "30kg",
+        "30kg"
+       ],
+       "cabinBaggageInfo": [
+        "7kg",
+        "7kg"
+       ],
+       "fareBasisCodes": [
+        "LRLP7IN1",
+        "KRL7IN1"
+       ],
+       "fareTypeCodes": null,
+       "fareTypeCodesName": null,
+       "passengerFare": {
+        "baseFare": {
+         "amount": 20722.68999456975,
+         "currencyCode": "INR"
+        },
+        "totalTax": {
+         "amount": 21752.376740481337,
+         "currencyCode": "INR"
+        },
+        "totalFare": {
+         "amount": 42475.06673505109,
+         "currencyCode": "INR"
+        }
+       },
+       "passengerTypeQuantity": {
+        "code": "ADT",
+        "quantity": 2
+       },
+       "penaltiesInfo": []
+      }
+     ],
+     "isHold": false
+    },
+    "directionInd": "return",
+    "originDestinationOptions": [
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DXB",
+        "arrivalAirportName": "Dubai Airport",
+        "arrivalAirportCity": "Dubai",
+        "arrivalAirportCountry": "United Arab Emirates",
+        "arrivalAirportlatitude": "25.2500000000",
+        "arrivalAirportlongitude": "55.3500000000",
+        "arrivalDateTime": "2026-10-20T06:20:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "AMD",
+        "departureAirportName": "Ahmedabad Airport",
+        "departureAirportCity": "Ahmedabad",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "23.0700000000",
+        "departureAirportlongitude": "72.6200000000",
+        "departureDateTime": "2026-10-20T04:25:00",
+        "flightNumber": "438",
+        "journeyDuration": 205,
+        "marketingAirlineCode": "FZ",
+        "marketingAirlineName": "Flydubai",
+        "operatingAirline": {
+         "code": "FZ",
+         "flightNumber": "438",
+         "operatingAirlineName": "Flydubai",
+         "airlinelogoPath": "/Flightlogos/FZ.svg"
+        },
+        "stopQuantity": 1,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/FZ.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     },
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "AMD",
+        "arrivalAirportName": "Ahmedabad Airport",
+        "arrivalAirportCity": "Ahmedabad",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "23.0700000000",
+        "arrivalAirportlongitude": "72.6200000000",
+        "arrivalDateTime": "2026-10-27T02:40:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "K",
+        "departureAirportLocationCode": "DXB",
+        "departureAirportName": "Dubai Airport",
+        "departureAirportCity": "Dubai",
+        "departureAirportCountry": "United Arab Emirates",
+        "departureAirportlatitude": "25.2500000000",
+        "departureAirportlongitude": "55.3500000000",
+        "departureDateTime": "2026-10-26T22:35:00",
+        "flightNumber": "437",
+        "journeyDuration": 155,
+        "marketingAirlineCode": "FZ",
+        "marketingAirlineName": "Flydubai",
+        "operatingAirline": {
+         "code": "FZ",
+         "flightNumber": "437",
+         "operatingAirlineName": "Flydubai",
+         "airlinelogoPath": "/Flightlogos/FZ.svg"
+        },
+        "stopQuantity": 1,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/FZ.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     }
+    ],
+    "providerName": null,
+    "fareRules": [],
+    "flightGroupId": 0
+   },
+   {
+    "itinerarySourceCode": "MiQkMTA1JCRQS0ZhcmUkJDE5Y2YwMmUwLTNlOGMtNGZjYi05NzY0LTU4M2I4YzJkMzQ1YyQkQ2gzVkxjamlzWGpBK1ZFd05ZTmg4cXk5WUVTTjdKdXhjdHVlbTA3K0JWekhFUGg1N0kweE4ybXBla2h0d0sxdkU1SEtuTDlBOVVrYkJJb3lYK3RUSXA4emN0dnFTTWFkVDgya2J1UG9ucmJ1VUtBemRZRjJHU3N6dVFWMnVMYTVlSkQxamZtNy9NNFpTdXRNU1pFeWRzclF4MTFxZjQxeDN1cTNEVnZXNWlibkJoZ0d3cDA2NUVrbjdtekxWaXBpbGZmS1JIYVB2Qm1Kenl0REcwTHhGZEUxUGVJY05uSnp2VHF5NUJjVGVkWGxKejBlZGlhV3JTcHpubitxUWMxNnlzTjdJejdwazV5dHdhNnFwbzBCYitka2ozRXlKQ3hncmp6UzRtRGtiZmxWNWVuWm1PZXdVWU5Ea2JXejBhN09yZE03UmRobkNWeXdQS2V3Z0ZYVHJBUmo3S0ZoZUVBMmZmcGMxQXlvUlFRc3dmc044N3VCVzRSK1BWZXlFQVFFY1ZpYms3eU1ON3NuL0o0RFVHdmdxTWtpMW5BRWo1b2NSbjE0b3N3RG5ibUJrcjRMTm1DV1FoT20zc2tGRzIvTA==",
+    "airItineraryPricingInfo": {
+     "fareSourceCode": "MiQkMTA1JCRQS0ZhcmUkJDE5Y2YwMmUwLTNlOGMtNGZjYi05NzY0LTU4M2I4YzJkMzQ1YyQkQ2gzVkxjamlzWGpBK1ZFd05ZTmg4cXk5WUVTTjdKdXhjdHVlbTA3K0JWekhFUGg1N0kweE4ybXBla2h0d0sxdkU1SEtuTDlBOVVrYkJJb3lYK3RUSXA4emN0dnFTTWFkVDgya2J1UG9ucmJ1VUtBemRZRjJHU3N6dVFWMnVMYTVlSkQxamZtNy9NNFpTdXRNU1pFeWRzclF4MTFxZjQxeDN1cTNEVnZXNWlibkJoZ0d3cDA2NUVrbjdtekxWaXBpbGZmS1JIYVB2Qm1Kenl0REcwTHhGZEUxUGVJY05uSnp2VHF5NUJjVGVkWGxKejBlZGlhV3JTcHpubitxUWMxNnlzTjdJejdwazV5dHdhNnFwbzBCYitka2ozRXlKQ3hncmp6UzRtRGtiZmxWNWVuWm1PZXdVWU5Ea2JXejBhN09yZE03UmRobkNWeXdQS2V3Z0ZYVHJBUmo3S0ZoZUVBMmZmcGMxQXlvUlFRc3dmc044N3VCVzRSK1BWZXlFQVFFY1ZpYms3eU1ON3NuL0o0RFVHdmdxTWtpMW5BRWo1b2NSbjE0b3N3RG5ibUJrcjRMTm1DV1FoT20zc2tGRzIvTA==",
+     "fareType": "public",
+     "isRefundable": "refundable",
+     "corporateId": null,
+     "itinTotalFare": {
+      "baseFare": {
+       "amount": 73961.59787426396,
+       "currencyCode": "INR"
+      },
+      "totalTax": {
+       "amount": 45114.73807039559,
+       "currencyCode": "INR"
+      },
+      "totalFare": {
+       "amount": 119076.33594465954,
+       "currencyCode": "INR"
+      }
+     },
+     "ptC_FareBreakdowns": [
+      {
+       "baggageInfo": [
+        "30kg",
+        "30kg",
+        "30kg"
+       ],
+       "cabinBaggageInfo": [
+        "7kg",
+        "7kg",
+        "7kg"
+       ],
+       "fareBasisCodes": [
+        "QRLP7IN1",
+        "QRLP7IN1",
+        "KRL7IN1"
+       ],
+       "fareTypeCodes": null,
+       "fareTypeCodesName": null,
+       "passengerFare": {
+        "baseFare": {
+         "amount": 36980.79893713198,
+         "currencyCode": "INR"
+        },
+        "totalTax": {
+         "amount": 22557.369035197797,
+         "currencyCode": "INR"
+        },
+        "totalFare": {
+         "amount": 59538.16797232977,
+         "currencyCode": "INR"
+        }
+       },
+       "passengerTypeQuantity": {
+        "code": "ADT",
+        "quantity": 2
+       },
+       "penaltiesInfo": []
+      }
+     ],
+     "isHold": false
+    },
+    "directionInd": "return",
+    "originDestinationOptions": [
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DEL",
+        "arrivalAirportName": "Indira Gandhi International Airport",
+        "arrivalAirportCity": "Delhi",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "28.5600000000",
+        "arrivalAirportlongitude": "77.0900000000",
+        "arrivalDateTime": "2026-10-21T00:45:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "AMD",
+        "departureAirportName": "Ahmedabad Airport",
+        "departureAirportCity": "Ahmedabad",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "23.0700000000",
+        "departureAirportlongitude": "72.6200000000",
+        "departureDateTime": "2026-10-20T23:00:00",
+        "flightNumber": "2546",
+        "journeyDuration": 105,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "2546",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 205,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       },
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DXB",
+        "arrivalAirportName": "Dubai Airport",
+        "arrivalAirportCity": "Dubai",
+        "arrivalAirportCountry": "United Arab Emirates",
+        "arrivalAirportlatitude": "25.2500000000",
+        "arrivalAirportlongitude": "55.3500000000",
+        "arrivalDateTime": "2026-10-21T06:15:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "Q",
+        "departureAirportLocationCode": "DEL",
+        "departureAirportName": "Indira Gandhi International Airport",
+        "departureAirportCity": "Delhi",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "28.5600000000",
+        "departureAirportlongitude": "77.0900000000",
+        "departureDateTime": "2026-10-21T04:10:00",
+        "flightNumber": "442",
+        "journeyDuration": 215,
+        "marketingAirlineCode": "FZ",
+        "marketingAirlineName": "Flydubai",
+        "operatingAirline": {
+         "code": "FZ",
+         "flightNumber": "442",
+         "operatingAirlineName": "Flydubai",
+         "airlinelogoPath": "/Flightlogos/FZ.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "3",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/FZ.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     },
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "AMD",
+        "arrivalAirportName": "Ahmedabad Airport",
+        "arrivalAirportCity": "Ahmedabad",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "23.0700000000",
+        "arrivalAirportlongitude": "72.6200000000",
+        "arrivalDateTime": "2026-10-27T02:40:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "K",
+        "departureAirportLocationCode": "DXB",
+        "departureAirportName": "Dubai Airport",
+        "departureAirportCity": "Dubai",
+        "departureAirportCountry": "United Arab Emirates",
+        "departureAirportlatitude": "25.2500000000",
+        "departureAirportlongitude": "55.3500000000",
+        "departureDateTime": "2026-10-26T22:35:00",
+        "flightNumber": "437",
+        "journeyDuration": 155,
+        "marketingAirlineCode": "FZ",
+        "marketingAirlineName": "Flydubai",
+        "operatingAirline": {
+         "code": "FZ",
+         "flightNumber": "437",
+         "operatingAirlineName": "Flydubai",
+         "airlinelogoPath": "/Flightlogos/FZ.svg"
+        },
+        "stopQuantity": 1,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/FZ.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     }
+    ],
+    "providerName": null,
+    "fareRules": [],
+    "flightGroupId": 0
+   },
+   {
+    "itinerarySourceCode": "MSQkNDIkJEFtYWRldXMkJDE5Y2YwMmUwLTNlOGMtNGZjYi05NzY0LTU4M2I4YzJkMzQ1YyQkZXlKemRYQndTWFJwYmxSdmRHRnNSbUZ5WlNJNmV5SndZWGhEYjNWdWRDSTZNQ3dpY0dGNFZIbHdaU0k2Ym5Wc2JDd2lRbUZ6WlVaaGNtVWlPbnNpUVcxdmRXNTBJam8wTVRnNU1Dd2lRM1Z5Y21WdVkzbERiMlJsSWpvaVNVNVNJbjBzSWxSdmRHRnNWR0Y0SWpwN0lrRnRiM1Z1ZENJNk5ESTBNRFlzSWtOMWNuSmxibU41UTI5a1pTSTZJa2xPVWlKOUxDSlViM1JoYkVaaGNtVWlPbnNpUVcxdmRXNTBJam80TkRJNU5pd2lRM1Z5Y21WdVkzbERiMlJsSWpvaVNVNVNJbjE5TENKemRYQndVRlJEWDBaaGNtVkNjbVZoYTJSdmQyNXpJanBiZXlKemRYQndVR0Y0Wm1GeVpTSTZleUp3WVhoRGIzVnVkQ0k2TWl3aWNHRjRWSGx3WlNJNklrRkVWQ0lzSWtKaGMyVkdZWEpsSWpwN0lrRnRiM1Z1ZENJNk1qQTVORFVzSWtOMWNuSmxibU41UTI5a1pTSTZJa2xPVWlKOUxDSlViM1JoYkZSaGVDSTZleUpCYlc5MWJuUWlPakl4TWpBekxDSkRkWEp5Wlc1amVVTnZaR1VpT2lKSlRsSWlmU3dpVkc5MFlXeEdZWEpsSWpwN0lrRnRiM1Z1ZENJNk5ESXhORGdzSWtOMWNuSmxibU41UTI5a1pTSTZJa2xPVWlKOWZYMWRmUT09",
+    "airItineraryPricingInfo": {
+     "fareSourceCode": "MSQkNDIkJEFtYWRldXMkJDE5Y2YwMmUwLTNlOGMtNGZjYi05NzY0LTU4M2I4YzJkMzQ1YyQkZXlKemRYQndTWFJwYmxSdmRHRnNSbUZ5WlNJNmV5SndZWGhEYjNWdWRDSTZNQ3dpY0dGNFZIbHdaU0k2Ym5Wc2JDd2lRbUZ6WlVaaGNtVWlPbnNpUVcxdmRXNTBJam8wTVRnNU1Dd2lRM1Z5Y21WdVkzbERiMlJsSWpvaVNVNVNJbjBzSWxSdmRHRnNWR0Y0SWpwN0lrRnRiM1Z1ZENJNk5ESTBNRFlzSWtOMWNuSmxibU41UTI5a1pTSTZJa2xPVWlKOUxDSlViM1JoYkVaaGNtVWlPbnNpUVcxdmRXNTBJam80TkRJNU5pd2lRM1Z5Y21WdVkzbERiMlJsSWpvaVNVNVNJbjE5TENKemRYQndVRlJEWDBaaGNtVkNjbVZoYTJSdmQyNXpJanBiZXlKemRYQndVR0Y0Wm1GeVpTSTZleUp3WVhoRGIzVnVkQ0k2TWl3aWNHRjRWSGx3WlNJNklrRkVWQ0lzSWtKaGMyVkdZWEpsSWpwN0lrRnRiM1Z1ZENJNk1qQTVORFVzSWtOMWNuSmxibU41UTI5a1pTSTZJa2xPVWlKOUxDSlViM1JoYkZSaGVDSTZleUpCYlc5MWJuUWlPakl4TWpBekxDSkRkWEp5Wlc1amVVTnZaR1VpT2lKSlRsSWlmU3dpVkc5MFlXeEdZWEpsSWpwN0lrRnRiM1Z1ZENJNk5ESXhORGdzSWtOMWNuSmxibU41UTI5a1pTSTZJa2xPVWlKOWZYMWRmUT09",
+     "fareType": "",
+     "isRefundable": "No",
+     "corporateId": "",
+     "itinTotalFare": {
+      "baseFare": {
+       "amount": 41890,
+       "currencyCode": "INR"
+      },
+      "totalTax": {
+       "amount": 42406,
+       "currencyCode": "INR"
+      },
+      "totalFare": {
+       "amount": 84296,
+       "currencyCode": "INR"
+      }
+     },
+     "ptC_FareBreakdowns": [
+      {
+       "baggageInfo": [
+        "30 kg"
+       ],
+       "cabinBaggageInfo": [
+        "1 piece"
+       ],
+       "fareBasisCodes": [
+        "LRLP7IN1",
+        "KRL7IN1"
+       ],
+       "fareTypeCodes": [
+        "RP",
+        "RP"
+       ],
+       "fareTypeCodesName": [
+        "Published fares",
+        "Published fares"
+       ],
+       "passengerFare": {
+        "baseFare": {
+         "amount": 20945,
+         "currencyCode": "INR"
+        },
+        "totalTax": {
+         "amount": 21203,
+         "currencyCode": "INR"
+        },
+        "totalFare": {
+         "amount": 42148,
+         "currencyCode": "INR"
+        }
+       },
+       "passengerTypeQuantity": {
+        "code": "ADT",
+        "quantity": 2
+       },
+       "penaltiesInfo": [
+        {
+         "allowed": false,
+         "amount": 0,
+         "currencyCode": "INR",
+         "penaltyType": "PENALTY APPLIES LAST TKT DTE 20OCT26  - DATE OF ORIGIN ",
+         "lastTickitingDate": "20/10/2026"
+        }
+       ]
+      }
+     ],
+     "isHold": false
+    },
+    "directionInd": "return",
+    "originDestinationOptions": [
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": "",
+        "arrivalAirportLocationCode": "DXB",
+        "arrivalAirportName": "Dubai Airport",
+        "arrivalAirportCity": "Dubai",
+        "arrivalAirportCountry": "United Arab Emirates",
+        "arrivalAirportlatitude": "25.2500000000",
+        "arrivalAirportlongitude": "55.3500000000",
+        "arrivalDateTime": "2026-10-20T06:20:00",
+        "cabinClass": "M",
+        "cabinClassText": "Economy Standard",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "AMD",
+        "departureAirportName": "Ahmedabad Airport",
+        "departureAirportCity": "Ahmedabad",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "23.0700000000",
+        "departureAirportlongitude": "72.6200000000",
+        "departureDateTime": "2026-10-20T04:25:00",
+        "flightNumber": "438",
+        "journeyDuration": 205,
+        "marketingAirlineCode": "FZ",
+        "marketingAirlineName": "Flydubai",
+        "operatingAirline": {
+         "code": "FZ",
+         "flightNumber": "438",
+         "operatingAirlineName": "Flydubai",
+         "airlinelogoPath": "/Flightlogos/FZ.svg"
+        },
+        "stopQuantity": 1,
+        "departureTerminal": "2",
+        "arrivalTerminal": "2",
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": "ADT",
+        "direction": 0,
+        "airLineCode": "FZ",
+        "luggageInfo": "30 kg",
+        "cabinLuggageInfo": "1 piece",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/FZ.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     },
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": "",
+        "arrivalAirportLocationCode": "AMD",
+        "arrivalAirportName": "Ahmedabad Airport",
+        "arrivalAirportCity": "Ahmedabad",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "23.0700000000",
+        "arrivalAirportlongitude": "72.6200000000",
+        "arrivalDateTime": "2026-10-27T02:40:00",
+        "cabinClass": "M",
+        "cabinClassText": "Economy Standard",
+        "cabinClassRBD": "K",
+        "departureAirportLocationCode": "DXB",
+        "departureAirportName": "Dubai Airport",
+        "departureAirportCity": "Dubai",
+        "departureAirportCountry": "United Arab Emirates",
+        "departureAirportlatitude": "25.2500000000",
+        "departureAirportlongitude": "55.3500000000",
+        "departureDateTime": "2026-10-26T22:35:00",
+        "flightNumber": "437",
+        "journeyDuration": 155,
+        "marketingAirlineCode": "FZ",
+        "marketingAirlineName": "Flydubai",
+        "operatingAirline": {
+         "code": "FZ",
+         "flightNumber": "437",
+         "operatingAirlineName": "Flydubai",
+         "airlinelogoPath": "/Flightlogos/FZ.svg"
+        },
+        "stopQuantity": 1,
+        "departureTerminal": "2",
+        "arrivalTerminal": "2",
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": "ADT",
+        "direction": 1,
+        "airLineCode": "FZ",
+        "luggageInfo": "0kg",
+        "cabinLuggageInfo": "sb",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/FZ.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     }
+    ],
+    "providerName": "Techno_Flight",
+    "fareRules": [],
+    "flightGroupId": 0
+   },
+   {
+    "itinerarySourceCode": "MSQkNjMkJEFtYWRldXMkJDE5Y2YwMmUwLTNlOGMtNGZjYi05NzY0LTU4M2I4YzJkMzQ1YyQkZXlKemRYQndTWFJwYmxSdmRHRnNSbUZ5WlNJNmV5SndZWGhEYjNWdWRDSTZNQ3dpY0dGNFZIbHdaU0k2Ym5Wc2JDd2lRbUZ6WlVaaGNtVWlPbnNpUVcxdmRXNTBJam8zTXpNd01Dd2lRM1Z5Y21WdVkzbERiMlJsSWpvaVNVNVNJbjBzSWxSdmRHRnNWR0Y0SWpwN0lrRnRiM1Z1ZENJNk5ETTVOellzSWtOMWNuSmxibU41UTI5a1pTSTZJa2xPVWlKOUxDSlViM1JoYkVaaGNtVWlPbnNpUVcxdmRXNTBJam94TVRjeU56WXNJa04xY25KbGJtTjVRMjlrWlNJNklrbE9VaUo5ZlN3aWMzVndjRkJVUTE5R1lYSmxRbkpsWVd0a2IzZHVjeUk2VzNzaWMzVndjRkJoZUdaaGNtVWlPbnNpY0dGNFEyOTFiblFpT2pJc0luQmhlRlI1Y0dVaU9pSkJSRlFpTENKQ1lYTmxSbUZ5WlNJNmV5SkJiVzkxYm5RaU9qTTJOalV3TENKRGRYSnlaVzVqZVVOdlpHVWlPaUpKVGxJaWZTd2lWRzkwWVd4VVlYZ2lPbnNpUVcxdmRXNTBJam95TVRrNE9Dd2lRM1Z5Y21WdVkzbERiMlJsSWpvaVNVNVNJbjBzSWxSdmRHRnNSbUZ5WlNJNmV5SkJiVzkxYm5RaU9qVTROak00TENKRGRYSnlaVzVqZVVOdlpHVWlPaUpKVGxJaWZYMTlYWDA9",
+    "airItineraryPricingInfo": {
+     "fareSourceCode": "MSQkNjMkJEFtYWRldXMkJDE5Y2YwMmUwLTNlOGMtNGZjYi05NzY0LTU4M2I4YzJkMzQ1YyQkZXlKemRYQndTWFJwYmxSdmRHRnNSbUZ5WlNJNmV5SndZWGhEYjNWdWRDSTZNQ3dpY0dGNFZIbHdaU0k2Ym5Wc2JDd2lRbUZ6WlVaaGNtVWlPbnNpUVcxdmRXNTBJam8zTXpNd01Dd2lRM1Z5Y21WdVkzbERiMlJsSWpvaVNVNVNJbjBzSWxSdmRHRnNWR0Y0SWpwN0lrRnRiM1Z1ZENJNk5ETTVOellzSWtOMWNuSmxibU41UTI5a1pTSTZJa2xPVWlKOUxDSlViM1JoYkVaaGNtVWlPbnNpUVcxdmRXNTBJam94TVRjeU56WXNJa04xY25KbGJtTjVRMjlrWlNJNklrbE9VaUo5ZlN3aWMzVndjRkJVUTE5R1lYSmxRbkpsWVd0a2IzZHVjeUk2VzNzaWMzVndjRkJoZUdaaGNtVWlPbnNpY0dGNFEyOTFiblFpT2pJc0luQmhlRlI1Y0dVaU9pSkJSRlFpTENKQ1lYTmxSbUZ5WlNJNmV5SkJiVzkxYm5RaU9qTTJOalV3TENKRGRYSnlaVzVqZVVOdlpHVWlPaUpKVGxJaWZTd2lWRzkwWVd4VVlYZ2lPbnNpUVcxdmRXNTBJam95TVRrNE9Dd2lRM1Z5Y21WdVkzbERiMlJsSWpvaVNVNVNJbjBzSWxSdmRHRnNSbUZ5WlNJNmV5SkJiVzkxYm5RaU9qVTROak00TENKRGRYSnlaVzVqZVVOdlpHVWlPaUpKVGxJaWZYMTlYWDA9",
+     "fareType": "",
+     "isRefundable": "No",
+     "corporateId": "",
+     "itinTotalFare": {
+      "baseFare": {
+       "amount": 73300,
+       "currencyCode": "INR"
+      },
+      "totalTax": {
+       "amount": 43976,
+       "currencyCode": "INR"
+      },
+      "totalFare": {
+       "amount": 117276,
+       "currencyCode": "INR"
+      }
+     },
+     "ptC_FareBreakdowns": [
+      {
+       "baggageInfo": [
+        "30 kg"
+       ],
+       "cabinBaggageInfo": [
+        "7 kg"
+       ],
+       "fareBasisCodes": [
+        "QRLP7IN1",
+        "KRL7IN1"
+       ],
+       "fareTypeCodes": [
+        "RP",
+        "RP"
+       ],
+       "fareTypeCodesName": [
+        "Published fares",
+        "Published fares"
+       ],
+       "passengerFare": {
+        "baseFare": {
+         "amount": 36650,
+         "currencyCode": "INR"
+        },
+        "totalTax": {
+         "amount": 21988,
+         "currencyCode": "INR"
+        },
+        "totalFare": {
+         "amount": 58638,
+         "currencyCode": "INR"
+        }
+       },
+       "passengerTypeQuantity": {
+        "code": "ADT",
+        "quantity": 2
+       },
+       "penaltiesInfo": [
+        {
+         "allowed": false,
+         "amount": 0,
+         "currencyCode": "INR",
+         "penaltyType": "PENALTY APPLIES LAST TKT DTE 20OCT26  - DATE OF ORIGIN ",
+         "lastTickitingDate": "20/10/2026"
+        }
+       ]
+      }
+     ],
+     "isHold": false
+    },
+    "directionInd": "return",
+    "originDestinationOptions": [
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": "",
+        "arrivalAirportLocationCode": "DEL",
+        "arrivalAirportName": "Indira Gandhi International Airport",
+        "arrivalAirportCity": "Delhi",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "28.5600000000",
+        "arrivalAirportlongitude": "77.0900000000",
+        "arrivalDateTime": "2026-10-21T00:45:00",
+        "cabinClass": "M",
+        "cabinClassText": "Economy Standard",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "AMD",
+        "departureAirportName": "Ahmedabad Airport",
+        "departureAirportCity": "Ahmedabad",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "23.0700000000",
+        "departureAirportlongitude": "72.6200000000",
+        "departureDateTime": "2026-10-20T23:00:00",
+        "flightNumber": "2546",
+        "journeyDuration": 105,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "2546",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 1,
+        "departureTerminal": "2",
+        "arrivalTerminal": "3",
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": "ADT",
+        "direction": 0,
+        "airLineCode": "FZ",
+        "luggageInfo": "30 kg",
+        "cabinLuggageInfo": "7 kg",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 205,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       },
+       {
+        "segmentOptionKey": "",
+        "arrivalAirportLocationCode": "DXB",
+        "arrivalAirportName": "Dubai Airport",
+        "arrivalAirportCity": "Dubai",
+        "arrivalAirportCountry": "United Arab Emirates",
+        "arrivalAirportlatitude": "25.2500000000",
+        "arrivalAirportlongitude": "55.3500000000",
+        "arrivalDateTime": "2026-10-21T06:15:00",
+        "cabinClass": "M",
+        "cabinClassText": "Economy Standard",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "DEL",
+        "departureAirportName": "Indira Gandhi International Airport",
+        "departureAirportCity": "Delhi",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "28.5600000000",
+        "departureAirportlongitude": "77.0900000000",
+        "departureDateTime": "2026-10-21T04:10:00",
+        "flightNumber": "442",
+        "journeyDuration": 215,
+        "marketingAirlineCode": "FZ",
+        "marketingAirlineName": "Flydubai",
+        "operatingAirline": {
+         "code": "FZ",
+         "flightNumber": "442",
+         "operatingAirlineName": "Flydubai",
+         "airlinelogoPath": "/Flightlogos/FZ.svg"
+        },
+        "stopQuantity": 1,
+        "departureTerminal": "3",
+        "arrivalTerminal": "2",
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": "ADT",
+        "direction": 0,
+        "airLineCode": "FZ",
+        "luggageInfo": "30 kg",
+        "cabinLuggageInfo": "7 kg",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/FZ.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     },
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": "",
+        "arrivalAirportLocationCode": "AMD",
+        "arrivalAirportName": "Ahmedabad Airport",
+        "arrivalAirportCity": "Ahmedabad",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "23.0700000000",
+        "arrivalAirportlongitude": "72.6200000000",
+        "arrivalDateTime": "2026-10-27T02:40:00",
+        "cabinClass": "M",
+        "cabinClassText": "Economy Standard",
+        "cabinClassRBD": "K",
+        "departureAirportLocationCode": "DXB",
+        "departureAirportName": "Dubai Airport",
+        "departureAirportCity": "Dubai",
+        "departureAirportCountry": "United Arab Emirates",
+        "departureAirportlatitude": "25.2500000000",
+        "departureAirportlongitude": "55.3500000000",
+        "departureDateTime": "2026-10-26T22:35:00",
+        "flightNumber": "437",
+        "journeyDuration": 155,
+        "marketingAirlineCode": "FZ",
+        "marketingAirlineName": "Flydubai",
+        "operatingAirline": {
+         "code": "FZ",
+         "flightNumber": "437",
+         "operatingAirlineName": "Flydubai",
+         "airlinelogoPath": "/Flightlogos/FZ.svg"
+        },
+        "stopQuantity": 1,
+        "departureTerminal": "2",
+        "arrivalTerminal": "2",
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": "ADT",
+        "direction": 1,
+        "airLineCode": "FZ",
+        "luggageInfo": "0kg",
+        "cabinLuggageInfo": "sb",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/FZ.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     }
+    ],
+    "providerName": "Techno_Flight",
+    "fareRules": [],
+    "flightGroupId": 0
+   },
+   {
+    "itinerarySourceCode": "MiQkMTgkJFBLRmFyZSQkMTljZjAyZTAtM2U4Yy00ZmNiLTk3NjQtNTgzYjhjMmQzNDVjJCRYR1FCVHdVNkxGQTVHZXZMYm5BbGpHSW1jWlBHQ3JlcXVIdU45WHUweW84R25jeUJrZ0grNkVDaVVYL1hDRXFEUm03M2hIMVJFckYvVXNneXFPQ1NOQ3pLVEwxVnpPdmR2bmZuR2ZBc2VhUUFkc2lFYU1yazkzdUEwZUwxaTIwZVNvamo3Q1lrVU1QZGpRWWVKVG0vWHBuWHZCNzR2M285VkU2bkhBNXJSL2JJQ1htU29BZ1dPYk9MM1V0UzVoV0prL3h0dG9VLzBaMEtUcWdZMHRlOVFkVy80b21tdkNzT1RtWDF3VVJLZUJVNFpoZnN0YkI1Mmthd2VMcUw5b3BTdXB6c3V2QzN1TnJHZzZPRUlXcG9PUS9HRlJDYUNmd1hNMmovNVR3dThCcTBQVk1kdDhSRDlnS0NGaWJpTjVsaXQxTjZiZk5hUEk2dFhzdjdTMG9DSDdFNFBvSTRIWkNCQnV4dFY5cU5hdmx5dFFXcnpOQ05CNUNnVDlxTzB5bVZ5cFM2OGtObFA4Q1dJNXkvZWVTUUZSVzNHTEN5b2VJeDVaK3JqUmVic0lvZEFjUndSZ09ZQUZ6elQ5aEdiMVp4YiszeFlJZXgzT3lWR0hjdmFrRHR3dz09",
+    "airItineraryPricingInfo": {
+     "fareSourceCode": "MiQkMTgkJFBLRmFyZSQkMTljZjAyZTAtM2U4Yy00ZmNiLTk3NjQtNTgzYjhjMmQzNDVjJCRYR1FCVHdVNkxGQTVHZXZMYm5BbGpHSW1jWlBHQ3JlcXVIdU45WHUweW84R25jeUJrZ0grNkVDaVVYL1hDRXFEUm03M2hIMVJFckYvVXNneXFPQ1NOQ3pLVEwxVnpPdmR2bmZuR2ZBc2VhUUFkc2lFYU1yazkzdUEwZUwxaTIwZVNvamo3Q1lrVU1QZGpRWWVKVG0vWHBuWHZCNzR2M285VkU2bkhBNXJSL2JJQ1htU29BZ1dPYk9MM1V0UzVoV0prL3h0dG9VLzBaMEtUcWdZMHRlOVFkVy80b21tdkNzT1RtWDF3VVJLZUJVNFpoZnN0YkI1Mmthd2VMcUw5b3BTdXB6c3V2QzN1TnJHZzZPRUlXcG9PUS9HRlJDYUNmd1hNMmovNVR3dThCcTBQVk1kdDhSRDlnS0NGaWJpTjVsaXQxTjZiZk5hUEk2dFhzdjdTMG9DSDdFNFBvSTRIWkNCQnV4dFY5cU5hdmx5dFFXcnpOQ05CNUNnVDlxTzB5bVZ5cFM2OGtObFA4Q1dJNXkvZWVTUUZSVzNHTEN5b2VJeDVaK3JqUmVic0lvZEFjUndSZ09ZQUZ6elQ5aEdiMVp4YiszeFlJZXgzT3lWR0hjdmFrRHR3dz09",
+     "fareType": "public",
+     "isRefundable": "refundable",
+     "corporateId": null,
+     "itinTotalFare": {
+      "baseFare": {
+       "amount": 300744.73053310957,
+       "currencyCode": "INR"
+      },
+      "totalTax": {
+       "amount": 49331.17829369198,
+       "currencyCode": "INR"
+      },
+      "totalFare": {
+       "amount": 350075.9088268016,
+       "currencyCode": "INR"
+      }
+     },
+     "ptC_FareBreakdowns": [
+      {
+       "baggageInfo": [
+        "35kg",
+        "35kg",
+        "35kg"
+       ],
+       "cabinBaggageInfo": [
+        "7kg",
+        "7kg",
+        "7kg"
+       ],
+       "fareBasisCodes": [
+        "YRTIN7",
+        "YRTIN7",
+        "YRTIN7"
+       ],
+       "fareTypeCodes": null,
+       "fareTypeCodesName": null,
+       "passengerFare": {
+        "baseFare": {
+         "amount": 150372.36526655479,
+         "currencyCode": "INR"
+        },
+        "totalTax": {
+         "amount": 24665.58914684599,
+         "currencyCode": "INR"
+        },
+        "totalFare": {
+         "amount": 175037.9544134008,
+         "currencyCode": "INR"
+        }
+       },
+       "passengerTypeQuantity": {
+        "code": "ADT",
+        "quantity": 2
+       },
+       "penaltiesInfo": []
+      }
+     ],
+     "isHold": false
+    },
+    "directionInd": "return",
+    "originDestinationOptions": [
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DXB",
+        "arrivalAirportName": "Dubai Airport",
+        "arrivalAirportCity": "Dubai",
+        "arrivalAirportCountry": "United Arab Emirates",
+        "arrivalAirportlatitude": "25.2500000000",
+        "arrivalAirportlongitude": "55.3500000000",
+        "arrivalDateTime": "2026-10-20T06:10:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "Y",
+        "departureAirportLocationCode": "AMD",
+        "departureAirportName": "Ahmedabad Airport",
+        "departureAirportCity": "Ahmedabad",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "23.0700000000",
+        "departureAirportlongitude": "72.6200000000",
+        "departureDateTime": "2026-10-20T04:40:00",
+        "flightNumber": "539",
+        "journeyDuration": 180,
+        "marketingAirlineCode": "EK",
+        "marketingAirlineName": "Emirates",
+        "operatingAirline": {
+         "code": "EK",
+         "flightNumber": "539",
+         "operatingAirlineName": "Emirates",
+         "airlinelogoPath": "/Flightlogos/EK.svg"
+        },
+        "stopQuantity": 1,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/EK.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     },
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "BOM",
+        "arrivalAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "arrivalAirportCity": "Mumbai",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "19.1000000000",
+        "arrivalAirportlongitude": "72.8700000000",
+        "arrivalDateTime": "2026-10-26T17:50:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "Y",
+        "departureAirportLocationCode": "DXB",
+        "departureAirportName": "Dubai Airport",
+        "departureAirportCity": "Dubai",
+        "departureAirportCountry": "United Arab Emirates",
+        "departureAirportlatitude": "25.2500000000",
+        "departureAirportlongitude": "55.3500000000",
+        "departureDateTime": "2026-10-26T13:15:00",
+        "flightNumber": "502",
+        "journeyDuration": 185,
+        "marketingAirlineCode": "EK",
+        "marketingAirlineName": "Emirates",
+        "operatingAirline": {
+         "code": "EK",
+         "flightNumber": "502",
+         "operatingAirlineName": "Emirates",
+         "airlinelogoPath": "/Flightlogos/EK.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "3",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/EK.svg",
+        "layoverTimeInMinute": 200,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       },
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "AMD",
+        "arrivalAirportName": "Ahmedabad Airport",
+        "arrivalAirportCity": "Ahmedabad",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "23.0700000000",
+        "arrivalAirportlongitude": "72.6200000000",
+        "arrivalDateTime": "2026-10-26T22:30:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "G",
+        "departureAirportLocationCode": "BOM",
+        "departureAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "departureAirportCity": "Mumbai",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "19.1000000000",
+        "departureAirportlongitude": "72.8700000000",
+        "departureDateTime": "2026-10-26T21:10:00",
+        "flightNumber": "2919",
+        "journeyDuration": 80,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "2919",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     }
+    ],
+    "providerName": null,
+    "fareRules": [],
+    "flightGroupId": 0
+   },
+   {
+    "itinerarySourceCode": "MiQkMjE1JCRQS0ZhcmUkJDE5Y2YwMmUwLTNlOGMtNGZjYi05NzY0LTU4M2I4YzJkMzQ1YyQkL0g5V1YyQ056ZUQ0eEpVRlhwbll2aWFrVXkvTS9WTU8vYTJkOFQwaGl4djZ3NUk2U0hDTXc0dFlERUcwL1d2MS9WcmtnTzNpUXFVMUZML2hiMlk4SkViTjJ1ZmZjaXhPWEpVTGtlUEtFM3N1MWpCZ3lhZVViditUYXNKNGRGaW1OSEh2ZlpjV05Gd3RxSEx1c2Q0UFJTQzF4ZUUxUExLSVUzQU43dlhheUYxbCtEdXA4dFIrSisrTjJNR2lrcnhJZmp0eWpBcXd4YVIyZFpibll1b3Jmc0d1M3JwQ1kyT3BjSmZyMXFhK1VVQnZ6U0dvaE8zSDJJSDRXaC9LSVJCLzhlYzl1aEpRcVNPb0FYR3hFQUVFRXJHd2hKd3loR01lbjhveHBwUndVdGpTaGRYTDdOS1p4KzZEWVhMZlJ3UDlLZlBwaGhzS2FWQXFDeVBYNVNvcTlCbmNwalpMVzFLNWk2YjJOUTJ6aEpjZ3l0TFAzMXpSU05rUStaNHBDdFg4",
+    "airItineraryPricingInfo": {
+     "fareSourceCode": "MiQkMjE1JCRQS0ZhcmUkJDE5Y2YwMmUwLTNlOGMtNGZjYi05NzY0LTU4M2I4YzJkMzQ1YyQkL0g5V1YyQ056ZUQ0eEpVRlhwbll2aWFrVXkvTS9WTU8vYTJkOFQwaGl4djZ3NUk2U0hDTXc0dFlERUcwL1d2MS9WcmtnTzNpUXFVMUZML2hiMlk4SkViTjJ1ZmZjaXhPWEpVTGtlUEtFM3N1MWpCZ3lhZVViditUYXNKNGRGaW1OSEh2ZlpjV05Gd3RxSEx1c2Q0UFJTQzF4ZUUxUExLSVUzQU43dlhheUYxbCtEdXA4dFIrSisrTjJNR2lrcnhJZmp0eWpBcXd4YVIyZFpibll1b3Jmc0d1M3JwQ1kyT3BjSmZyMXFhK1VVQnZ6U0dvaE8zSDJJSDRXaC9LSVJCLzhlYzl1aEpRcVNPb0FYR3hFQUVFRXJHd2hKd3loR01lbjhveHBwUndVdGpTaGRYTDdOS1p4KzZEWVhMZlJ3UDlLZlBwaGhzS2FWQXFDeVBYNVNvcTlCbmNwalpMVzFLNWk2YjJOUTJ6aEpjZ3l0TFAzMXpSU05rUStaNHBDdFg4",
+     "fareType": "webfare",
+     "isRefundable": "nonrefundable",
+     "corporateId": null,
+     "itinTotalFare": {
+      "baseFare": {
+       "amount": 69997.2062092647,
+       "currencyCode": "INR"
+      },
+      "totalTax": {
+       "amount": 38395.39704726477,
+       "currencyCode": "INR"
+      },
+      "totalFare": {
+       "amount": 108392.60325652946,
+       "currencyCode": "INR"
+      }
+     },
+     "ptC_FareBreakdowns": [
+      {
+       "baggageInfo": [
+        "25kg",
+        "35kg"
+       ],
+       "cabinBaggageInfo": [
+        "7kg",
+        "7kg"
+       ],
+       "fareBasisCodes": [
+        "LLXAPIN1",
+        "XLXRFIN1"
+       ],
+       "fareTypeCodes": null,
+       "fareTypeCodesName": null,
+       "passengerFare": {
+        "baseFare": {
+         "amount": 34998.60310463235,
+         "currencyCode": "INR"
+        },
+        "totalTax": {
+         "amount": 19197.698523632385,
+         "currencyCode": "INR"
+        },
+        "totalFare": {
+         "amount": 54196.30162826473,
+         "currencyCode": "INR"
+        }
+       },
+       "passengerTypeQuantity": {
+        "code": "ADT",
+        "quantity": 2
+       },
+       "penaltiesInfo": []
+      }
+     ],
+     "isHold": false
+    },
+    "directionInd": "return",
+    "originDestinationOptions": [
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DXB",
+        "arrivalAirportName": "Dubai Airport",
+        "arrivalAirportCity": "Dubai",
+        "arrivalAirportCountry": "United Arab Emirates",
+        "arrivalAirportlatitude": "25.2500000000",
+        "arrivalAirportlongitude": "55.3500000000",
+        "arrivalDateTime": "2026-10-20T06:10:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "AMD",
+        "departureAirportName": "Ahmedabad Airport",
+        "departureAirportCity": "Ahmedabad",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "23.0700000000",
+        "departureAirportlongitude": "72.6200000000",
+        "departureDateTime": "2026-10-20T04:40:00",
+        "flightNumber": "539",
+        "journeyDuration": 180,
+        "marketingAirlineCode": "EK",
+        "marketingAirlineName": "Emirates",
+        "operatingAirline": {
+         "code": "EK",
+         "flightNumber": "539",
+         "operatingAirlineName": "Emirates",
+         "airlinelogoPath": "/Flightlogos/EK.svg"
+        },
+        "stopQuantity": 1,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/EK.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     },
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "AMD",
+        "arrivalAirportName": "Ahmedabad Airport",
+        "arrivalAirportCity": "Ahmedabad",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "23.0700000000",
+        "arrivalAirportlongitude": "72.6200000000",
+        "arrivalDateTime": "2026-10-27T02:55:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "X",
+        "departureAirportLocationCode": "DXB",
+        "departureAirportName": "Dubai Airport",
+        "departureAirportCity": "Dubai",
+        "departureAirportCountry": "United Arab Emirates",
+        "departureAirportlatitude": "25.2500000000",
+        "departureAirportlongitude": "55.3500000000",
+        "departureDateTime": "2026-10-26T22:50:00",
+        "flightNumber": "538",
+        "journeyDuration": 155,
+        "marketingAirlineCode": "EK",
+        "marketingAirlineName": "Emirates",
+        "operatingAirline": {
+         "code": "EK",
+         "flightNumber": "538",
+         "operatingAirlineName": "Emirates",
+         "airlinelogoPath": "/Flightlogos/EK.svg"
+        },
+        "stopQuantity": 1,
+        "departureTerminal": "3",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/EK.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     }
+    ],
+    "providerName": null,
+    "fareRules": [],
+    "flightGroupId": 0
+   },
+   {
+    "itinerarySourceCode": "MiQkMjM5JCRQS0ZhcmUkJDE5Y2YwMmUwLTNlOGMtNGZjYi05NzY0LTU4M2I4YzJkMzQ1YyQkWEdRQlR3VTZMRkE1R2V2TGJuQWxqR0ltY1pQR0NyZXF1SHVOOVh1MHlvOEduY3lCa2dIKzZFQ2lVWC9YQ0VxRFJtNzNoSDFSRXJGL1VzZ3lxT0NTTkN6S1RMMVZ6T3Zkdm5mbkdmQXNlYVFBZHNpRWFNcms5M3VBMGVMMWkyMGVTb2pqN0NZa1VNUGRqUVllSlRtL1hwblh2Qjc0djNvOVZFNm5IQTVyUi9iSUNYbVNvQWdXT2JPTDNVdFM1aFdKY3p5eHlPNVFWcXJ1YXdqUG1VSVZLM3N6cFl4VGl5aTRPamxnS3kvbFlVamR1MXZ0OUxFRC8wVmE4VFd0eXc5diswRTZDdFBBUlhJaklqVUpGeHQzaks5UDVNeG9jZUVJYy9yek1kU1FhalYxRDVYTVl4V25ZU3JKWi9CUkZOWmFrdVR3QVdnVEtzOGorcXFmb0FGem5aaWJyZHBMVk45NDhHMjV0QTdBbFJIT2ZHd3RtVXUzZHYySXJONkFXbHhLMHVyTHhrRjVrYWNMa3lzcFJnTjczS1dyeXhJbDdHbVBDTU5RSFd3bW9wZlM4VUVObUxnWWQ0YUZ2bDBSdldtdCtsOGMveWRJT0ltZVZMb3E2SktVNEE9PQ==",
+    "airItineraryPricingInfo": {
+     "fareSourceCode": "MiQkMjM5JCRQS0ZhcmUkJDE5Y2YwMmUwLTNlOGMtNGZjYi05NzY0LTU4M2I4YzJkMzQ1YyQkWEdRQlR3VTZMRkE1R2V2TGJuQWxqR0ltY1pQR0NyZXF1SHVOOVh1MHlvOEduY3lCa2dIKzZFQ2lVWC9YQ0VxRFJtNzNoSDFSRXJGL1VzZ3lxT0NTTkN6S1RMMVZ6T3Zkdm5mbkdmQXNlYVFBZHNpRWFNcms5M3VBMGVMMWkyMGVTb2pqN0NZa1VNUGRqUVllSlRtL1hwblh2Qjc0djNvOVZFNm5IQTVyUi9iSUNYbVNvQWdXT2JPTDNVdFM1aFdKY3p5eHlPNVFWcXJ1YXdqUG1VSVZLM3N6cFl4VGl5aTRPamxnS3kvbFlVamR1MXZ0OUxFRC8wVmE4VFd0eXc5diswRTZDdFBBUlhJaklqVUpGeHQzaks5UDVNeG9jZUVJYy9yek1kU1FhalYxRDVYTVl4V25ZU3JKWi9CUkZOWmFrdVR3QVdnVEtzOGorcXFmb0FGem5aaWJyZHBMVk45NDhHMjV0QTdBbFJIT2ZHd3RtVXUzZHYySXJONkFXbHhLMHVyTHhrRjVrYWNMa3lzcFJnTjczS1dyeXhJbDdHbVBDTU5RSFd3bW9wZlM4VUVObUxnWWQ0YUZ2bDBSdldtdCtsOGMveWRJT0ltZVZMb3E2SktVNEE9PQ==",
+     "fareType": "public",
+     "isRefundable": "refundable",
+     "corporateId": null,
+     "itinTotalFare": {
+      "baseFare": {
+       "amount": 300744.73053310957,
+       "currencyCode": "INR"
+      },
+      "totalTax": {
+       "amount": 49331.17829369198,
+       "currencyCode": "INR"
+      },
+      "totalFare": {
+       "amount": 350075.9088268016,
+       "currencyCode": "INR"
+      }
+     },
+     "ptC_FareBreakdowns": [
+      {
+       "baggageInfo": [
+        "35kg",
+        "35kg",
+        "35kg"
+       ],
+       "cabinBaggageInfo": [
+        "7kg",
+        "7kg",
+        "7kg"
+       ],
+       "fareBasisCodes": [
+        "YRTIN7",
+        "YRTIN7",
+        "YRTIN7"
+       ],
+       "fareTypeCodes": null,
+       "fareTypeCodesName": null,
+       "passengerFare": {
+        "baseFare": {
+         "amount": 150372.36526655479,
+         "currencyCode": "INR"
+        },
+        "totalTax": {
+         "amount": 24665.58914684599,
+         "currencyCode": "INR"
+        },
+        "totalFare": {
+         "amount": 175037.9544134008,
+         "currencyCode": "INR"
+        }
+       },
+       "passengerTypeQuantity": {
+        "code": "ADT",
+        "quantity": 2
+       },
+       "penaltiesInfo": []
+      }
+     ],
+     "isHold": false
+    },
+    "directionInd": "return",
+    "originDestinationOptions": [
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DXB",
+        "arrivalAirportName": "Dubai Airport",
+        "arrivalAirportCity": "Dubai",
+        "arrivalAirportCountry": "United Arab Emirates",
+        "arrivalAirportlatitude": "25.2500000000",
+        "arrivalAirportlongitude": "55.3500000000",
+        "arrivalDateTime": "2026-10-20T06:10:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "Y",
+        "departureAirportLocationCode": "AMD",
+        "departureAirportName": "Ahmedabad Airport",
+        "departureAirportCity": "Ahmedabad",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "23.0700000000",
+        "departureAirportlongitude": "72.6200000000",
+        "departureDateTime": "2026-10-20T04:40:00",
+        "flightNumber": "539",
+        "journeyDuration": 180,
+        "marketingAirlineCode": "EK",
+        "marketingAirlineName": "Emirates",
+        "operatingAirline": {
+         "code": "EK",
+         "flightNumber": "539",
+         "operatingAirlineName": "Emirates",
+         "airlinelogoPath": "/Flightlogos/EK.svg"
+        },
+        "stopQuantity": 1,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/EK.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     },
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "BOM",
+        "arrivalAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "arrivalAirportCity": "Mumbai",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "19.1000000000",
+        "arrivalAirportlongitude": "72.8700000000",
+        "arrivalDateTime": "2026-10-26T20:25:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "Y",
+        "departureAirportLocationCode": "DXB",
+        "departureAirportName": "Dubai Airport",
+        "departureAirportCity": "Dubai",
+        "departureAirportCountry": "United Arab Emirates",
+        "departureAirportlatitude": "25.2500000000",
+        "departureAirportlongitude": "55.3500000000",
+        "departureDateTime": "2026-10-26T15:40:00",
+        "flightNumber": "508",
+        "journeyDuration": 195,
+        "marketingAirlineCode": "EK",
+        "marketingAirlineName": "Emirates",
+        "operatingAirline": {
+         "code": "EK",
+         "flightNumber": "508",
+         "operatingAirlineName": "Emirates",
+         "airlinelogoPath": "/Flightlogos/EK.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "3",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/EK.svg",
+        "layoverTimeInMinute": 605,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       },
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "AMD",
+        "arrivalAirportName": "Ahmedabad Airport",
+        "arrivalAirportCity": "Ahmedabad",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "23.0700000000",
+        "arrivalAirportlongitude": "72.6200000000",
+        "arrivalDateTime": "2026-10-27T07:50:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "G",
+        "departureAirportLocationCode": "BOM",
+        "departureAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "departureAirportCity": "Mumbai",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "19.1000000000",
+        "departureAirportlongitude": "72.8700000000",
+        "departureDateTime": "2026-10-27T06:30:00",
+        "flightNumber": "493",
+        "journeyDuration": 80,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "493",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     }
+    ],
+    "providerName": null,
+    "fareRules": [],
+    "flightGroupId": 0
+   },
+   {
+    "itinerarySourceCode": "MiQkMjQ4JCRQS0ZhcmUkJDE5Y2YwMmUwLTNlOGMtNGZjYi05NzY0LTU4M2I4YzJkMzQ1YyQkWEdRQlR3VTZMRkE1R2V2TGJuQWxqR0ltY1pQR0NyZXF1SHVOOVh1MHlvOEduY3lCa2dIKzZFQ2lVWC9YQ0VxRFJtNzNoSDFSRXJGL1VzZ3lxT0NTTkN6S1RMMVZ6T3Zkdm5mbkdmQXNlYVFBZHNpRWFNcms5M3VBMGVMMWkyMGVTb2pqN0NZa1VNUGRqUVllSlRtL1hwblh2Qjc0djNvOVZFNm5IQTVyUi9iSUNYbVNvQWdXT2JPTDNVdFM1aFdKay94dHRvVS8wWjBLVHFnWTB0ZTlRZFcvNG9tbXZDc09UbVgxd1VSS2VCVTRaaGZzdGJCNTJrYXdlTHFMOW9wU1BUMDhQdmkvQkpaeFp5dS9CcUhmUUU3YkhTSndtY3ZoMmY2L0lJeVpCLzZ0YXRRbkEwMzA5b1h5QVlxaXFRUmdOcHRYcm1rN0ZYTkVTdUtNcTFQSy93TEJJUGNlZkdBWm5YZ3o4bWZyQUpURUlGeGhoRXoyRFJMaEpuTjhYdkZHdW9aU0p0UjJlZUdtWWNzR1hiQitySElWeXR6T25ld0hUSW1qT0NzdTc2bkZ5QmMwSDVac1IzQzJlZ1ZSL25ncmxYeVB4V2tBaGYya0x0bVpmMDZZY1E9PQ==",
+    "airItineraryPricingInfo": {
+     "fareSourceCode": "MiQkMjQ4JCRQS0ZhcmUkJDE5Y2YwMmUwLTNlOGMtNGZjYi05NzY0LTU4M2I4YzJkMzQ1YyQkWEdRQlR3VTZMRkE1R2V2TGJuQWxqR0ltY1pQR0NyZXF1SHVOOVh1MHlvOEduY3lCa2dIKzZFQ2lVWC9YQ0VxRFJtNzNoSDFSRXJGL1VzZ3lxT0NTTkN6S1RMMVZ6T3Zkdm5mbkdmQXNlYVFBZHNpRWFNcms5M3VBMGVMMWkyMGVTb2pqN0NZa1VNUGRqUVllSlRtL1hwblh2Qjc0djNvOVZFNm5IQTVyUi9iSUNYbVNvQWdXT2JPTDNVdFM1aFdKay94dHRvVS8wWjBLVHFnWTB0ZTlRZFcvNG9tbXZDc09UbVgxd1VSS2VCVTRaaGZzdGJCNTJrYXdlTHFMOW9wU1BUMDhQdmkvQkpaeFp5dS9CcUhmUUU3YkhTSndtY3ZoMmY2L0lJeVpCLzZ0YXRRbkEwMzA5b1h5QVlxaXFRUmdOcHRYcm1rN0ZYTkVTdUtNcTFQSy93TEJJUGNlZkdBWm5YZ3o4bWZyQUpURUlGeGhoRXoyRFJMaEpuTjhYdkZHdW9aU0p0UjJlZUdtWWNzR1hiQitySElWeXR6T25ld0hUSW1qT0NzdTc2bkZ5QmMwSDVac1IzQzJlZ1ZSL25ncmxYeVB4V2tBaGYya0x0bVpmMDZZY1E9PQ==",
+     "fareType": "public",
+     "isRefundable": "refundable",
+     "corporateId": null,
+     "itinTotalFare": {
+      "baseFare": {
+       "amount": 300744.73053310957,
+       "currencyCode": "INR"
+      },
+      "totalTax": {
+       "amount": 49331.17829369198,
+       "currencyCode": "INR"
+      },
+      "totalFare": {
+       "amount": 350075.9088268016,
+       "currencyCode": "INR"
+      }
+     },
+     "ptC_FareBreakdowns": [
+      {
+       "baggageInfo": [
+        "35kg",
+        "35kg",
+        "35kg"
+       ],
+       "cabinBaggageInfo": [
+        "7kg",
+        "7kg",
+        "7kg"
+       ],
+       "fareBasisCodes": [
+        "YRTIN7",
+        "YRTIN7",
+        "YRTIN7"
+       ],
+       "fareTypeCodes": null,
+       "fareTypeCodesName": null,
+       "passengerFare": {
+        "baseFare": {
+         "amount": 150372.36526655479,
+         "currencyCode": "INR"
+        },
+        "totalTax": {
+         "amount": 24665.58914684599,
+         "currencyCode": "INR"
+        },
+        "totalFare": {
+         "amount": 175037.9544134008,
+         "currencyCode": "INR"
+        }
+       },
+       "passengerTypeQuantity": {
+        "code": "ADT",
+        "quantity": 2
+       },
+       "penaltiesInfo": []
+      }
+     ],
+     "isHold": false
+    },
+    "directionInd": "return",
+    "originDestinationOptions": [
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DXB",
+        "arrivalAirportName": "Dubai Airport",
+        "arrivalAirportCity": "Dubai",
+        "arrivalAirportCountry": "United Arab Emirates",
+        "arrivalAirportlatitude": "25.2500000000",
+        "arrivalAirportlongitude": "55.3500000000",
+        "arrivalDateTime": "2026-10-20T06:10:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "Y",
+        "departureAirportLocationCode": "AMD",
+        "departureAirportName": "Ahmedabad Airport",
+        "departureAirportCity": "Ahmedabad",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "23.0700000000",
+        "departureAirportlongitude": "72.6200000000",
+        "departureDateTime": "2026-10-20T04:40:00",
+        "flightNumber": "539",
+        "journeyDuration": 180,
+        "marketingAirlineCode": "EK",
+        "marketingAirlineName": "Emirates",
+        "operatingAirline": {
+         "code": "EK",
+         "flightNumber": "539",
+         "operatingAirlineName": "Emirates",
+         "airlinelogoPath": "/Flightlogos/EK.svg"
+        },
+        "stopQuantity": 1,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/EK.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     },
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "BOM",
+        "arrivalAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "arrivalAirportCity": "Mumbai",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "19.1000000000",
+        "arrivalAirportlongitude": "72.8700000000",
+        "arrivalDateTime": "2026-10-26T17:50:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "Y",
+        "departureAirportLocationCode": "DXB",
+        "departureAirportName": "Dubai Airport",
+        "departureAirportCity": "Dubai",
+        "departureAirportCountry": "United Arab Emirates",
+        "departureAirportlatitude": "25.2500000000",
+        "departureAirportlongitude": "55.3500000000",
+        "departureDateTime": "2026-10-26T13:15:00",
+        "flightNumber": "502",
+        "journeyDuration": 185,
+        "marketingAirlineCode": "EK",
+        "marketingAirlineName": "Emirates",
+        "operatingAirline": {
+         "code": "EK",
+         "flightNumber": "502",
+         "operatingAirlineName": "Emirates",
+         "airlinelogoPath": "/Flightlogos/EK.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "3",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/EK.svg",
+        "layoverTimeInMinute": 760,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       },
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "AMD",
+        "arrivalAirportName": "Ahmedabad Airport",
+        "arrivalAirportCity": "Ahmedabad",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "23.0700000000",
+        "arrivalAirportlongitude": "72.6200000000",
+        "arrivalDateTime": "2026-10-27T07:50:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "G",
+        "departureAirportLocationCode": "BOM",
+        "departureAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "departureAirportCity": "Mumbai",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "19.1000000000",
+        "departureAirportlongitude": "72.8700000000",
+        "departureDateTime": "2026-10-27T06:30:00",
+        "flightNumber": "493",
+        "journeyDuration": 80,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "493",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     }
+    ],
+    "providerName": null,
+    "fareRules": [],
+    "flightGroupId": 0
+   },
+   {
+    "itinerarySourceCode": "MiQkMCQkUEtGYXJlJCQxOWNmMDJlMC0zZThjLTRmY2ItOTc2NC01ODNiOGMyZDM0NWMkJE5zZ2dJbFBRSjhUN2pUc3RINm1iTFE5MXJuNTh2TkdXMG1IKzQxck13Q2xIdUcyYmFqRFcrZlRlcHg2WDdDT2NNWUpjQmk1N2x0WW5LRkVLQ1EyKzZiY0pDY1Z0TzYxanlyZUFqbjByTTBEUnFoU2VmUHVXL3paSkd4anRkUEh6UzFnUEJEZ29UT3RkU3ZvdTBrV1o0RURsMHNheXNzTnR3RDgrZmU3ZjEwcVIzdmVZUGJOUFZPZ1NNNU9LdHZPc3NpSGRjUXoxK2lSNGVVdS9TOUtNV0RNK3phdDJ1cUJmeXNLVlk0WWhXWDRHMzJrWXZjMW5kbk9PQi9rWkJUeUpPZXdSc3FIajJIajZ6L1ZRWms1UEg1Zzl2T3F3ZENlaEk0TmpVS3BXcFJTQjFvMklKOTRZc2ZEc0kzRUZ1TUFmY1JqSnI3clZiU0ZqT2hTLzk2bytadTZNbjR6TEs4d2taMXp0THRjN1pmcVEwenhIU3QxTUZOakRBNnVHUVN2VmpFbnlZdmZXWkNiVFBTcE13amhoK0FIaEo1RzdabVN0eXRoOGthK3Bxd2xmQkZMUGdnVmM4aWRXam1lTFRYRkpscFNUbWtwRFpPemtYWnlWR0pZdTI4emxQRnZ3TkxzcjVXQ3Fib0ZtMmFzdFg0RmZJWEt2UjJPT0s2MkFHUWQxT1RuTUJlN1dNZEJRdEJlaGt1NXBxUT09",
+    "airItineraryPricingInfo": {
+     "fareSourceCode": "MiQkMCQkUEtGYXJlJCQxOWNmMDJlMC0zZThjLTRmY2ItOTc2NC01ODNiOGMyZDM0NWMkJE5zZ2dJbFBRSjhUN2pUc3RINm1iTFE5MXJuNTh2TkdXMG1IKzQxck13Q2xIdUcyYmFqRFcrZlRlcHg2WDdDT2NNWUpjQmk1N2x0WW5LRkVLQ1EyKzZiY0pDY1Z0TzYxanlyZUFqbjByTTBEUnFoU2VmUHVXL3paSkd4anRkUEh6UzFnUEJEZ29UT3RkU3ZvdTBrV1o0RURsMHNheXNzTnR3RDgrZmU3ZjEwcVIzdmVZUGJOUFZPZ1NNNU9LdHZPc3NpSGRjUXoxK2lSNGVVdS9TOUtNV0RNK3phdDJ1cUJmeXNLVlk0WWhXWDRHMzJrWXZjMW5kbk9PQi9rWkJUeUpPZXdSc3FIajJIajZ6L1ZRWms1UEg1Zzl2T3F3ZENlaEk0TmpVS3BXcFJTQjFvMklKOTRZc2ZEc0kzRUZ1TUFmY1JqSnI3clZiU0ZqT2hTLzk2bytadTZNbjR6TEs4d2taMXp0THRjN1pmcVEwenhIU3QxTUZOakRBNnVHUVN2VmpFbnlZdmZXWkNiVFBTcE13amhoK0FIaEo1RzdabVN0eXRoOGthK3Bxd2xmQkZMUGdnVmM4aWRXam1lTFRYRkpscFNUbWtwRFpPemtYWnlWR0pZdTI4emxQRnZ3TkxzcjVXQ3Fib0ZtMmFzdFg0RmZJWEt2UjJPT0s2MkFHUWQxT1RuTUJlN1dNZEJRdEJlaGt1NXBxUT09",
+     "fareType": "public",
+     "isRefundable": "refundable",
+     "corporateId": null,
+     "itinTotalFare": {
+      "baseFare": {
+       "amount": 30474.429176438283,
+       "currencyCode": "INR"
+      },
+      "totalTax": {
+       "amount": 41375.04085659146,
+       "currencyCode": "INR"
+      },
+      "totalFare": {
+       "amount": 71849.47003302975,
+       "currencyCode": "INR"
+      }
+     },
+     "ptC_FareBreakdowns": [
+      {
+       "baggageInfo": [
+        "25kg",
+        "25kg",
+        "25kg",
+        "25kg"
+       ],
+       "cabinBaggageInfo": [
+        "7kg",
+        "7kg",
+        "7kg",
+        "7kg"
+       ],
+       "fareBasisCodes": [
+        "TL2YXQI3",
+        "TL2YXSI3",
+        "GP2YXSI3",
+        "GP2YXSI3"
+       ],
+       "fareTypeCodes": null,
+       "fareTypeCodesName": null,
+       "passengerFare": {
+        "baseFare": {
+         "amount": 15237.214588219142,
+         "currencyCode": "INR"
+        },
+        "totalTax": {
+         "amount": 20687.52042829573,
+         "currencyCode": "INR"
+        },
+        "totalFare": {
+         "amount": 35924.735016514875,
+         "currencyCode": "INR"
+        }
+       },
+       "passengerTypeQuantity": {
+        "code": "ADT",
+        "quantity": 2
+       },
+       "penaltiesInfo": []
+      }
+     ],
+     "isHold": false
+    },
+    "directionInd": "return",
+    "originDestinationOptions": [
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DEL",
+        "arrivalAirportName": "Indira Gandhi International Airport",
+        "arrivalAirportCity": "Delhi",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "28.5600000000",
+        "arrivalAirportlongitude": "77.0900000000",
+        "arrivalDateTime": "2026-10-20T10:15:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "T",
+        "departureAirportLocationCode": "AMD",
+        "departureAirportName": "Ahmedabad Airport",
+        "departureAirportCity": "Ahmedabad",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "23.0700000000",
+        "departureAirportlongitude": "72.6200000000",
+        "departureDateTime": "2026-10-20T08:25:00",
+        "flightNumber": "1117",
+        "journeyDuration": 110,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "1117",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 90,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       },
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DXB",
+        "arrivalAirportName": "Dubai Airport",
+        "arrivalAirportCity": "Dubai",
+        "arrivalAirportCountry": "United Arab Emirates",
+        "arrivalAirportlatitude": "25.2500000000",
+        "arrivalAirportlongitude": "55.3500000000",
+        "arrivalDateTime": "2026-10-20T14:00:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "T",
+        "departureAirportLocationCode": "DEL",
+        "departureAirportName": "Indira Gandhi International Airport",
+        "departureAirportCity": "Delhi",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "28.5600000000",
+        "departureAirportlongitude": "77.0900000000",
+        "departureDateTime": "2026-10-20T11:45:00",
+        "flightNumber": "4209",
+        "journeyDuration": 225,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "4209",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "3",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     },
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DEL",
+        "arrivalAirportName": "Indira Gandhi International Airport",
+        "arrivalAirportCity": "Delhi",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "28.5600000000",
+        "arrivalAirportlongitude": "77.0900000000",
+        "arrivalDateTime": "2026-10-27T01:50:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "G",
+        "departureAirportLocationCode": "DXB",
+        "departureAirportName": "Dubai Airport",
+        "departureAirportCity": "Dubai",
+        "departureAirportCountry": "United Arab Emirates",
+        "departureAirportlatitude": "25.2500000000",
+        "departureAirportlongitude": "55.3500000000",
+        "departureDateTime": "2026-10-26T20:40:00",
+        "flightNumber": "916",
+        "journeyDuration": 220,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "916",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "1",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 1170,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       },
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "AMD",
+        "arrivalAirportName": "Ahmedabad Airport",
+        "arrivalAirportCity": "Ahmedabad",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "23.0700000000",
+        "arrivalAirportlongitude": "72.6200000000",
+        "arrivalDateTime": "2026-10-27T23:05:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "G",
+        "departureAirportLocationCode": "DEL",
+        "departureAirportName": "Indira Gandhi International Airport",
+        "departureAirportCity": "Delhi",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "28.5600000000",
+        "departureAirportlongitude": "77.0900000000",
+        "departureDateTime": "2026-10-27T21:20:00",
+        "flightNumber": "9633",
+        "journeyDuration": 105,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "IX",
+         "flightNumber": "1210",
+         "operatingAirlineName": "Air India Express",
+         "airlinelogoPath": "/Flightlogos/IX.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "1",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 4,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     }
+    ],
+    "providerName": null,
+    "fareRules": [],
+    "flightGroupId": 0
+   },
+   {
+    "itinerarySourceCode": "MiQkMSQkUEtGYXJlJCQxOWNmMDJlMC0zZThjLTRmY2ItOTc2NC01ODNiOGMyZDM0NWMkJEF1L0RXWEtoVjVOWmJKbEl0cm9PN3RnS3I4NDkwZ0NZU3NXZXJzT2hNTEs2QUU5NFVLRDB0NUZIbDdrelZXYnNyb3dXVytlUFEwYkJWUHZQdzRHUW1PSzlrWU9JcVpCNWp5TkVCSUZNcFp3dzVhRktub1NEMldYQ3JQRXd5c0RocVVkWWh1NmpSWVFwWDdiNnlEN29pbGdzVU9MenMyZkhaSmFleWdCQmdpaERGOWNYVytLSk9YZXo2Yllxais2WHBweHMveUlmR24rTDEwaXlVY1d5SEJwam1XWnZYSTNVcVp0MVl3YzI1TDJpaXY3YnU0SEIwMWZXS3A0azk0UEZCMkVIbzZNU2EzRStkc0JrQTBSTHJyVVlXSTBMV3psT1I5VEtORXFROUx5ZjlmcGZQQVc4amdLYkI0dkNvbzdiRGZwR0NBb0FtdW1QaGtEcTNSZHN4NnJ4aURDYzVITElZTjB4a3NQTUxwUmhmZWZreWU3c0g4YVVwQWZVNWZabWpzQmhkSzZPRzFoUFFESUdoRko2U0hIS1Z4VVJqRW1RRzQzaWFiL2EwbWlUVW0wVXA5Y0I3MzhIbCtlaUFGT1NVZUpNVFdXeFM3WGpFdzZlUHVyaFdMK3JwTnBiRDk4QmgrZm1YUkZyTEMva2VJYU5QOVdFblM0QllkZ0JTbTdFNDhSRWZUamRYT3hnV1pjaEFSVUNFUT09",
+    "airItineraryPricingInfo": {
+     "fareSourceCode": "MiQkMSQkUEtGYXJlJCQxOWNmMDJlMC0zZThjLTRmY2ItOTc2NC01ODNiOGMyZDM0NWMkJEF1L0RXWEtoVjVOWmJKbEl0cm9PN3RnS3I4NDkwZ0NZU3NXZXJzT2hNTEs2QUU5NFVLRDB0NUZIbDdrelZXYnNyb3dXVytlUFEwYkJWUHZQdzRHUW1PSzlrWU9JcVpCNWp5TkVCSUZNcFp3dzVhRktub1NEMldYQ3JQRXd5c0RocVVkWWh1NmpSWVFwWDdiNnlEN29pbGdzVU9MenMyZkhaSmFleWdCQmdpaERGOWNYVytLSk9YZXo2Yllxais2WHBweHMveUlmR24rTDEwaXlVY1d5SEJwam1XWnZYSTNVcVp0MVl3YzI1TDJpaXY3YnU0SEIwMWZXS3A0azk0UEZCMkVIbzZNU2EzRStkc0JrQTBSTHJyVVlXSTBMV3psT1I5VEtORXFROUx5ZjlmcGZQQVc4amdLYkI0dkNvbzdiRGZwR0NBb0FtdW1QaGtEcTNSZHN4NnJ4aURDYzVITElZTjB4a3NQTUxwUmhmZWZreWU3c0g4YVVwQWZVNWZabWpzQmhkSzZPRzFoUFFESUdoRko2U0hIS1Z4VVJqRW1RRzQzaWFiL2EwbWlUVW0wVXA5Y0I3MzhIbCtlaUFGT1NVZUpNVFdXeFM3WGpFdzZlUHVyaFdMK3JwTnBiRDk4QmgrZm1YUkZyTEMva2VJYU5QOVdFblM0QllkZ0JTbTdFNDhSRWZUamRYT3hnV1pjaEFSVUNFUT09",
+     "fareType": "public",
+     "isRefundable": "refundable",
+     "corporateId": null,
+     "itinTotalFare": {
+      "baseFare": {
+       "amount": 32016.028498116157,
+       "currencyCode": "INR"
+      },
+      "totalTax": {
+       "amount": 41023.345193851266,
+       "currencyCode": "INR"
+      },
+      "totalFare": {
+       "amount": 73039.37369196743,
+       "currencyCode": "INR"
+      }
+     },
+     "ptC_FareBreakdowns": [
+      {
+       "baggageInfo": [
+        "25kg",
+        "25kg",
+        "25kg",
+        "25kg"
+       ],
+       "cabinBaggageInfo": [
+        "7kg",
+        "7kg",
+        "7kg",
+        "7kg"
+       ],
+       "fareBasisCodes": [
+        "LL2YXSI3",
+        "LL2YXSI3",
+        "LP2YXQI3",
+        "LP2YXQI3"
+       ],
+       "fareTypeCodes": null,
+       "fareTypeCodesName": null,
+       "passengerFare": {
+        "baseFare": {
+         "amount": 16008.014249058078,
+         "currencyCode": "INR"
+        },
+        "totalTax": {
+         "amount": 20511.672596925633,
+         "currencyCode": "INR"
+        },
+        "totalFare": {
+         "amount": 36519.68684598371,
+         "currencyCode": "INR"
+        }
+       },
+       "passengerTypeQuantity": {
+        "code": "ADT",
+        "quantity": 2
+       },
+       "penaltiesInfo": []
+      }
+     ],
+     "isHold": false
+    },
+    "directionInd": "return",
+    "originDestinationOptions": [
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "BOM",
+        "arrivalAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "arrivalAirportCity": "Mumbai",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "19.1000000000",
+        "arrivalAirportlongitude": "72.8700000000",
+        "arrivalDateTime": "2026-10-20T13:40:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "AMD",
+        "departureAirportName": "Ahmedabad Airport",
+        "departureAirportCity": "Ahmedabad",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "23.0700000000",
+        "departureAirportlongitude": "72.6200000000",
+        "departureDateTime": "2026-10-20T12:00:00",
+        "flightNumber": "2848",
+        "journeyDuration": 100,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "2848",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 140,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       },
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DXB",
+        "arrivalAirportName": "Dubai Airport",
+        "arrivalAirportCity": "Dubai",
+        "arrivalAirportCountry": "United Arab Emirates",
+        "arrivalAirportlatitude": "25.2500000000",
+        "arrivalAirportlongitude": "55.3500000000",
+        "arrivalDateTime": "2026-10-20T17:25:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "BOM",
+        "departureAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "departureAirportCity": "Mumbai",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "19.1000000000",
+        "departureAirportlongitude": "72.8700000000",
+        "departureDateTime": "2026-10-20T16:00:00",
+        "flightNumber": "4217",
+        "journeyDuration": 175,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "4217",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     },
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DEL",
+        "arrivalAirportName": "Indira Gandhi International Airport",
+        "arrivalAirportCity": "Delhi",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "28.5600000000",
+        "arrivalAirportlongitude": "77.0900000000",
+        "arrivalDateTime": "2026-10-27T05:15:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "DXB",
+        "departureAirportName": "Dubai Airport",
+        "departureAirportCity": "Dubai",
+        "departureAirportCountry": "United Arab Emirates",
+        "departureAirportlatitude": "25.2500000000",
+        "departureAirportlongitude": "55.3500000000",
+        "departureDateTime": "2026-10-26T23:55:00",
+        "flightNumber": "996",
+        "journeyDuration": 230,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "996",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "1",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 315,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       },
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "AMD",
+        "arrivalAirportName": "Ahmedabad Airport",
+        "arrivalAirportCity": "Ahmedabad",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "23.0700000000",
+        "arrivalAirportlongitude": "72.6200000000",
+        "arrivalDateTime": "2026-10-27T12:10:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "DEL",
+        "departureAirportName": "Indira Gandhi International Airport",
+        "departureAirportCity": "Delhi",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "28.5600000000",
+        "departureAirportlongitude": "77.0900000000",
+        "departureDateTime": "2026-10-27T10:30:00",
+        "flightNumber": "2521",
+        "journeyDuration": 100,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "2521",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "3",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     }
+    ],
+    "providerName": null,
+    "fareRules": [],
+    "flightGroupId": 0
+   },
+   {
+    "itinerarySourceCode": "MiQkMiQkUEtGYXJlJCQxOWNmMDJlMC0zZThjLTRmY2ItOTc2NC01ODNiOGMyZDM0NWMkJEF1L0RXWEtoVjVOWmJKbEl0cm9PN3RnS3I4NDkwZ0NZU3NXZXJzT2hNTEs2QUU5NFVLRDB0NUZIbDdrelZXYnNyb3dXVytlUFEwYkJWUHZQdzRHUW1PSzlrWU9JcVpCNWp5TkVCSUZNcFp3TWpyMUlsKzFESXZzTy9MNnpSRnNFN2pvc0kvK25BTXJLNFFPem14aHpoNDJVQi9jNnJ0aHBOS3o4czNab0lWSEtsU0c1MEtFQ293MkJ6cFlRUEViZjkzQ0wwT3kxYWVYL09xSG9ZUTNyZ1pERTRqRXZiZ3B4YTNLam5VTmFOdXBNK0h4cU03VFI0S0xxMTNiUnVSV09vK0doYi9QQk9KMkFLaDRlUFNtZU5QWkdVeWhQS3llUTRpSlovQ0lzSmplbko3bVdQWEJQb2ZqczEvRVJUUWRFS2ZmdDZ6QzkwWFlEZ0R6SFhrY2R5Z1F0STY4NSt2dTl5b1I4a051bU1MamRMWTYrMWNUMTR0NXhKVkh2eU1BWXcxbnFnZytBblJxNE43REZBeGR0Rk1xemRiOEwvS3pZanoxNks2aFdqRzJSaDllcWQyNUJWeXE5b0RIZ1kyT3E1V3UxT1Mxc29FZmlXRUQ5aVBLNVh3UmtGbXphOEpId05YTkRBNUlVQzlSSHNuTWhkRFVFQnBTZkxLQnU3SWVzb0ZlZkF2Ui91SGJFS1F1TSs5TnFGUT09",
+    "airItineraryPricingInfo": {
+     "fareSourceCode": "MiQkMiQkUEtGYXJlJCQxOWNmMDJlMC0zZThjLTRmY2ItOTc2NC01ODNiOGMyZDM0NWMkJEF1L0RXWEtoVjVOWmJKbEl0cm9PN3RnS3I4NDkwZ0NZU3NXZXJzT2hNTEs2QUU5NFVLRDB0NUZIbDdrelZXYnNyb3dXVytlUFEwYkJWUHZQdzRHUW1PSzlrWU9JcVpCNWp5TkVCSUZNcFp3TWpyMUlsKzFESXZzTy9MNnpSRnNFN2pvc0kvK25BTXJLNFFPem14aHpoNDJVQi9jNnJ0aHBOS3o4czNab0lWSEtsU0c1MEtFQ293MkJ6cFlRUEViZjkzQ0wwT3kxYWVYL09xSG9ZUTNyZ1pERTRqRXZiZ3B4YTNLam5VTmFOdXBNK0h4cU03VFI0S0xxMTNiUnVSV09vK0doYi9QQk9KMkFLaDRlUFNtZU5QWkdVeWhQS3llUTRpSlovQ0lzSmplbko3bVdQWEJQb2ZqczEvRVJUUWRFS2ZmdDZ6QzkwWFlEZ0R6SFhrY2R5Z1F0STY4NSt2dTl5b1I4a051bU1MamRMWTYrMWNUMTR0NXhKVkh2eU1BWXcxbnFnZytBblJxNE43REZBeGR0Rk1xemRiOEwvS3pZanoxNks2aFdqRzJSaDllcWQyNUJWeXE5b0RIZ1kyT3E1V3UxT1Mxc29FZmlXRUQ5aVBLNVh3UmtGbXphOEpId05YTkRBNUlVQzlSSHNuTWhkRFVFQnBTZkxLQnU3SWVzb0ZlZkF2Ui91SGJFS1F1TSs5TnFGUT09",
+     "fareType": "public",
+     "isRefundable": "refundable",
+     "corporateId": null,
+     "itinTotalFare": {
+      "baseFare": {
+       "amount": 32016.028498116157,
+       "currencyCode": "INR"
+      },
+      "totalTax": {
+       "amount": 41023.345193851266,
+       "currencyCode": "INR"
+      },
+      "totalFare": {
+       "amount": 73039.37369196743,
+       "currencyCode": "INR"
+      }
+     },
+     "ptC_FareBreakdowns": [
+      {
+       "baggageInfo": [
+        "25kg",
+        "25kg",
+        "25kg",
+        "25kg"
+       ],
+       "cabinBaggageInfo": [
+        "7kg",
+        "7kg",
+        "7kg",
+        "7kg"
+       ],
+       "fareBasisCodes": [
+        "LL2YXSI3",
+        "LL2YXSI3",
+        "LP2YXSI3",
+        "LP2YXQI3"
+       ],
+       "fareTypeCodes": null,
+       "fareTypeCodesName": null,
+       "passengerFare": {
+        "baseFare": {
+         "amount": 16008.014249058078,
+         "currencyCode": "INR"
+        },
+        "totalTax": {
+         "amount": 20511.672596925633,
+         "currencyCode": "INR"
+        },
+        "totalFare": {
+         "amount": 36519.68684598371,
+         "currencyCode": "INR"
+        }
+       },
+       "passengerTypeQuantity": {
+        "code": "ADT",
+        "quantity": 2
+       },
+       "penaltiesInfo": []
+      }
+     ],
+     "isHold": false
+    },
+    "directionInd": "return",
+    "originDestinationOptions": [
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "BOM",
+        "arrivalAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "arrivalAirportCity": "Mumbai",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "19.1000000000",
+        "arrivalAirportlongitude": "72.8700000000",
+        "arrivalDateTime": "2026-10-20T10:30:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "AMD",
+        "departureAirportName": "Ahmedabad Airport",
+        "departureAirportCity": "Ahmedabad",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "23.0700000000",
+        "departureAirportlongitude": "72.6200000000",
+        "departureDateTime": "2026-10-20T08:45:00",
+        "flightNumber": "494",
+        "journeyDuration": 105,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "494",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 330,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       },
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DXB",
+        "arrivalAirportName": "Dubai Airport",
+        "arrivalAirportCity": "Dubai",
+        "arrivalAirportCountry": "United Arab Emirates",
+        "arrivalAirportlatitude": "25.2500000000",
+        "arrivalAirportlongitude": "55.3500000000",
+        "arrivalDateTime": "2026-10-20T17:25:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "BOM",
+        "departureAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "departureAirportCity": "Mumbai",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "19.1000000000",
+        "departureAirportlongitude": "72.8700000000",
+        "departureDateTime": "2026-10-20T16:00:00",
+        "flightNumber": "4217",
+        "journeyDuration": 175,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "4217",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     },
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DEL",
+        "arrivalAirportName": "Indira Gandhi International Airport",
+        "arrivalAirportCity": "Delhi",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "28.5600000000",
+        "arrivalAirportlongitude": "77.0900000000",
+        "arrivalDateTime": "2026-10-26T15:05:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "DXB",
+        "departureAirportName": "Dubai Airport",
+        "departureAirportCity": "Dubai",
+        "departureAirportCountry": "United Arab Emirates",
+        "departureAirportlatitude": "25.2500000000",
+        "departureAirportlongitude": "55.3500000000",
+        "departureDateTime": "2026-10-26T09:55:00",
+        "flightNumber": "930",
+        "journeyDuration": 220,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "930",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "1",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "Boing",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 285,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       },
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "AMD",
+        "arrivalAirportName": "Ahmedabad Airport",
+        "arrivalAirportCity": "Ahmedabad",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "23.0700000000",
+        "arrivalAirportlongitude": "72.6200000000",
+        "arrivalDateTime": "2026-10-26T21:30:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "DEL",
+        "departureAirportName": "Indira Gandhi International Airport",
+        "departureAirportCity": "Delhi",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "28.5600000000",
+        "departureAirportlongitude": "77.0900000000",
+        "departureDateTime": "2026-10-26T19:50:00",
+        "flightNumber": "2619",
+        "journeyDuration": 100,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "2619",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "3",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     }
+    ],
+    "providerName": null,
+    "fareRules": [],
+    "flightGroupId": 0
+   },
+   {
+    "itinerarySourceCode": "MiQkMyQkUEtGYXJlJCQxOWNmMDJlMC0zZThjLTRmY2ItOTc2NC01ODNiOGMyZDM0NWMkJDFuaDBBTzRxQ2pldTNld3pRY3hmK0FTZWJ3d250Y2xmdk8rdmZtTTd4QXE3ZTNOdTRoSnZla0tmMHliUmh0UmpJcUtzbTJsWEpnQ0lTbkxVd3pGeGFHSEl5Uy9ndkxJWkpDcHlTNEVyWFQwRUQxK0pWSnRNUmZpckVrRERsWlFoRU41NWRXTnV6bTQxc1lxNzRMRVdsU0YzUEYvMTBIemxqWlBSMjNwQlFWUzRBYk5XT1JWWkZEUE4wdkxjWHB2dGRUL1JDUUJTaHZXWnZaTlBqTk1IVTJ4V3FKMlB0ZjdYdmhCY05FVS9seDdyc05jTURoS1ZPakFUSzJKNERmWTBCdHIxd1FOdHhtVEVBSjJqVUVhQ3lFcjB0bjZ2WGVYbjczUUdqUDIwN2hrV2pZbCtNMS9sVWZSdWZneU1vc3ErMWp6U01Yd2UreTN4bTJjaTYyTXFTU1RFdkFPd3FReVZvMnZpcElEdEZ3bmlud21JNHFSNFV5RWZVNk1RcEJ2WENHdWZmMHprRUZOdUw0TFV6VlVQU3V4YWNEVGhaeGgvVlBLcElaSHpvaWZkMEFwYTZpVnpLY2ZVVHEwTjRQV1MxY05CenlscU1TZURWdGZEeWdKT1MrSi95WGtrRmZHL2RsZUd1cWFxRkJ0b0FNUFVsTWZLZjdNRTlaNElLQ1BtaFNMSWpmOEVXWEZSWm1DQnFsazFjdz09",
+    "airItineraryPricingInfo": {
+     "fareSourceCode": "MiQkMyQkUEtGYXJlJCQxOWNmMDJlMC0zZThjLTRmY2ItOTc2NC01ODNiOGMyZDM0NWMkJDFuaDBBTzRxQ2pldTNld3pRY3hmK0FTZWJ3d250Y2xmdk8rdmZtTTd4QXE3ZTNOdTRoSnZla0tmMHliUmh0UmpJcUtzbTJsWEpnQ0lTbkxVd3pGeGFHSEl5Uy9ndkxJWkpDcHlTNEVyWFQwRUQxK0pWSnRNUmZpckVrRERsWlFoRU41NWRXTnV6bTQxc1lxNzRMRVdsU0YzUEYvMTBIemxqWlBSMjNwQlFWUzRBYk5XT1JWWkZEUE4wdkxjWHB2dGRUL1JDUUJTaHZXWnZaTlBqTk1IVTJ4V3FKMlB0ZjdYdmhCY05FVS9seDdyc05jTURoS1ZPakFUSzJKNERmWTBCdHIxd1FOdHhtVEVBSjJqVUVhQ3lFcjB0bjZ2WGVYbjczUUdqUDIwN2hrV2pZbCtNMS9sVWZSdWZneU1vc3ErMWp6U01Yd2UreTN4bTJjaTYyTXFTU1RFdkFPd3FReVZvMnZpcElEdEZ3bmlud21JNHFSNFV5RWZVNk1RcEJ2WENHdWZmMHprRUZOdUw0TFV6VlVQU3V4YWNEVGhaeGgvVlBLcElaSHpvaWZkMEFwYTZpVnpLY2ZVVHEwTjRQV1MxY05CenlscU1TZURWdGZEeWdKT1MrSi95WGtrRmZHL2RsZUd1cWFxRkJ0b0FNUFVsTWZLZjdNRTlaNElLQ1BtaFNMSWpmOEVXWEZSWm1DQnFsazFjdz09",
+     "fareType": "public",
+     "isRefundable": "refundable",
+     "corporateId": null,
+     "itinTotalFare": {
+      "baseFare": {
+       "amount": 25830.092563474645,
+       "currencyCode": "INR"
+      },
+      "totalTax": {
+       "amount": 40237.89154706482,
+       "currencyCode": "INR"
+      },
+      "totalFare": {
+       "amount": 66067.98411053946,
+       "currencyCode": "INR"
+      }
+     },
+     "ptC_FareBreakdowns": [
+      {
+       "baggageInfo": [
+        "25kg",
+        "25kg",
+        "25kg",
+        "25kg"
+       ],
+       "cabinBaggageInfo": [
+        "7kg",
+        "7kg",
+        "7kg",
+        "7kg"
+       ],
+       "fareBasisCodes": [
+        "UL2YXSI3",
+        "UL2YXQI3",
+        "LP2YXSI3",
+        "LP2YXQI3"
+       ],
+       "fareTypeCodes": null,
+       "fareTypeCodesName": null,
+       "passengerFare": {
+        "baseFare": {
+         "amount": 12915.046281737323,
+         "currencyCode": "INR"
+        },
+        "totalTax": {
+         "amount": 20118.94577353241,
+         "currencyCode": "INR"
+        },
+        "totalFare": {
+         "amount": 33033.99205526973,
+         "currencyCode": "INR"
+        }
+       },
+       "passengerTypeQuantity": {
+        "code": "ADT",
+        "quantity": 2
+       },
+       "penaltiesInfo": []
+      }
+     ],
+     "isHold": false
+    },
+    "directionInd": "return",
+    "originDestinationOptions": [
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "BOM",
+        "arrivalAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "arrivalAirportCity": "Mumbai",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "19.1000000000",
+        "arrivalAirportlongitude": "72.8700000000",
+        "arrivalDateTime": "2026-10-20T22:40:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "U",
+        "departureAirportLocationCode": "AMD",
+        "departureAirportName": "Ahmedabad Airport",
+        "departureAirportCity": "Ahmedabad",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "23.0700000000",
+        "departureAirportlongitude": "72.6200000000",
+        "departureDateTime": "2026-10-20T21:00:00",
+        "flightNumber": "2494",
+        "journeyDuration": 100,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "2494",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 435,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       },
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "DXB",
+        "arrivalAirportName": "Dubai Airport",
+        "arrivalAirportCity": "Dubai",
+        "arrivalAirportCountry": "United Arab Emirates",
+        "arrivalAirportlatitude": "25.2500000000",
+        "arrivalAirportlongitude": "55.3500000000",
+        "arrivalDateTime": "2026-10-21T07:25:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "U",
+        "departureAirportLocationCode": "BOM",
+        "departureAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "departureAirportCity": "Mumbai",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "19.1000000000",
+        "departureAirportlongitude": "72.8700000000",
+        "departureDateTime": "2026-10-21T05:55:00",
+        "flightNumber": "4215",
+        "journeyDuration": 180,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "4215",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 0,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     },
+     {
+      "flightSegments": [
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "BOM",
+        "arrivalAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "arrivalAirportCity": "Mumbai",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "19.1000000000",
+        "arrivalAirportlongitude": "72.8700000000",
+        "arrivalDateTime": "2026-10-26T23:50:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "DXB",
+        "departureAirportName": "Dubai Airport",
+        "departureAirportCity": "Dubai",
+        "departureAirportCountry": "United Arab Emirates",
+        "departureAirportlatitude": "25.2500000000",
+        "departureAirportlongitude": "55.3500000000",
+        "departureDateTime": "2026-10-26T18:55:00",
+        "flightNumber": "920",
+        "journeyDuration": 205,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "920",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "1",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "AirBus",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 400,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       },
+       {
+        "segmentOptionKey": null,
+        "arrivalAirportLocationCode": "AMD",
+        "arrivalAirportName": "Ahmedabad Airport",
+        "arrivalAirportCity": "Ahmedabad",
+        "arrivalAirportCountry": "India",
+        "arrivalAirportlatitude": "23.0700000000",
+        "arrivalAirportlongitude": "72.6200000000",
+        "arrivalDateTime": "2026-10-27T07:50:00",
+        "cabinClass": null,
+        "cabinClassText": "ECONOMY",
+        "cabinClassRBD": "L",
+        "departureAirportLocationCode": "BOM",
+        "departureAirportName": "Chhatrapati Shivaji Maharaj International Airport",
+        "departureAirportCity": "Mumbai",
+        "departureAirportCountry": "India",
+        "departureAirportlatitude": "19.1000000000",
+        "departureAirportlongitude": "72.8700000000",
+        "departureDateTime": "2026-10-27T06:30:00",
+        "flightNumber": "493",
+        "journeyDuration": 80,
+        "marketingAirlineCode": "AI",
+        "marketingAirlineName": "Air India Limited",
+        "operatingAirline": {
+         "code": "AI",
+         "flightNumber": "493",
+         "operatingAirlineName": "Air India Limited",
+         "airlinelogoPath": "/Flightlogos/AI.svg"
+        },
+        "stopQuantity": 2,
+        "departureTerminal": "2",
+        "arrivalTerminal": null,
+        "connectIn": null,
+        "seatsRemaining": 9,
+        "totalDays": null,
+        "passengerType": null,
+        "direction": 1,
+        "airLineCode": null,
+        "luggageInfo": null,
+        "cabinLuggageInfo": "SB",
+        "aircraft": "",
+        "airlinelogoPath": "/Flightlogos/AI.svg",
+        "layoverTimeInMinute": 0,
+        "isAirportChange": false,
+        "airportChangeInfo": null
+       }
+      ]
+     }
+    ],
+    "providerName": null,
+    "fareRules": [],
+    "flightGroupId": 0
+   }
+  ]
+ },
+ "error": [],
+ "responseDateTime": "2026-10-13 11:37:18",
+ "target": "Test"
+}

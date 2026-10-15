@@ -81,7 +81,7 @@ Optional, on demand only:
 ```
 1. resolve IATA (local reference data)
 2. /api/Flight/search   → pricedItineraries[]
-3. /api/Flight/getflightdetails(fare_source_code) → baggage, fare rules
+3. /api/Flight/getflightdetails(fare_source_code + conversationId) → fare rules
 ```
 
 ### Transfers
@@ -244,22 +244,51 @@ Response is under **`data.pricedItineraries[]`** — not `result`. Each itinerar
 has `originDestinationOptions[].flightSegments[]`.
 
 **Used per segment:** `departureAirportLocationCode`, `arrivalAirportLocationCode`,
-`departureDateTime`, `arrivalDateTime`, `journeyDuration`, `marketingAirlineName`,
-`flightNumber`, `stopQuantity`, `cabinClass`, baggage.
+`departureDateTime`, `arrivalDateTime`, `journeyDuration`, `layoverTimeInMinute`,
+`marketingAirlineName`, `operatingAirline`, `flightNumber`, `cabinClassText`,
+`luggageInfo`, `cabinLuggageInfo`. Per fare: `itinTotalFare.totalFare`,
+`ptC_FareBreakdowns[]` (per passenger type, `passengerFare` is per person),
+`isRefundable`, `penaltiesInfo`, `baggageInfo`. Envelope: `conversationId`.
 
-**Trap: `journeyDuration` is per segment and excludes layovers.** Saudia
-HYD→JED→DXB is 340 + 175 = 8h 35m of flying, but the passenger departs 02:25
-and lands 19:30 — **17h 5m**. Total duration must be computed as
-`last arrival − first departure`, or a one-stop reads like a direct flight.
+**Trap: segment times are local clock times with no UTC offset.** Arrival minus
+departure is wrong on every leg that crosses a timezone — 1h 30m short on every
+India→Gulf flight (FZ 438 AMD 04:25 → DXB 06:20 is 3h 25m, not 1h 55m). A
+leg's true duration is `sum(journeyDuration) + sum(layoverTimeInMinute)`
+(matched 1,440 of 1,440 live legs). `layoverTimeInMinute` sits on the segment
+**arriving** at the stop; it equals the gap between that arrival and the next
+departure, both local to the same airport (2,055 of 2,055).
 
-`airlineCode: ""` returns every carrier — 142 fares across 10 airlines in
-~4.7s, which is both faster and more complete than filtering per airline.
+**Trap: `CabinPreference: "C"` also returns economy fares** (255 of 371 on a live
+AMD→DXB search). Filter on each segment's `cabinClassText`. "Economy Premium"
+and "Economy Standard" are economy fare brands, not premium economy.
 
-Supplier rejects parties above 9 pax.
+**Trap: the same flights come from two providers** (`providerName` null and
+`Techno_Flight`) with different price, refundable label and baggage text. Show
+one row per itinerary. The null-provider "refundable" fares carry no
+`penaltiesInfo`.
+
+**Passengers:** `ADT` / `CHD` + `childAge` / `INF` + `infantAge` (under 2s;
+~₹800–3,200 vs ~₹30,000 as `CHD`). Max 9 **including infants** — over that the
+supplier answers `success:false`, "Maximum 9 Passengers are allowed."
+
+**Coverage:** `airlineCode: ""` is the broadest single call, but single codes add
+fares it omits (AI alone added ~200 on AMD→DXB) and some carriers come only via
+`""` (FZ's own code returned 0 on AMD→DXB). Both are fired in parallel and the
+answer waits for all of them (≤25s).
+
+**Price vs gujjutours.com:** the website's price is exactly **our fare × 1.05**
+(15 of 16 fares, both providers, 2026-10-13). The supplier confirmed this is
+by design: the website's token has `IsFromApi = false` and carries a 5%
+tariff-wise markup; the chatbot's token (`IsFromApi = true`) gets the fare
+without it. The chatbot quotes the supplier fare unchanged. `Target` in the
+payload is ignored — the account always gets `target: "Test"`.
 
 #### `POST /api/Flight/getflightdetails`
-Takes `fare_source_code` from a search result. Returns baggage allowance and
-fare rules for that exact fare.
+Takes `fare_source_code`, `itinerarySourceCode` **and the search's
+`conversationId`** — without it the body is empty. Returns the same shape as
+search for that one fare, re-priced, with `penaltiesInfo` (refund/change
+rules). The model passes the 12-character `fare_ref`; the tool resolves the
+full code and conversation from the flight cache.
 
 ### 3.4 Transfers, restaurants, visas, packages
 
@@ -306,7 +335,7 @@ transfers. The schema now forces it.
 | `get_tour_options` | `tour_id`, `travel_date`, **`adults`** |
 | `get_tour_details` | `tour_id` |
 | `get_tour_timeslots` | `tour_id`, `option_id`, `supplier_id`, `travel_date` |
-| `get_flight_details` | `fare_source_code` |
+| `get_flight_details` | `fare_source_code` (the search's `fare_ref`) |
 | `get_transfer_details` | `unique_key`, both coords, both place_ids, `departure_date` |
 | `get_restaurant_details` | `restaurant_id`, `destination_city`, `search_date` |
 | `get_package_details` | `package_id` |

@@ -77,7 +77,8 @@ export type StreamEvent =
   | { type: "tool"; tool: ToolCall }
   | { type: "options"; group: OptionGroup }
   | { type: "error"; message: string }
-  | { type: "done"; message_id: string };
+  // `content` is the reply as the server stored it; absent from older servers.
+  | { type: "done"; message_id: string; content?: string };
 
 // --- Live-stream segments -------------------------------------------------
 // While a turn streams we keep an ORDERED list of what happened instead of one
