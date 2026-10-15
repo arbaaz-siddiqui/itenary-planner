@@ -10,6 +10,14 @@ export interface User {
   last_name?: string;
 }
 
+/** Travel defaults from Settings; the agent reads them at the start of a chat. */
+export interface Preferences {
+  origin_city?: string;
+  usual_party_size?: number | null;
+  diet?: "" | "Veg" | "Jain" | "Vegan";
+  nationality?: string;
+}
+
 export interface ChatSession {
   id: string;
   title: string;
@@ -40,7 +48,7 @@ export interface ToolCall {
 
 export type OptionKind = "tours" | "hotels" | "flights" | "restaurants";
 
-/** An option card. Keys are kind-dependent; see components/OptionCards.tsx. */
+/** An option card. Keys are kind-dependent; see components/cards/Cards.tsx. */
 export type OptionItem = Record<string, unknown>;
 
 export interface OptionGroup {

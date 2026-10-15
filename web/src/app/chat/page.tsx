@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Menu } from "lucide-react";
+import { ArrowDown, Menu } from "lucide-react";
 import { api, isUnauthorized, MOCK_MODE } from "@/lib/api";
 import type { ChatSession, Message, OptionGroup, User } from "@/lib/types";
 import { useStreamSegments } from "@/lib/useStreamSegments";
@@ -15,6 +15,11 @@ import { Composer, type ComposerHandle, type ComposerMode } from "@/components/C
 import { HomeHero } from "@/components/HomeHero";
 import { SearchDialog } from "@/components/SearchDialog";
 import { SettingsDialog } from "@/components/SettingsDialog";
+import { NameDialog } from "@/components/NameDialog";
+import { DetailPanel } from "@/components/detail/DetailPanel";
+import { CardActionsProvider, type CardActions, type CardRef } from "@/lib/cardActions";
+import { formatInr, num, titleOf } from "@/lib/cards";
+import { toCardRefs } from "@/lib/cardRefs";
 
 const ACTIVE_KEY = "active-session-id";
 
@@ -44,6 +49,14 @@ export default function ChatPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const theme = useTheme();
   const composerRef = useRef<ComposerHandle>(null);
+
+  // Cards: saved with the heart (per browser), and the one open in detail.
+  const [saved, setSaved] = usePersisted<CardRef[]>("saved-cards", []);
+  const [detail, setDetail] = useState<CardRef | null>(null);
+  const detailPushed = useRef(false);
+  const [nameLater, setNameLater] = useState(false);
+  /** False once the reader scrolls up during a reply: show "Jump to latest". */
+  const [atBottom, setAtBottom] = useState(true);
 
   // Live segments + the idle "Thinking…" timer. Segments are a streaming-only
   // view; the settled message still persists as content + tool_calls.
@@ -137,6 +150,15 @@ export default function ChatPage() {
     const el = scrollRef.current;
     if (!el) return;
     pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    setAtBottom(pinnedRef.current);
+  }, []);
+
+  const jumpToLatest = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    pinnedRef.current = true;
+    setAtBottom(true);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, []);
 
   useEffect(() => {
@@ -161,6 +183,125 @@ export default function ChatPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // --- cards: detail view (URL-synced), saving, booking ---
+
+  const openCard = useCallback((card: CardRef) => {
+    setDetail(card);
+    // ?view=kind&id=... so the view can be shared and Back closes it.
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", card.kind);
+    url.searchParams.set("id", card.id);
+    if (detailPushed.current) window.history.replaceState({ detail: true }, "", url);
+    else window.history.pushState({ detail: true }, "", url);
+    detailPushed.current = true;
+  }, []);
+
+  const closeCard = useCallback(() => {
+    setDetail(null);
+    if (detailPushed.current) {
+      detailPushed.current = false;
+      window.history.back();
+    } else {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("view");
+      url.searchParams.delete("id");
+      window.history.replaceState(null, "", url);
+    }
+  }, []);
+
+  // Browser Back closes the panel instead of leaving the page.
+  useEffect(() => {
+    const onPop = () => {
+      detailPushed.current = false;
+      setDetail(null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // A shared link (?view=&id=) reopens its card once the chat or the saved
+  // list has it.
+  useEffect(() => {
+    if (detail) return;
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("id");
+    if (!params.get("view") || !id) return;
+    const fromChat = messages.flatMap((m) =>
+      (m.options ?? [])
+        .filter((g) => g.kind !== "suggestions" && g.kind !== "itinerary_pdf")
+        .flatMap((g) => toCardRefs(g.items ?? [], g.kind)),
+    );
+    const found = [...fromChat, ...saved].find((c) => c.id === id);
+    if (found) setDetail(found);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, saved]);
+
+  function bookCard(card: CardRef) {
+    // The selection goes to the agent as the customer's next message, so the
+    // conversation continues from exactly what they picked.
+    if (detail) closeCard();
+    const price = formatInr(
+      num(card.item, "price_inr") ?? num(card.item, "price_per_adult_inr") ?? num(card.item, "price_per_person_inr"),
+    );
+    const what = titleOf(card.item, card.kind) + (price ? " (" + price + ")" : "");
+    void send("I would like to book " + what + ". What do you need from me to confirm it?");
+  }
+
+  const cardActions: CardActions = {
+    open: openCard,
+    isSaved: (id) => saved.some((c) => c.id === id),
+    toggleSave: (card) =>
+      setSaved((list) =>
+        list.some((c) => c.id === card.id) ? list.filter((c) => c.id !== card.id) : [card, ...list].slice(0, 50),
+      ),
+    book: bookCard,
+  };
+
+  function askAbout(card: CardRef) {
+    closeCard();
+    // Names the kind and the exact title, so the agent ties the question to
+    // the option it returned under that name.
+    composerRef.current?.prefill("About the " + card.kind + " " + titleOf(card.item, card.kind) + ": ");
+  }
+
+  /** Send the last question again, replacing the reply it got. */
+  function regenerate() {
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    if (!lastUser || streaming) return;
+    setMessages((prev) => {
+      const i = prev.findIndex((m) => m.id === lastUser.id);
+      return i >= 0 ? prev.slice(0, i) : prev;
+    });
+    void send(lastUser.content);
+  }
+
+  /** Download the open chat as plain text. */
+  function exportChat() {
+    if (!messages.length) return;
+    const title = sessions.find((x) => x.id === activeId)?.title ?? "GujjuTours chat";
+    const body = messages
+      .map((m) => (m.role === "user" ? "You" : "GujjuTours AI") + ":\n" + m.content.trim())
+      .join("\n\n");
+    const blob = new Blob([title + "\n\n" + body + "\n"], { type: "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 60) + ".txt";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  /** Delete every chat. Throws if any delete failed, so Settings can say so. */
+  async function clearAllChats() {
+    if (streaming) stop();
+    const results = await Promise.allSettled(sessions.map((x) => api.deleteSession(x.id)));
+    const failed = sessions.filter((_, i) => results[i].status === "rejected");
+    setSessions(failed);
+    setPinnedList([]);
+    setActiveId(null);
+    setMessages([]);
+    if (failed.length) throw new Error(failed.length + " chats were not deleted");
+  }
 
   // --- session CRUD ---
 
@@ -412,6 +553,11 @@ export default function ChatPage() {
     },
     onLogout: logout,
     themeResolved: theme.resolved,
+    saved,
+    onOpenSaved: (c: CardRef) => {
+      setDrawerOpen(false);
+      openCard(c);
+    },
     onToggleTheme: () => theme.setPref(theme.resolved === "dark" ? "light" : "dark"),
   };
 
@@ -430,6 +576,7 @@ export default function ChatPage() {
   );
 
   return (
+    <CardActionsProvider value={cardActions}>
     <div className="flex h-dvh overflow-hidden bg-bg">
       {/* Desktop: a 280px column that collapses to a 64px icon rail. */}
       <aside
@@ -452,7 +599,7 @@ export default function ChatPage() {
 
       {/* min-w-0 here is load-bearing: without it a wide table in a message
           expands this flex child and pushes the whole layout sideways. */}
-      <main className="relative flex min-w-0 flex-1 flex-col">
+      <main className="relative flex min-w-0 flex-1 flex-col p-2">
         {/* No top bar, as in the reference layout. Below 1024px the sidebar is
             a drawer, so the menu button floats over the page instead. */}
         <button
@@ -478,36 +625,70 @@ export default function ChatPage() {
           </div>
         )}
 
-        <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-          {messagesLoading && messages.length === 0 ? (
-            <p className="py-10 text-center text-sm text-fg-muted">Loading messages…</p>
-          ) : home ? (
-            <HomeHero
-              name={name}
-              needsName={Boolean(user && !user.first_name)}
-              onSaveName={async (first, last) => setUser((await api.updateProfile(first, last)).user)}
-              service={service}
-              onPick={(p) => send(p)}
-            >
-              {composer("hero")}
-            </HomeHero>
-          ) : (
-            <MessageList messages={messages} liveId={liveId} segments={stream.segments} streaming={streaming} />
-          )}
-        </div>
+        {/* One rounded panel for both states: the gradient on the home
+            screen, a dark (or light) canvas with a low brand glow in chat. */}
+        <div
+          className={`relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[22px] ${home ? "" : "chat-canvas border border-border"}`}
+        >
+          <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+            {messagesLoading && messages.length === 0 ? (
+              <div className="mx-auto w-full max-w-[820px] space-y-4 px-4 py-10" role="status" aria-label="Loading messages">
+                <div className="skeleton ml-auto h-10 w-1/3 rounded-2xl" />
+                <div className="skeleton h-4 w-3/4 rounded" />
+                <div className="skeleton h-4 w-2/3 rounded" />
+              </div>
+            ) : home ? (
+              <HomeHero name={name} service={service} onPick={(p) => send(p)}>
+                {composer("hero")}
+              </HomeHero>
+            ) : (
+              <MessageList
+                messages={messages}
+                liveId={liveId}
+                segments={stream.segments}
+                streaming={streaming}
+                onSuggest={(t) => send(t)}
+                onRegenerate={regenerate}
+                onEdit={(t) => composerRef.current?.prefill(t)}
+              />
+            )}
+          </div>
 
-        {!home && composer("dock")}
+          {!home && !atBottom && (
+            <button
+              type="button"
+              onClick={jumpToLatest}
+              className="press absolute bottom-28 left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-medium text-fg shadow-lg hover:bg-surface-2"
+            >
+              <ArrowDown size={14} aria-hidden />
+              Jump to latest
+            </button>
+          )}
+
+          {!home && composer("dock")}
+        </div>
       </main>
 
       <SearchDialog open={searchOpen} sessions={sessions} onPick={selectChat} onClose={() => setSearchOpen(false)} />
+      <DetailPanel card={detail} onClose={closeCard} onBook={bookCard} onAsk={askAbout} />
+      <NameDialog
+        open={Boolean(user && !user.first_name && !nameLater && !MOCK_MODE)}
+        onSaved={setUser}
+        onLater={() => setNameLater(true)}
+        onSignedOut={signOutAndRedirect}
+      />
       <SettingsDialog
         open={settingsOpen}
         user={user}
         onUser={setUser}
         theme={theme.pref}
         onTheme={theme.setPref}
+        onExport={exportChat}
+        onClearAll={clearAllChats}
+        canExport={messages.length > 0}
         onClose={() => setSettingsOpen(false)}
       />
     </div>
+    </CardActionsProvider>
   );
 }

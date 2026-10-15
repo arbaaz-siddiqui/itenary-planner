@@ -763,6 +763,10 @@ _CDN_PREFIXES = ("/tour-images/", "/hotel-images/", "/restaurant-images/")
 # CDN serves it under `/uploads/{guid}/TourMedia/...` -- without that prefix it
 # answers 403. Confirmed by reading the URLs the client's own website uses.
 _CDN_UPLOADS_MARKERS = ("/TourMedia/", "/HotelMedia/", "/RestaurantMedia/")
+# Any tenant media folder: `/{guid}/PackageMedia/`, `/{guid}/TransferVehicleMedia/`
+# and whatever the supplier adds next. Listing folders one by one left package
+# and transfer photos on the API host, which answers 404 for all of them.
+_TENANT_MEDIA = re.compile(r"/[0-9a-f]{8}-[0-9a-f-]{27}/[a-z]+media/", re.IGNORECASE)
 
 
 def _cdn_url(path: str) -> str | None:
@@ -773,7 +777,7 @@ def _cdn_url(path: str) -> str | None:
     # and a case-sensitive test left every restaurant and dish image pointing
     # at the API host, which answers 404.
     lowered = path.lower()
-    if any(m.lower() in lowered for m in _CDN_UPLOADS_MARKERS):
+    if any(m.lower() in lowered for m in _CDN_UPLOADS_MARKERS) or _TENANT_MEDIA.search(path):
         return MEDIA_CDN_BASE + "/uploads" + path
     return None
 

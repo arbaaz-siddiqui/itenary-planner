@@ -458,3 +458,100 @@ ul.ui-list {
   scrollbar-width: thin;
   scrollbar-color: var(--color-sidebar-border) transparent;
 }
+
+/* Skeleton shimmer for cards and photos that are still on their way. */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-2) 0%,
+    color-mix(in srgb, var(--color-surface-2) 55%, var(--color-fg) 8%) 50%,
+    var(--color-surface-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* Cards fade in one by one, 60ms apart, once their row is ready. */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.card-in {
+  animation: card-in 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+
+/* The chat column sits on the same rounded panel as the home screen, with
+   the brand colour kept as a low glow along the bottom, so starting a chat
+   continues the page instead of dropping to a blank black screen. */
+.chat-canvas {
+  background:
+    radial-gradient(ellipse 90% 55% at 50% 118%, rgb(232 80 58 / 0.22), transparent 70%),
+    radial-gradient(ellipse 70% 45% at 0% 100%, rgb(43 127 200 / 0.18), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 100% 0%, rgb(43 127 200 / 0.1), transparent 70%),
+    var(--color-surface);
+}
+:root[data-theme="light"] .chat-canvas {
+  background:
+    radial-gradient(ellipse 90% 55% at 50% 118%, rgb(232 80 58 / 0.12), transparent 70%),
+    radial-gradient(ellipse 70% 45% at 0% 100%, rgb(43 127 200 / 0.12), transparent 70%),
+    var(--color-surface);
+}
+
+/* Detail panel slides in from the right (up from the bottom on phones);
+   dialogs pop in. Both answer the user's own action. */
+@keyframes panel-in-right {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes panel-in-up {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes pop {
+  from {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.panel-in {
+  animation: panel-in-up 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@media (min-width: 640px) {
+  .panel-in {
+    animation-name: panel-in-right;
+  }
+}
+.panel-pop {
+  animation: pop 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}

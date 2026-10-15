@@ -150,7 +150,11 @@ def _apply_filters(
     for r in rows:
         if restaurant_name and not matches(restaurant_name, r.name):
             continue
-        if cuisine and not matches_any(cuisine, r.cuisines):
+        # "Veg" / "Vegetarian" arrives as a cuisine as often as a feature. It
+        # is the restaurant's food type, not a cuisine name, so the type counts
+        # too. Matching cuisines alone hit "Vegetables" on one menu and left
+        # the other eight pure-veg restaurants without cards.
+        if cuisine and not matches_any(cuisine, [*r.cuisines, r.veg_type]):
             continue
         if feature and not matches_any(feature, [*r.tags, r.veg_type]):
             continue

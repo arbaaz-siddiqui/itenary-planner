@@ -1,85 +1,35 @@
 "use client";
 
 import { memo } from "react";
+import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { groupSegments, summarizeResult, toolLabel } from "@/lib/segments";
 import type { Segment } from "@/lib/types";
 
 type ToolSegment = Extract<Segment, { type: "tool_call" }>;
 
-/** Reuses the same three-dot animation the old typing indicator used. */
+/** Shown before anything else has arrived. */
 function ThinkingLine({ content }: { content?: string }) {
   return (
-    <div
-      className="flex items-center gap-2 py-0.5 text-xs text-fg-muted"
-      aria-live="polite"
-    >
+    <div className="flex items-center gap-2.5 py-1 text-sm text-fg-muted" aria-live="polite">
       <span className="inline-flex items-center gap-1" aria-hidden="true">
-        <span className="dot h-1.5 w-1.5 rounded-full bg-fg-muted" />
-        <span className="dot h-1.5 w-1.5 rounded-full bg-fg-muted" />
-        <span className="dot h-1.5 w-1.5 rounded-full bg-fg-muted" />
+        <span className="dot h-1.5 w-1.5 rounded-full bg-brand-blue" />
+        <span className="dot h-1.5 w-1.5 rounded-full bg-brand-blue" />
+        <span className="dot h-1.5 w-1.5 rounded-full bg-brand-red" />
       </span>
-      <span className="animate-pulse">{content ?? "Thinking…"}</span>
+      <span>{content ?? "Thinking"}</span>
     </div>
   );
 }
 
 function Spinner() {
-  return (
-    <svg
-      className="h-3 w-3 shrink-0 animate-spin text-fg-muted"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
-      <path
-        d="M21 12a9 9 0 0 0-9-9"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function Check() {
-  return (
-    <svg
-      className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
-  );
-}
-
-function Cross() {
-  return (
-    <svg
-      className="h-3 w-3 shrink-0 text-red-500"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="3"
-      strokeLinecap="round"
-      aria-hidden="true"
-    >
-      <path d="M18 6 6 18M6 6l12 12" />
-    </svg>
-  );
+  return <Loader2 size={14} className="shrink-0 animate-spin text-brand-blue" aria-hidden />;
 }
 
 function StatusIcon({ status }: { status: ToolSegment["status"] }) {
   if (status === "running") return <Spinner />;
-  if (status === "error") return <Cross />;
-  return <Check />;
+  if (status === "error") return <XCircle size={14} className="shrink-0 text-brand-red" aria-hidden />;
+  return <CheckCircle2 size={14} className="shrink-0 text-success" aria-hidden />;
 }
 
 /**
@@ -109,14 +59,16 @@ const ToolChip = memo(function ToolChip({ calls }: { calls: ToolSegment[] }) {
         : `${calls.filter((c) => c.status !== "error").length} of ${calls.length} succeeded`;
 
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs">
+    // A status line, not a box: "Searching flights" while it runs, then a
+    // quiet "Searched flights, 9 results" once it is done.
+    <div className="flex items-center gap-2 py-0.5 text-[13px]" aria-live={running ? "polite" : undefined}>
       <StatusIcon status={status} />
       <span className="min-w-0 flex-1 truncate">
-        <span className={running ? "text-fg-muted" : "font-medium"}>
+        <span className={running ? "text-fg" : "text-fg-muted"}>
           {label}
           {count}
         </span>
-        {summary && <span className="ml-1.5 text-fg-muted">· {summary}</span>}
+        {summary && <span className="text-fg-muted">, {summary}</span>}
       </span>
     </div>
   );
@@ -159,7 +111,7 @@ export const SegmentList = memo(function SegmentList({
         const isLast = row.index === lastIndex;
         return (
           <div key={`tx-${row.index}`} className="min-w-0">
-            <Markdown>{s.content}</Markdown>
+            <Markdown streaming={streaming}>{s.content}</Markdown>
             {streaming && isLast && <span className="caret text-fg-muted">▍</span>}
           </div>
         );

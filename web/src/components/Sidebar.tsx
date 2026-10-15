@@ -21,6 +21,9 @@ import type { ChatSession, User } from "@/lib/types";
 import { SERVICES, displayFirstName, type ServiceId } from "@/lib/services";
 import { groupSessions } from "@/lib/sessionGroups";
 import { BrandLogo } from "./BrandLogo";
+import type { CardRef } from "@/lib/cardActions";
+import { titleOf } from "@/lib/cards";
+import { KIND_ICON } from "./cards/Cards";
 
 const ROW = "flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm transition";
 const ROW_IDLE = "text-sidebar-fg/85 hover:bg-sidebar-2 hover:text-sidebar-fg";
@@ -176,6 +179,9 @@ export interface SidebarProps {
   onLogout: () => void;
   themeResolved: "dark" | "light";
   onToggleTheme: () => void;
+  /** Cards saved with the heart, newest first. */
+  saved: CardRef[];
+  onOpenSaved: (card: CardRef) => void;
 }
 
 export function Sidebar(p: SidebarProps) {
@@ -268,8 +274,26 @@ export function Sidebar(p: SidebarProps) {
         </div>
       </nav>
 
-      {/* Chats: hidden in the rail, where a title cannot fit. */}
+      {/* Chats and saved items: hidden in the rail, where a title cannot fit. */}
       <nav aria-label="Chat sessions" className="sidebar-scroll mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-2">
+        {!collapsed && p.saved.length > 0 && (
+          <section className="mb-3">
+            <p className="px-2.5 pb-1 text-xs font-medium text-sidebar-muted">Saved</p>
+            <ul className="space-y-0.5">
+              {p.saved.slice(0, 8).map((c) => {
+                const Icon = KIND_ICON[c.kind];
+                return (
+                  <li key={c.id}>
+                    <button type="button" onClick={() => p.onOpenSaved(c)} className={`${ROW} py-1.5 ${ROW_IDLE} ${FOCUS}`}>
+                      <Icon size={15} className="shrink-0 text-brand-red" aria-hidden />
+                      <span className="truncate">{titleOf(c.item, c.kind)}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
         {!collapsed &&
           (p.loading ? (
             <p className="px-2.5 py-2 text-xs text-sidebar-muted">Loading chats…</p>

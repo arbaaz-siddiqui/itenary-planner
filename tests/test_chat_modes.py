@@ -32,3 +32,14 @@ def test_registration_names_are_optional_for_older_clients():
 def test_user_out_always_carries_name_fields():
     out = _user_out({"id": 1, "email": "a@example.com"})
     assert out == {"id": "1", "email": "a@example.com", "first_name": "", "last_name": ""}
+
+
+def test_preferences_validate_and_cover_the_remembered_keys():
+    from api.main import _PREF_KEYS, Preferences
+
+    p = Preferences(origin_city="Ahmedabad", usual_party_size=4, diet="Jain")
+    assert set(p.model_dump()) == set(_PREF_KEYS)
+    with pytest.raises(ValidationError):
+        Preferences(diet="Keto")
+    with pytest.raises(ValidationError):
+        Preferences(usual_party_size=0)

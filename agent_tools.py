@@ -1305,7 +1305,18 @@ def _build_all_tools() -> list[BaseTool]:
     ]
 
 
-ALL_TOOLS: list[BaseTool] = _build_all_tools()
+def _split_for_ui(tools: list[BaseTool]) -> list[BaseTool]:
+    """Every tool's option list reaches the cards in full and the model slim.
+
+    See mcp_tools/ui_payload.py: photos and long texts stay out of the model's
+    context, and the cards are built from the full copy.
+    """
+    from mcp_tools.ui_payload import wrap_tool
+
+    return [wrap_tool(t) for t in tools]
+
+
+ALL_TOOLS: list[BaseTool] = _split_for_ui(_build_all_tools())
 
 
 # =============================================================================

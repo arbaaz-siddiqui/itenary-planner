@@ -690,9 +690,13 @@ def extract_tool_calls(response: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def extract_search_options(response: dict[str, Any]) -> dict[str, Any]:
+    from mcp_tools.ui_payload import full_result
+
     for tc in reversed(extract_tool_calls(response)):
         parsed = _coerce_to_dict(tc.get("output"))
         if isinstance(parsed, dict) and isinstance(parsed.get("options"), list):
+            # The model saw a slim copy; the cards get the full one.
+            parsed = full_result(parsed)
             return {
                 "kind": _kind_from_tool_name(tc.get("tool_name") or ""),
                 "options": parsed["options"],

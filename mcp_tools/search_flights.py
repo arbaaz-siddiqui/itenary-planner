@@ -240,6 +240,13 @@ def _clock(ts: Any) -> str:
     return ""
 
 
+def _day(ts: Any) -> str:
+    """'2026-09-15 22:25:00' -> '2026-09-15'. Empty string when unparseable."""
+    text = str(ts or "").strip()
+    day = text.split(" ", 1)[0].split("T", 1)[0]
+    return day if len(day) == 10 and day[4] == "-" else ""
+
+
 # --- Baggage ------------------------------------------------------------------
 # The supplier states baggage two ways, differently per provider: a fare-level
 # list (ptC_FareBreakdowns.baggageInfo, one entry per segment on one provider,
@@ -365,7 +372,17 @@ def _leg_summary(segments: Any) -> dict[str, Any]:
     connections = flight_layovers(segments)
     duration = flight_leg_duration_min(segments)
 
+    dep_day, arr_day = _day(first.get("departure")), _day(last.get("arrival"))
     return {
+        # Airports and local dates, so a card can show "RPR 13:30 -> DXB 22:05"
+        # and a "+1 day" marker without parsing the route string.
+        "from_airport": str(first.get("from_airport") or ""),
+        "to_airport": str(last.get("to_airport") or ""),
+        "from_city": str(first.get("from_city") or ""),
+        "to_city": str(last.get("to_city") or ""),
+        "departure_date": dep_day,
+        "arrival_date": arr_day,
+        "next_day": bool(dep_day and arr_day and arr_day > dep_day),
         "departure_time": _clock(first.get("departure")),
         "arrival_time": _clock(last.get("arrival")),
         "departure_terminal": str(first.get("departure_terminal") or ""),

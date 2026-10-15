@@ -3,7 +3,7 @@
 
 import { mockApi } from "./mock";
 import { parseSSE } from "./sse";
-import type { ChatSession, Message, StreamEvent, TourDetailSection, User } from "./types";
+import type { ChatSession, Message, Preferences, StreamEvent, TourDetailSection, User } from "./types";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 export const MOCK_MODE = process.env.NEXT_PUBLIC_MOCK_MODE === "true";
@@ -102,6 +102,14 @@ export const api = {
     MOCK_MODE ? mockApi.logout() : request("/auth/logout", { method: "POST" }),
 
   me: (): Promise<{ user: User }> => (MOCK_MODE ? mockApi.me() : request("/auth/me")),
+
+  getPreferences: (): Promise<{ preferences: Preferences }> =>
+    MOCK_MODE ? Promise.resolve({ preferences: {} }) : request("/me/preferences"),
+
+  setPreferences: (prefs: Preferences): Promise<{ preferences: Preferences }> =>
+    MOCK_MODE
+      ? Promise.resolve({ preferences: prefs })
+      : request("/me/preferences", { method: "PATCH", body: JSON.stringify(prefs) }),
 
   updateProfile: (firstName: string, lastName: string): Promise<{ user: User }> =>
     MOCK_MODE

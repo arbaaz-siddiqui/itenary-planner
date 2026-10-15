@@ -446,7 +446,7 @@ def _impl(
                 f"{len(o.timeslots)} start times: "
                 + ", ".join(x["time"] for x in o.timeslots[:6])
                 + (" …" if len(o.timeslots) > 6 else "")
-                if getattr(o, "timeslots", []) else "Flexible — no fixed start time"
+                if getattr(o, "timeslots", []) else "Flexible, no fixed start time"
             )
             option_dicts.append(d)
 

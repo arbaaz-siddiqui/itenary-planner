@@ -93,6 +93,23 @@ class Registration(Credentials):
     last_name: str = Field(default="", max_length=80)
 
 
+class Preferences(BaseModel):
+    """Travel defaults the customer sets in Settings.
+
+    Stored with the facts the agent already remembers between chats, under
+    the same keys, so a preference set here and one the agent learned from
+    the conversation are the same thing and the newest wins.
+    """
+
+    origin_city: str = Field(default="", max_length=60)
+    usual_party_size: int | None = Field(default=None, ge=1, le=20)
+    diet: Literal["", "Veg", "Jain", "Vegan"] = ""
+    nationality: str = Field(default="", max_length=60)
+
+
+_PREF_KEYS = ("origin_city", "usual_party_size", "diet", "nationality")
+
+
 class ProfileUpdate(BaseModel):
     first_name: str = Field(min_length=1, max_length=80)
     last_name: str = Field(default="", max_length=80)
@@ -192,6 +209,23 @@ async def logout(response: Response) -> None:
 @app.get("/auth/me")
 async def me(user: dict = Depends(auth.current_user)) -> dict[str, Any]:
     return {"user": _user_out(user)}
+
+
+@app.get("/me/preferences")
+async def get_preferences(user: dict = Depends(auth.current_user)) -> dict[str, Any]:
+    facts = repository.get_memory(str(user["id"]))
+    return {"preferences": {k: facts.get(k) for k in _PREF_KEYS if facts.get(k) not in (None, "")}}
+
+
+@app.patch("/me/preferences")
+async def set_preferences(
+    body: Preferences, user: dict = Depends(auth.current_user)
+) -> dict[str, Any]:
+    # An empty field clears that preference rather than being ignored, so the
+    # customer can take one back.
+    facts = {k: (v if v not in ("", None) else None) for k, v in body.model_dump().items()}
+    merged = repository.merge_memory(str(user["id"]), facts)
+    return {"preferences": {k: merged.get(k) for k in _PREF_KEYS if merged.get(k) not in (None, "")}}
 
 
 @app.patch("/auth/me")
@@ -330,6 +364,19 @@ _MODE_CONTEXT = {
     ),
 }
 
+# Follow-up chips after a reply that showed results, by result kind. Each is
+# phrased as the customer would type it, because tapping one sends it as
+# their next message. Only things the agent can actually do.
+_FOLLOW_UPS: dict[str, list[str]] = {
+    "tours": ["Show private transfer prices", "Add a hotel for these dates", "Plan my full trip"],
+    "hotels": ["Only free cancellation", "Show cheaper hotels", "Add an airport transfer"],
+    "flights": ["Show cheaper flights", "Only non-stop flights", "Find hotels in Dubai"],
+    "restaurants": ["Jain-friendly options", "Restaurants near Burj Khalifa", "Show the menu"],
+    "transfers": ["Shared transfer instead", "Add the return transfer", "Find a hotel"],
+    "visa": ["Which documents do I need?", "How long does processing take?", "Find flights to Dubai"],
+    "packages": ["Show package details", "Compare the top two", "Plan a custom trip"],
+}
+
 _TURN_FAILED = (
     "Sorry, I could not finish that one. Please send it again, and I will "
     "pick up from where we were."
@@ -359,8 +406,8 @@ async def _stream_turn(session: dict, message: str, mode: str = "ask") -> AsyncI
         existing = repository.list_messages(str(session["id"]))
         if len([m for m in existing if m["role"] == "user"]) <= 1:
             facts = repository.get_memory(str(session["user_id"]))
-            if facts:
-                pairs = ", ".join(f"{k}: {v}" for k, v in facts.items())
+            pairs = ", ".join(f"{k}: {v}" for k, v in (facts or {}).items() if v not in (None, ""))
+            if pairs:
                 memory_prefix = (
                     f"[system] Known about this customer from earlier "
                     f"conversations — use it instead of asking again, but "
@@ -489,9 +536,17 @@ async def _stream_turn(session: dict, message: str, mode: str = "ask") -> AsyncI
             kind = str(found.get("kind") or "tour")
             plural = {
                 "tour": "tours", "hotel": "hotels", "flight": "flights",
-                "restaurant": "restaurants",
+                "restaurant": "restaurants", "transfer": "transfers",
+                "package": "packages", "visa": "visa",
             }
             option_groups = [{"kind": plural.get(kind, kind), "items": items}]
+            follow = _FOLLOW_UPS.get(plural.get(kind, kind))
+            if follow:
+                # Next steps for what was just shown, as tappable chips. Same
+                # persisted channel as the cards, so they survive a reload.
+                option_groups.append(
+                    {"kind": "suggestions", "items": [{"text": t} for t in follow]}
+                )
     except Exception as e:  # noqa: BLE001 — cards are a bonus, never the reply
         log.warning("option_extraction_failed: %s", e)
 

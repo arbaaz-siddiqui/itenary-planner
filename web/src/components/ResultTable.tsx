@@ -2,10 +2,9 @@
 
 import { memo } from "react";
 import { looksNumeric, splitParts, type ResultCell, type ResultRow, type ResultTable as Parsed } from "@/lib/resultTable";
-import { SafeImage } from "./SafeImage";
-import { TourDetails } from "./TourDetails";
 import { Carousel } from "./Carousel";
-import { RestaurantCard } from "./OptionCards";
+import { CardCarousel } from "./cards/CardCarousel";
+import { toCardRefs } from "@/lib/cardRefs";
 import type { OptionItem } from "@/lib/types";
 
 /**
@@ -16,21 +15,6 @@ import type { OptionItem } from "@/lib/types";
  * card carry the tour, its image and its "Show details" link.
  */
 export type OptionLookup = (name: string) => OptionItem | null;
-
-function pickImage(o: OptionItem | null): unknown {
-  if (!o) return null;
-  if (typeof o.image_url === "string" && o.image_url) return o.image_url;
-  const many = o.image_urls;
-  if (Array.isArray(many) && typeof many[0] === "string") return many[0];
-  return null;
-}
-
-function pickNumber(o: OptionItem | null, k: string): number | null {
-  const v = o?.[k];
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v.trim() && Number.isFinite(Number(v))) return Number(v);
-  return null;
-}
 
 /**
  * A result comparison (tours, hotels, flights) the agent wrote as a markdown
@@ -95,35 +79,10 @@ function Attribute({ cell }: { cell: ResultCell }) {
   );
 }
 
-function Card({ row, optionFor }: { row: ResultRow; optionFor?: OptionLookup }) {
-  const option = optionFor?.(row.name) ?? null;
-  // A restaurant row is drawn from the supplier data, not from the table
-  // text: the agent's cells paraphrase ("Features: modern, vibrant ...") and
-  // carry no food photos, while the option row has the real tags, rating,
-  // starting price and the menu's dish photos.
-  if (option && option.restaurant_id != null) {
-    return (
-      <li className="h-full">
-        <RestaurantCard o={option} />
-      </li>
-    );
-  }
-  const image = pickImage(option);
-  // Only when the supplier ids came through: a details link that cannot fetch
-  // is worse than no link.
-  const tourId = pickNumber(option, "tour_id");
-  const optionId = pickNumber(option, "option_id");
-  const supplierId = pickNumber(option, "supplier_id");
-
+/** A table row with no supplier data behind it: the agent's own text only. */
+function Card({ row }: { row: ResultRow }) {
   return (
-    <li className="h-full overflow-hidden rounded-lg border border-border bg-surface">
-      {image != null && (
-        <SafeImage src={image} alt={row.name} ratio="aspect-[16/9]" className="rounded-none" />
-      )}
-      <div className="p-3">
-      {/* Name and price on one line, never separated by a scroll. `min-w-0`
-          on the name is what lets a 90-character tour title wrap instead of
-          pushing the price off the card. */}
+    <li className="h-full rounded-2xl border border-border bg-surface p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           {row.recommended && (
@@ -131,7 +90,7 @@ function Card({ row, optionFor }: { row: ResultRow; optionFor?: OptionLookup }) 
               <RecommendedBadge />
             </div>
           )}
-          <p className="text-[13px] leading-snug font-semibold break-words">{row.name}</p>
+          <p className="text-sm leading-snug font-semibold break-words">{row.name}</p>
         </div>
         <PriceBlock cell={row.price} />
       </div>
@@ -143,23 +102,11 @@ function Card({ row, optionFor }: { row: ResultRow; optionFor?: OptionLookup }) 
           ))}
         </dl>
       )}
-
-      {tourId != null && optionId != null && supplierId != null && (
-        <div className="mt-2.5 border-t border-border pt-2.5">
-          <TourDetails
-            tourId={tourId}
-            optionId={optionId}
-            supplierId={supplierId}
-            name={row.name}
-          />
-        </div>
-      )}
-      </div>
     </li>
   );
 }
 
-function Cards({ table, optionFor }: { table: Parsed; optionFor?: OptionLookup }) {
+function Cards({ table }: { table: Parsed }) {
   // A carousel, not a stack: a 17-tour search became a wall the customer had
   // to scroll past to reach the rest of the reply.
   return (
@@ -169,7 +116,7 @@ function Cards({ table, optionFor }: { table: Parsed; optionFor?: OptionLookup }
           key={i}
           className="ui-list w-[85%] shrink-0 snap-start sm:w-[calc(50%-0.375rem)]"
         >
-          <Card row={row} optionFor={optionFor} />
+          <Card row={row} />
         </ul>
       ))}
     </Carousel>
@@ -253,20 +200,27 @@ export const ResultComparison = memo(function ResultComparison({
   table: Parsed;
   optionFor?: OptionLookup;
 }) {
-  // Restaurants are chosen by their photos — the place and its food — which a
-  // text table cannot carry. When the rows are restaurants we have data for,
-  // cards everywhere: on desktop the wide table showed the agent's text only,
-  // and the photo cards underneath were suppressed because the table named
-  // the same restaurants.
-  const photoLed = Boolean(
-    optionFor && table.rows.some((r) => optionFor(r.name)?.restaurant_id != null),
-  );
+  // Rows the agent wrote about real results become the real cards: photo,
+  // supplier fields, details and booking. Only rows with nothing behind them
+  // stay as text cards.
+  const matched = table.rows.map((row) => ({ row, item: optionFor?.(row.name) ?? null }));
+  const cards = toCardRefs(matched.flatMap((m) => (m.item ? [m.item] : [])));
+  const rest = matched.filter((m) => !m.item).map((m) => m.row);
 
-  // Too many columns to read across at any width — cards only, everywhere.
-  if (photoLed || table.headers.length >= WIDE_TABLE_COLUMNS) {
+  if (cards.length) {
     return (
       <div className="md-result mt-3.5">
-        <Cards table={table} optionFor={optionFor} />
+        <CardCarousel cards={cards} layout={cards[0].kind === "flight" ? "list" : "carousel"} />
+        {rest.length > 0 && <Cards table={{ ...table, rows: rest }} />}
+      </div>
+    );
+  }
+
+  // Too many columns to read across at any width: cards only, everywhere.
+  if (table.headers.length >= WIDE_TABLE_COLUMNS) {
+    return (
+      <div className="md-result mt-3.5">
+        <Cards table={table} />
       </div>
     );
   }
@@ -276,7 +230,7 @@ export const ResultComparison = memo(function ResultComparison({
   return (
     <div className="md-result mt-3.5">
       <div className="sm:hidden">
-        <Cards table={table} optionFor={optionFor} />
+        <Cards table={table} />
       </div>
       <div className="hidden sm:block">
         <WideTable table={table} />

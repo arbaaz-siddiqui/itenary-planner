@@ -371,7 +371,7 @@ def tour_options(
             "timing": (
                 "Fixed start times — call get_tour_timeslots for this option"
                 if option.get("isTimeslot")
-                else "Flexible — no fixed start time"
+                else "Flexible, no fixed start time"
             ),
         }
         with cf.ThreadPoolExecutor(max_workers=2) as ex:

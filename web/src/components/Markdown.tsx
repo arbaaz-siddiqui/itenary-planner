@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { parseResultTable } from "@/lib/resultTable";
 import { ResultComparison, type OptionLookup } from "./ResultTable";
+import { CardsLoading } from "./cards/CardCarousel";
 
 /**
  * Assistant markdown.
@@ -27,8 +28,12 @@ import { ResultComparison, type OptionLookup } from "./ResultTable";
 export const Markdown = memo(function Markdown({
   children,
   optionFor,
+  streaming = false,
 }: {
   children: string;
+  /** While the reply streams, a result table is a half-written list. It
+   *  shows as a loading carousel and becomes cards when the reply is done. */
+  streaming?: boolean;
   /**
    * Supplies the option row behind a table row, by name: its picture and the
    * supplier ids the "Show details" panel needs.
@@ -42,7 +47,13 @@ export const Markdown = memo(function Markdown({
         components={{
           table: ({ node, children }) => {
             const parsed = parseResultTable(node);
-            if (parsed) return <ResultComparison table={parsed} optionFor={optionFor} />;
+            if (parsed) {
+              return streaming ? (
+                <CardsLoading label="Loading results" />
+              ) : (
+                <ResultComparison table={parsed} optionFor={optionFor} />
+              );
+            }
 
             return (
               <div className="md-table-wrap" role="region" aria-label="Table" tabIndex={0}>

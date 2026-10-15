@@ -174,7 +174,7 @@ export const Composer = forwardRef<
   if (hero) return box;
 
   return (
-    <div className="bg-bg px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
+    <div className="px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
       <div className="mx-auto w-full max-w-[820px]">{box}</div>
       <p className="mx-auto mt-1.5 max-w-[820px] text-center text-[11px] text-fg-muted">
         Enter to send, Shift+Enter for a new line
