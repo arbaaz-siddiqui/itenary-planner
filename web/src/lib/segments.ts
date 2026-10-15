@@ -312,6 +312,10 @@ const DONE_LABELS: Record<string, string> = {
 /** Friendly label for a tool name, for the given status. */
 export function toolLabel(name: string, status: "running" | "done" | "error"): string {
   const map = status === "running" ? TOOL_LABELS : DONE_LABELS;
+  // A model sometimes writes the arguments into the name
+  // ("get_tour_details(tour id:53632)<tool call|>"); the server repairs the
+  // call, and the label uses only the tool name.
+  name = (name.match(/^[A-Za-z_][A-Za-z0-9_]*/) ?? [name])[0];
   const hit = map[name];
   if (hit) return hit;
   // Unknown tool: "get_tour_addons" -> "Get tour addons".

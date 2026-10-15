@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, ExternalLink, MapPin, MessageCircle, Plane, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, ExternalLink, MapPin, MessageCircle, Plane, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { CardRef } from "@/lib/cardActions";
 import { formatInr, imagesOf, num, obj, objList, str, strList, titleOf } from "@/lib/cards";
@@ -108,8 +108,24 @@ function Gallery({ images, alt, kind }: { images: string[]; alt: string; kind: C
   const [index, setIndex] = useState(0);
   const strip = useRef<HTMLDivElement>(null);
   const shown = images.length ? images : [""];
+  const go = (i: number) => {
+    const el = strip.current;
+    if (!el) return;
+    const next = Math.max(0, Math.min(shown.length - 1, i));
+    el.scrollTo({ left: next * el.clientWidth, behavior: "smooth" });
+  };
+  const arrow =
+    "press absolute top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-brand-black shadow-md backdrop-blur hover:bg-white disabled:pointer-events-none disabled:opacity-0";
   return (
-    <div className="relative">
+    <div
+      className="relative"
+      tabIndex={shown.length > 1 ? 0 : -1}
+      aria-label={`${alt} photos`}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowRight") go(index + 1);
+        if (e.key === "ArrowLeft") go(index - 1);
+      }}
+    >
       <div
         ref={strip}
         onScroll={(e) => {
@@ -124,6 +140,25 @@ function Gallery({ images, alt, kind }: { images: string[]; alt: string; kind: C
           </div>
         ))}
       </div>
+      {shown.length > 1 && (
+        <>
+          <button type="button" onClick={() => go(index - 1)} disabled={index === 0} aria-label="Previous photo" className={`${arrow} left-3`}>
+            <ChevronLeft size={18} aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={() => go(index + 1)}
+            disabled={index >= shown.length - 1}
+            aria-label="Next photo"
+            className={`${arrow} right-3`}
+          >
+            <ChevronRight size={18} aria-hidden />
+          </button>
+          <span className="absolute right-3 bottom-3 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-medium text-white tabular-nums">
+            {index + 1} / {shown.length}
+          </span>
+        </>
+      )}
       {shown.length > 1 && (
         <div className="absolute inset-x-0 bottom-3 flex justify-center gap-1.5">
           {shown.map((_, i) => (
@@ -403,7 +438,13 @@ function TourBody({ o }: { o: OptionItem }) {
         </Section>
       )}
       {prices.length > 0 && (
-        <Section title={`Prices${str(o, "party") ? ` for ${str(o, "party")}` : ""}`}>
+        <Section
+          title={(() => {
+            const pax = prices.map((p) => num(p, "priced_for_pax")).find((n) => n != null);
+            const who = str(o, "party") ?? (pax ? `${pax} traveller${pax > 1 ? "s" : ""}` : null);
+            return who ? `Total for ${who}` : "Total prices";
+          })()}
+        >
           <Facts
             rows={prices.map((p) => [
               str(p, "transfer_type") ?? "Total",

@@ -144,6 +144,16 @@ export const api = {
       ? mockApi.deleteSession(id)
       : request(`/chat/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
+  /** Whether a reply is still being worked on in this chat. */
+  sessionStatus: (id: string): Promise<{ busy: boolean }> =>
+    MOCK_MODE ? Promise.resolve({ busy: false }) : request(`/chat/sessions/${encodeURIComponent(id)}/status`),
+
+  /** Stop button: the server drops the reply in progress. */
+  cancelTurn: (id: string): Promise<void> =>
+    MOCK_MODE
+      ? Promise.resolve()
+      : request(`/chat/sessions/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
+
   rateMessage: (id: string, value: "up" | "down" | null): Promise<void> =>
     MOCK_MODE
       ? Promise.resolve()

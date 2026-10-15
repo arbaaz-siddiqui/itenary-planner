@@ -104,11 +104,16 @@ export function TourCard({ card, eager }: CardProps) {
   const prices = objList(o, "prices").length ? objList(o, "prices") : objList(o, "transfer_prices");
   const totals = prices.map((p) => num(p, "total_inr") ?? num(p, "price_inr")).filter((n): n is number => n != null);
   const pax = prices.map((p) => num(p, "priced_for_pax")).find((n) => n != null);
-  const party = str(o, "party") ?? (pax ? `${pax} traveller${pax > 1 ? "s" : ""}` : null);
-  const price = totals.length
-    ? formatInr(Math.min(...totals))
-    : (formatInr(num(o, "price_per_adult_inr")) ?? str(o, "price_display"));
-  const priceLabel = totals.length ? `From, total for ${party ?? "your party"}` : "Per adult";
+  // Every tour card shows the same unit, the price per person, so cards can
+  // be compared at a glance; the reply text gives the total for the party.
+  // A party total is split evenly across the travellers it was priced for.
+  const perPerson = totals.length && pax ? Math.min(...totals) / pax : null;
+  const price =
+    formatInr(perPerson != null ? Math.round(perPerson * 100) / 100 : num(o, "price_per_adult_inr")) ??
+    str(o, "price_display");
+  const cheapest = prices.find((p) => (num(p, "total_inr") ?? num(p, "price_inr")) === Math.min(...totals));
+  const withTransfer = perPerson != null && !/without/i.test(str(cheapest, "transfer_type") ?? "");
+  const priceLabel = withTransfer ? "From, per person with transfer" : "From, per person";
   const cancel = str(o, "cancellation") ?? str(o, "cancellation_display");
   const free = cancel ? /free/i.test(cancel) : false;
   return (

@@ -297,6 +297,26 @@ async def get_messages(
     ]
 
 
+@app.get("/chat/sessions/{session_id}/status")
+async def session_status(session_id: str, user: dict = Depends(auth.current_user)) -> dict[str, Any]:
+    """Whether a reply is still being worked on in this chat."""
+    if not repository.get_session(session_id, str(user["id"])):
+        raise HTTPException(status_code=404, detail="Session not found")
+    task = _RUNNING.get(session_id)
+    return {"busy": bool(task and not task.done())}
+
+
+@app.post("/chat/sessions/{session_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_turn(session_id: str, user: dict = Depends(auth.current_user)) -> Response:
+    """Stop button: drop the reply in progress; nothing is saved for it."""
+    if not repository.get_session(session_id, str(user["id"])):
+        raise HTTPException(status_code=404, detail="Session not found")
+    task = _RUNNING.pop(session_id, None)
+    if task and not task.done():
+        task.cancel()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.post("/chat/messages/{message_id}/feedback", status_code=status.HTTP_204_NO_CONTENT)
 async def rate_message(
     message_id: str, body: Feedback, user: dict = Depends(auth.current_user)
@@ -357,6 +377,9 @@ async def chat_stream(
     session = repository.get_session(body.session_id, str(user["id"]))
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    running = _RUNNING.get(str(session["id"]))
+    if running and not running.done():
+        raise HTTPException(status_code=409, detail="Still answering your last message in this chat")
     return StreamingResponse(
         _stream_turn(session, body.message, body.mode, body.regenerate),
         media_type="text/event-stream",
@@ -421,7 +444,47 @@ _TURN_FAILED = (
 )
 
 
+# Turns in progress, by session id. A turn runs as its own task so it is NOT
+# tied to the browser's connection: switching to another chat used to close
+# the stream, which cancelled the turn before its reply was saved, so the
+# answer was simply lost. Now the turn finishes and saves either way, and the
+# chat shows "still working" until it has. Single process: Railway runs one
+# worker for chat-api.
+_RUNNING: dict[str, asyncio.Task[None]] = {}
+
+
 async def _stream_turn(
+    session: dict, message: str, mode: str = "ask", regenerate: bool = False
+) -> AsyncIterator[str]:
+    """Start a turn and relay its events for as long as the browser listens."""
+    sid = str(session["id"])
+    out: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def run() -> None:
+        try:
+            async for event in _turn_events(session, message, mode, regenerate):
+                out.put_nowait(event)
+        except asyncio.CancelledError:
+            log.info("turn_cancelled session=%s", sid)
+            raise
+        except Exception as e:  # noqa: BLE001 -- reported to the customer in words
+            log.exception("turn_failed: %s", e)
+            out.put_nowait(_sse("error", {"message": _TURN_FAILED}))
+        finally:
+            out.put_nowait(None)
+            if _RUNNING.get(sid) is task:
+                _RUNNING.pop(sid, None)
+
+    task = asyncio.create_task(run())
+    _RUNNING[sid] = task
+    while True:
+        event = await out.get()
+        if event is None:
+            break
+        yield event
+
+
+async def _turn_events(
     session: dict, message: str, mode: str = "ask", regenerate: bool = False
 ) -> AsyncIterator[str]:
     """Run one agent turn, emitting SSE events as tokens arrive."""

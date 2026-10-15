@@ -22,6 +22,8 @@ import { formatInr, num, titleOf } from "@/lib/cards";
 import { toCardRefs } from "@/lib/cardRefs";
 
 const ACTIVE_KEY = "active-session-id";
+const WAITING_ID = "local-waiting";
+const WAITING_SEGMENTS = [{ type: "thinking" as const, content: "Still working on your answer" }];
 
 export default function ChatPage() {
   const router = useRouter();
@@ -59,6 +61,8 @@ export default function ChatPage() {
   const [atBottom, setAtBottom] = useState(true);
   /** True for the moment the home screen hands over to the chat. */
   const [entering, setEntering] = useState(false);
+  /** A chat whose reply is still being worked on, by a turn this tab left. */
+  const [waitingFor, setWaitingFor] = useState<string | null>(null);
 
   // Live segments + the idle "Thinking…" timer. Segments are a streaming-only
   // view; the settled message still persists as content + tool_calls.
@@ -129,10 +133,13 @@ export default function ChatPage() {
     setMessagesLoading(true);
     api
       .listMessages(activeId)
-      .then((ms) => {
+      .then(async (ms) => {
         if (!live) return;
         setMessages(ms);
         pinnedRef.current = true;
+        // A reply that kept running while the customer was in another chat.
+        const { busy } = await api.sessionStatus(activeId).catch(() => ({ busy: false }));
+        if (live && busy) setWaitingFor(activeId);
       })
       .catch((e) => {
         if (!live) return;
@@ -171,6 +178,28 @@ export default function ChatPage() {
     // Segments grow without `messages` changing identity while streaming, so
     // they have to be a dependency or the view stops following the reply.
   }, [messages, stream.segments]);
+
+  // Poll a chat whose reply is still running, and load it when it lands.
+  useEffect(() => {
+    if (!waitingFor) return;
+    if (waitingFor !== activeId) {
+      setWaitingFor(null);
+      return;
+    }
+    let live = true;
+    const timer = window.setInterval(async () => {
+      const { busy } = await api.sessionStatus(waitingFor).catch(() => ({ busy: true }));
+      if (!live || busy) return;
+      const ms = await api.listMessages(waitingFor).catch(() => null);
+      if (!live) return;
+      if (ms) setMessages(ms);
+      setWaitingFor(null);
+    }, 2500);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, [waitingFor, activeId]);
 
   // Cancel any in-flight stream on unmount.
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -314,7 +343,7 @@ export default function ChatPage() {
    * message, so opening "New chat" and walking away leaves no empty chat.
    */
   function newChat(withService: ServiceId | null = null) {
-    if (streaming) stop();
+    if (streaming) detach();
     setDrawerOpen(false);
     setActiveId(null);
     setMessages([]);
@@ -322,6 +351,12 @@ export default function ChatPage() {
   }
 
   function selectChat(id: string) {
+    if (id === activeId) {
+      setDrawerOpen(false);
+      setSearchOpen(false);
+      return;
+    }
+    if (streaming) detach();
     setDrawerOpen(false);
     setSearchOpen(false);
     setService(null);
@@ -506,7 +541,21 @@ export default function ChatPage() {
     }
   }
 
+  /**
+   * Leave a reply running on the server while the customer looks elsewhere.
+   * Only this tab stops listening; the turn finishes and is saved, and the
+   * chat shows it when they come back.
+   */
+  function detach() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    stream.settle();
+    setStreaming(false);
+    setLiveId(null);
+  }
+
   function stop() {
+    if (activeId) void api.cancelTurn(activeId).catch(() => {});
     abortRef.current?.abort();
     abortRef.current = null;
     setStreaming(false);
@@ -660,10 +709,14 @@ export default function ChatPage() {
               </HomeHero>
             ) : (
               <MessageList
-                messages={messages}
-                liveId={liveId}
-                segments={stream.segments}
-                streaming={streaming}
+                messages={
+                  waitingFor === activeId
+                    ? [...messages, { id: WAITING_ID, role: "assistant", content: "", created_at: "", pending: true }]
+                    : messages
+                }
+                liveId={waitingFor === activeId ? WAITING_ID : liveId}
+                segments={waitingFor === activeId ? WAITING_SEGMENTS : stream.segments}
+                streaming={streaming || waitingFor === activeId}
                 onSuggest={(t) => send(t)}
                 onRegenerate={regenerate}
                 onEdit={(t) => composerRef.current?.prefill(t)}
@@ -676,10 +729,11 @@ export default function ChatPage() {
             <button
               type="button"
               onClick={jumpToLatest}
-              className="press absolute right-5 bottom-32 z-20 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-medium text-fg shadow-lg hover:bg-surface-2"
+              aria-label="Jump to latest"
+              title="Jump to latest"
+              className="press absolute right-5 bottom-32 z-20 grid h-10 w-10 place-items-center rounded-full border border-border bg-surface text-fg shadow-lg hover:bg-surface-2"
             >
-              <ArrowDown size={14} aria-hidden />
-              Jump to latest
+              <ArrowDown size={18} aria-hidden />
             </button>
           )}
 

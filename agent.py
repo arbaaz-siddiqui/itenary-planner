@@ -359,6 +359,48 @@ def _supersede_earlier_searches(state: dict[str, Any]) -> dict[str, Any]:
     return {"llm_input_messages": out}
 
 
+_INLINE_CALL = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\((.*?)\)?\s*(?:<\|?\s*tool[ _]call\s*\|?>)?\s*$", re.S)
+_TEMPLATE_JUNK = re.compile(r"<\|?\s*\"?\s*\|?>|<\|[^>]*\|>")
+
+
+def _coerce_scalar(value: str) -> Any:
+    v = value.strip().strip("\"'").strip()
+    if re.fullmatch(r"-?\d+", v):
+        return int(v)
+    if re.fullmatch(r"-?\d+\.\d+", v):
+        return float(v)
+    if v.lower() in ("true", "false"):
+        return v.lower() == "true"
+    return v
+
+
+def repair_inline_tool_call(call: dict[str, Any]) -> dict[str, Any] | None:
+    """A call whose arguments were written into its NAME, made runnable.
+
+    Some models emit `get_tour_details(tour id:53632)<tool call|>` as the tool
+    name with empty arguments. No tool has that name, so the call failed, the
+    step line showed the raw text, and the agent told the customer it had a
+    technical problem. The name is the real tool; the parentheses hold
+    `key:value` (or `key=value`) pairs. Returns None when nothing needs fixing.
+    """
+    name = str(call.get("name") or "")
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        return None
+    m = _INLINE_CALL.match(_TEMPLATE_JUNK.sub("", name))
+    if not m:
+        return None
+    base, inner = m.group(1), m.group(2) or ""
+    args = dict(call.get("args") or {}) if isinstance(call.get("args"), dict) else {}
+    for part in re.split(r",(?=\s*[A-Za-z_][A-Za-z0-9_ ]*\s*[:=])", inner):
+        if not re.search(r"[:=]", part):
+            continue
+        key, _, value = re.split(r"([:=])", part, maxsplit=1)
+        key = re.sub(r"\s+", "_", key.strip())
+        if key and key not in args:
+            args[key] = _coerce_scalar(value)
+    return {**call, "name": base, "args": args}
+
+
 def _split_concatenated_args(state: dict[str, Any]) -> dict[str, Any] | None:
     """Split a tool call whose arguments are two JSON objects stuck together.
 
@@ -387,7 +429,18 @@ def _split_concatenated_args(state: dict[str, Any]) -> dict[str, Any] | None:
     decoder = json.JSONDecoder()
     fixed: list[dict[str, Any]] = []
     changed = False
+    calls: list[dict[str, Any]] = []
     for call in [*raw_calls, *invalid]:
+        repaired_call = repair_inline_tool_call(call)
+        if repaired_call is not None:
+            changed = True
+            logging.getLogger("agent.turn").warning(
+                "repaired inline tool call %r -> %s(%s)", call.get("name"),
+                repaired_call["name"], repaired_call["args"],
+            )
+            call = repaired_call
+        calls.append(call)
+    for call in calls:
         args = call.get("args")
         # A recoverable call carries its arguments as an unparsed string.
         text = args if isinstance(args, str) else None
