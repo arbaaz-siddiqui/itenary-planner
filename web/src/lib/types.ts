@@ -5,6 +5,9 @@
 export interface User {
   id: string;
   email: string;
+  /** Empty for accounts created before sign-up asked for a name. */
+  first_name?: string;
+  last_name?: string;
 }
 
 export interface ChatSession {

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   HelpCircle,
   LogOut,
+  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -12,11 +13,12 @@ import {
   Plus,
   Search,
   Settings,
+  Sun,
   Trash2,
   X,
 } from "lucide-react";
 import type { ChatSession, User } from "@/lib/types";
-import { SERVICES, firstNameFrom, type ServiceId } from "@/lib/services";
+import { SERVICES, displayFirstName, type ServiceId } from "@/lib/services";
 import { groupSessions } from "@/lib/sessionGroups";
 import { BrandLogo } from "./BrandLogo";
 
@@ -172,12 +174,15 @@ export interface SidebarProps {
   onTogglePin: (id: string) => void;
   onSettings: () => void;
   onLogout: () => void;
+  themeResolved: "dark" | "light";
+  onToggleTheme: () => void;
 }
 
 export function Sidebar(p: SidebarProps) {
   const collapsed = Boolean(p.collapsed);
   const groups = useMemo(() => groupSessions(p.sessions, p.pinned), [p.sessions, p.pinned]);
-  const name = firstNameFrom(p.user?.email) || "Traveller";
+  const name = displayFirstName(p.user) || "Traveller";
+  const fullName = [p.user?.first_name, p.user?.last_name].filter(Boolean).join(" ") || name;
 
   // In the rail every item is an icon with its label as a tooltip.
   const item = (
@@ -236,7 +241,7 @@ export function Sidebar(p: SidebarProps) {
           onClick={p.onNew}
           title={collapsed ? "New chat" : undefined}
           aria-label={collapsed ? "New chat" : undefined}
-          className={`flex w-full items-center gap-2 rounded-lg bg-brand-blue py-2 text-sm font-medium text-white transition hover:bg-brand-blue-dark ${
+          className={`press flex w-full items-center gap-2 rounded-lg bg-brand-blue py-2 text-sm font-medium text-white hover:bg-brand-blue-dark ${
             collapsed ? "justify-center px-0" : "px-3"
           } ${FOCUS}`}
         >
@@ -256,7 +261,7 @@ export function Sidebar(p: SidebarProps) {
 
       <nav aria-label="Services" className={`mt-4 shrink-0 ${collapsed ? "px-2" : "px-3"}`}>
         {!collapsed && (
-          <p className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wide text-sidebar-muted">Services</p>
+          <p className="px-2.5 pb-1 text-xs font-medium text-sidebar-muted">Services</p>
         )}
         <div className="space-y-0.5">
           {SERVICES.map((s) => item(s.id, s.label, s.icon, () => p.onService(s.id), p.activeService === s.id))}
@@ -273,7 +278,7 @@ export function Sidebar(p: SidebarProps) {
           ) : (
             groups.map((g) => (
               <section key={g.label} className="mb-3">
-                <p className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wide text-sidebar-muted">
+                <p className="px-2.5 pb-1 text-xs font-medium text-sidebar-muted">
                   {g.label}
                 </p>
                 <ul className="space-y-0.5">
@@ -296,6 +301,12 @@ export function Sidebar(p: SidebarProps) {
       </nav>
 
       <div className={`shrink-0 space-y-0.5 border-t border-sidebar-border py-2 ${collapsed ? "px-2" : "px-3"}`}>
+        {item(
+          "theme",
+          p.themeResolved === "dark" ? "Light theme" : "Dark theme",
+          p.themeResolved === "dark" ? Sun : Moon,
+          p.onToggleTheme,
+        )}
         {item("settings", "Settings", Settings, p.onSettings)}
         {item("help", "Help", HelpCircle, () => window.open("https://www.gujjutours.com/en/contact-us", "_blank", "noopener"))}
         <div className={`flex items-center gap-2.5 rounded-lg py-1.5 ${collapsed ? "justify-center" : "px-2.5"}`}>
@@ -309,7 +320,7 @@ export function Sidebar(p: SidebarProps) {
           {!collapsed && (
             <>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{name}</p>
+                <p className="truncate text-sm font-medium">{fullName}</p>
                 <p className="truncate text-[11px] text-sidebar-muted">{p.user?.email ?? ""}</p>
               </div>
               <button

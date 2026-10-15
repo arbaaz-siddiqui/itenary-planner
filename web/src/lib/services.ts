@@ -103,16 +103,22 @@ export const SERVICES: Service[] = [
 export const serviceById = (id: ServiceId | null | undefined) =>
   SERVICES.find((s) => s.id === id) ?? null;
 
-/** Quick-start chips on the home screen before any service is picked. */
-export const QUICK_STARTS = [
-  "Plan a Dubai trip",
-  "Veg restaurants in Dubai",
-  "Flights Ahmedabad to Dubai",
-  "Visa for Oman",
-  "Airport transfer",
+/** Quick-start chips on the home screen before any service is picked. Each
+ * carries its service so the chip shows that service's icon. */
+export const QUICK_STARTS: { text: string; service: ServiceId }[] = [
+  { text: "Plan a 4-day Dubai trip", service: "packages" },
+  { text: "Veg restaurants in Dubai", service: "restaurants" },
+  { text: "Flights Ahmedabad to Dubai", service: "flights" },
+  { text: "Desert safari with pickup", service: "tours" },
+  { text: "Dubai tourist visa", service: "visa" },
 ];
 
-/** "humble.shah@x.com" -> "Humble". The account has no display name yet. */
+/** The name to greet with: the one given at sign-up, else one from the email. */
+export function displayFirstName(user: { email?: string; first_name?: string } | null | undefined): string {
+  return (user?.first_name || "").trim() || firstNameFrom(user?.email);
+}
+
+/** "humble.shah@x.com" -> "Humble", for accounts made before names were asked for. */
 export function firstNameFrom(email: string | null | undefined): string {
   const local = (email ?? "").split("@")[0] ?? "";
   const first = local.split(/[._\-+0-9]/).find(Boolean) ?? "";

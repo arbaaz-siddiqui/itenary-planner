@@ -56,8 +56,9 @@ CREATE TABLE IF NOT EXISTS trip_state (
 
     -- {adults, children, child_ages}
     party          JSONB       NOT NULL DEFAULT '{}'::jsonb,
-    -- {origin, destination, start_date, end_date, nights}
-    window         JSONB       NOT NULL DEFAULT '{}'::jsonb,
+    -- {origin, destination, start_date, end_date, nights}. Not "window": that
+    -- is a reserved word in Postgres, and the bare name failed this migration.
+    trip_window    JSONB       NOT NULL DEFAULT '{}'::jsonb,
     budget_inr     NUMERIC,
 
     -- [{component, id, title, price_inr, price_basis, priced_for_pax, as_of}]

@@ -58,7 +58,10 @@ export default function LoginPage() {
     <main className="flex min-h-dvh items-center justify-center bg-bg px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <h1 className="text-xl font-semibold tracking-tight">Dubai Trip Planner</h1>
+          <h1 className="text-xl font-semibold tracking-tight">
+            <span className="text-brand-blue">gujju</span>
+            <span className="text-brand-red">tours</span> AI travel agent
+          </h1>
           <p className="mt-1.5 text-sm text-fg-muted">Sign in to continue</p>
         </div>
 

@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Menu, Moon, Sun } from "lucide-react";
+import { Menu } from "lucide-react";
 import { api, isUnauthorized, MOCK_MODE } from "@/lib/api";
 import type { ChatSession, Message, OptionGroup, User } from "@/lib/types";
 import { useStreamSegments } from "@/lib/useStreamSegments";
 import { usePersisted } from "@/lib/usePersisted";
 import { useTheme } from "@/lib/theme";
-import { firstNameFrom, serviceById, type ServiceId } from "@/lib/services";
+import { displayFirstName, serviceById, type ServiceId } from "@/lib/services";
 import { Sidebar } from "@/components/Sidebar";
 import { MessageList } from "@/components/MessageList";
 import { Composer, type ComposerHandle, type ComposerMode } from "@/components/Composer";
@@ -50,6 +50,13 @@ export default function ChatPage() {
   const stream = useStreamSegments();
 
   const abortRef = useRef<AbortController | null>(null);
+  /**
+   * A chat created by its own first message. Its history is the message being
+   * streamed right now, so loading it from the server would replace the live
+   * reply with an empty list -- which is how the first message of a new chat
+   * appeared to get no answer at all.
+   */
+  const createdHereRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
 
@@ -98,6 +105,10 @@ export default function ChatPage() {
       return;
     }
     if (typeof window !== "undefined") window.localStorage.setItem(ACTIVE_KEY, activeId);
+    if (createdHereRef.current === activeId) {
+      createdHereRef.current = null;
+      return;
+    }
 
     let live = true;
     setMessagesLoading(true);
@@ -223,8 +234,9 @@ export default function ChatPage() {
     // First message with no session yet: create one on the fly.
     if (!sessionId) {
       try {
-        const s = await api.createSession(text.slice(0, 48));
+        const s = await api.createSession(typed.slice(0, 48));
         setSessions((prev) => [s, ...prev]);
+        createdHereRef.current = s.id;
         setActiveId(s.id);
         sessionId = s.id;
       } catch (e) {
@@ -287,7 +299,7 @@ export default function ChatPage() {
     };
 
     try {
-      for await (const ev of api.stream(sessionId, text, ctrl.signal)) {
+      for await (const ev of api.stream(sessionId, text, ctrl.signal, mode)) {
         // Every event feeds the reducer and re-arms the idle timer, including
         // the ones that produce no segment.
         stream.push(ev);
@@ -374,8 +386,7 @@ export default function ChatPage() {
     );
   }
 
-  const activeTitle = sessions.find((s) => s.id === activeId)?.title ?? "New chat";
-  const name = firstNameFrom(user?.email);
+  const name = displayFirstName(user);
   const home = !messagesLoading && messages.length === 0;
 
   const sidebarProps = {
@@ -400,6 +411,8 @@ export default function ChatPage() {
       setSettingsOpen(true);
     },
     onLogout: logout,
+    themeResolved: theme.resolved,
+    onToggleTheme: () => theme.setPref(theme.resolved === "dark" ? "light" : "dark"),
   };
 
   const composer = (variant: "hero" | "dock") => (
@@ -439,41 +452,22 @@ export default function ChatPage() {
 
       {/* min-w-0 here is load-bearing: without it a wide table in a message
           expands this flex child and pushes the whole layout sideways. */}
-      <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
-          <button
-            type="button"
-            onClick={() => setDrawerOpen(true)}
-            aria-label="Open menu"
-            className="grid h-9 w-9 place-items-center rounded-lg text-fg-muted hover:bg-surface-2 hover:text-fg lg:hidden"
-          >
-            <Menu size={19} aria-hidden />
-          </button>
-          <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{home ? "New chat" : activeTitle}</h1>
-          {MOCK_MODE && (
-            <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
-              MOCK
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={() => theme.setPref(theme.resolved === "dark" ? "light" : "dark")}
-            aria-label={theme.resolved === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-            title={theme.resolved === "dark" ? "Light theme" : "Dark theme"}
-            className="grid h-9 w-9 place-items-center rounded-lg text-fg-muted hover:bg-surface-2 hover:text-fg"
-          >
-            {theme.resolved === "dark" ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
-          </button>
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="Account and settings"
-            title={user?.email}
-            className="grid h-8 w-8 place-items-center rounded-full bg-brand-red text-sm font-semibold text-white"
-          >
-            {(name || "T")[0]}
-          </button>
-        </header>
+      <main className="relative flex min-w-0 flex-1 flex-col">
+        {/* No top bar, as in the reference layout. Below 1024px the sidebar is
+            a drawer, so the menu button floats over the page instead. */}
+        <button
+          type="button"
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open menu"
+          className="absolute left-3 top-3 z-30 grid h-10 w-10 place-items-center rounded-xl border border-border bg-surface/80 text-fg backdrop-blur hover:bg-surface-2 lg:hidden"
+        >
+          <Menu size={19} aria-hidden />
+        </button>
+        {MOCK_MODE && (
+          <span className="absolute right-3 top-3 z-30 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+            MOCK
+          </span>
+        )}
 
         {banner && (
           <div role="alert" className="shrink-0 bg-brand-red/10 px-4 py-2 text-center text-xs text-brand-red">
@@ -484,11 +478,17 @@ export default function ChatPage() {
           </div>
         )}
 
-        <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
+        <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
           {messagesLoading && messages.length === 0 ? (
             <p className="py-10 text-center text-sm text-fg-muted">Loading messages…</p>
           ) : home ? (
-            <HomeHero name={name} service={service} onPick={(p) => send(p)}>
+            <HomeHero
+              name={name}
+              needsName={Boolean(user && !user.first_name)}
+              onSaveName={async (first, last) => setUser((await api.updateProfile(first, last)).user)}
+              service={service}
+              onPick={(p) => send(p)}
+            >
               {composer("hero")}
             </HomeHero>
           ) : (
@@ -502,7 +502,8 @@ export default function ChatPage() {
       <SearchDialog open={searchOpen} sessions={sessions} onPick={selectChat} onClose={() => setSearchOpen(false)} />
       <SettingsDialog
         open={settingsOpen}
-        email={user?.email ?? ""}
+        user={user}
+        onUser={setUser}
         theme={theme.pref}
         onTheme={theme.setPref}
         onClose={() => setSettingsOpen(false)}

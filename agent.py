@@ -1346,10 +1346,13 @@ def _customer_part(text: str) -> str:
     day" on the next turn was refused for having no date. A marker with no
     customer text after it yields "".
     """
-    if not is_internal_marker(text):
-        return text
-    _, sep, rest = text.partition("\n\n")
-    return rest if sep else ""
+    # Several context blocks can lead one message (remembered facts, then the
+    # Plan mode instruction), so strip them all.
+    while is_internal_marker(text):
+        _, sep, text = text.partition("\n\n")
+        if not sep:
+            return ""
+    return text
 
 
 def is_internal_marker(text: object) -> bool:

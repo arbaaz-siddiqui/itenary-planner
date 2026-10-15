@@ -30,12 +30,12 @@
   --color-rating: #ffc107;
   --color-success: #1e9e5a;
 
-  /* The sidebar is black in both themes, as in the reference layout. */
-  --color-sidebar: #0b0b0f;
-  --color-sidebar-2: #1b1b22;
-  --color-sidebar-border: #26262e;
-  --color-sidebar-fg: #f3f3f5;
-  --color-sidebar-muted: #9a9aa6;
+  /* Black in the dark theme, as in the reference; light in the light theme. */
+  --color-sidebar: var(--c-sidebar);
+  --color-sidebar-2: var(--c-sidebar-2);
+  --color-sidebar-border: var(--c-sidebar-border);
+  --color-sidebar-fg: var(--c-sidebar-fg);
+  --color-sidebar-muted: var(--c-sidebar-muted);
 }
 
 :root,
@@ -49,6 +49,11 @@
   --c-fg-muted: #a1a1ab;
   --c-accent: #2b7fc8;
   --c-link: #5aa2e0;
+  --c-sidebar: #0b0b0f;
+  --c-sidebar-2: #1b1b22;
+  --c-sidebar-border: #26262e;
+  --c-sidebar-fg: #f3f3f5;
+  --c-sidebar-muted: #9a9aa6;
 }
 
 :root[data-theme="light"] {
@@ -62,6 +67,11 @@
   --c-accent: #2b7fc8;
   /* Brand blue is 4.3:1 on white; links use the darker shade for AA. */
   --c-link: #1f5f9e;
+  --c-sidebar: #f6f7f9;
+  --c-sidebar-2: #e9ecf1;
+  --c-sidebar-border: #e2e4e9;
+  --c-sidebar-fg: #0b0b0f;
+  --c-sidebar-muted: #5b5f6a;
 }
 
 html,
@@ -76,19 +86,94 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Home state glow: brand blue from the top, brand red from the bottom,
-   fading into the canvas. The on-brand version of the reference's gradient. */
+/* Home state background, after the reference: colour arrives in curved bands
+   (a dome rising from the bottom), not flat stripes. One large ellipse from
+   the top centre runs black, GujjuTours blue, a violet blend, magenta,
+   GujjuTours red and a sunset orange. The fine grain in ::after breaks up the
+   8-bit steps a wide gradient otherwise shows as visible banding. */
 .hero-glow {
-  background:
-    radial-gradient(60% 45% at 50% 18%, color-mix(in srgb, var(--color-brand-blue) 45%, transparent), transparent 70%),
-    radial-gradient(70% 50% at 50% 100%, color-mix(in srgb, var(--color-brand-red) 55%, transparent), transparent 70%),
-    var(--color-bg);
+  position: relative;
+  isolation: isolate;
+  background: radial-gradient(
+    ellipse 135% 118% at 50% -18%,
+    #0b0b0f 0%,
+    #0b0b0f 30%,
+    #0f2440 38%,
+    #1d5ea6 45%,
+    #2b7fc8 50%,
+    #5a6fd0 55%,
+    #8c5fc6 60%,
+    #c04fa6 66%,
+    #e2477c 72%,
+    #e8503a 80%,
+    #f26a2e 89%,
+    #f78a3c 100%
+  );
 }
 :root[data-theme="light"] .hero-glow {
-  background:
-    radial-gradient(60% 45% at 50% 18%, color-mix(in srgb, var(--color-brand-blue) 22%, transparent), transparent 70%),
-    radial-gradient(70% 50% at 50% 100%, color-mix(in srgb, var(--color-brand-red) 22%, transparent), transparent 70%),
-    var(--color-bg);
+  background: radial-gradient(
+    ellipse 135% 118% at 50% -18%,
+    #ffffff 0%,
+    #ffffff 30%,
+    #e6f0fa 38%,
+    #b8d6f2 45%,
+    #8fbfeb 50%,
+    #a9b4ee 55%,
+    #c6a9e6 60%,
+    #e7a3cc 66%,
+    #f6a2b4 72%,
+    #f8a796 80%,
+    #f9b685 89%,
+    #fbc78f 100%
+  );
+}
+.hero-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.09;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* The one orchestrated moment: the home screen settles in once on load. */
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes hero-bloom {
+  from {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.hero-bloom {
+  animation: hero-bloom 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.hero-rise {
+  animation: hero-rise 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--rise-delay, 0ms);
+}
+
+/* Tactile press for buttons: a small physical push, nothing more. */
+.press {
+  transition: transform 120ms ease-out, background-color 150ms ease-out, color 150ms ease-out,
+    border-color 150ms ease-out, opacity 150ms ease-out;
+}
+.press:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 /* Horizontal strips that scroll by swipe, wheel, drag or arrows, with no

@@ -149,7 +149,7 @@ CREATE TABLE artifacts (
 
 CREATE TABLE trip_state (
   thread_id TEXT PRIMARY KEY,
-  party JSONB NOT NULL DEFAULT '{}', window JSONB NOT NULL DEFAULT '{}',
+  party JSONB NOT NULL DEFAULT '{}', trip_window JSONB NOT NULL DEFAULT '{}',
   budget_inr NUMERIC, selections JSONB NOT NULL DEFAULT '[]',
   last_refs JSONB NOT NULL DEFAULT '{}', open_questions JSONB NOT NULL DEFAULT '[]',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()

@@ -21,12 +21,27 @@ from .db import get_pool
 
 
 # ------------------------------------------------------------------ users
-def create_user(email: str, password_hash: str) -> dict[str, Any]:
+def create_user(
+    email: str, password_hash: str, first_name: str = "", last_name: str = ""
+) -> dict[str, Any]:
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "INSERT INTO users (email, password_hash) VALUES (%s, %s) "
-            "RETURNING id, email, created_at",
-            (email.strip(), password_hash),
+            "INSERT INTO users (email, password_hash, first_name, last_name) "
+            "VALUES (%s, %s, %s, %s) "
+            "RETURNING id, email, first_name, last_name, created_at",
+            (email.strip(), password_hash, first_name.strip(), last_name.strip()),
+        )
+        return cur.fetchone()
+
+
+def update_user_name(user_id: str, first_name: str, last_name: str) -> dict[str, Any] | None:
+    """Set the customer's name. Accounts made before names were asked for have
+    empty ones, and the home screen greets by first name."""
+    with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "UPDATE users SET first_name = %s, last_name = %s WHERE id = %s "
+            "RETURNING id, email, first_name, last_name, created_at",
+            (first_name.strip(), last_name.strip(), user_id),
         )
         return cur.fetchone()
 
@@ -36,7 +51,7 @@ def find_user_by_email(email: str) -> dict[str, Any] | None:
     # instead of creating a second account with a split history.
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "SELECT id, email, password_hash, created_at FROM users "
+            "SELECT id, email, first_name, last_name, password_hash, created_at FROM users "
             "WHERE lower(email) = lower(%s)",
             (email.strip(),),
         )
@@ -46,7 +61,8 @@ def find_user_by_email(email: str) -> dict[str, Any] | None:
 def find_user_by_id(user_id: str) -> dict[str, Any] | None:
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "SELECT id, email, created_at FROM users WHERE id = %s", (user_id,)
+            "SELECT id, email, first_name, last_name, created_at FROM users WHERE id = %s",
+            (user_id,),
         )
         return cur.fetchone()
 

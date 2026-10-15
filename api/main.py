@@ -15,7 +15,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -86,6 +86,27 @@ class Credentials(BaseModel):
     password: str = Field(min_length=8)
 
 
+class Registration(Credentials):
+    # Optional so an older client that sends only email + password still
+    # registers; the UI asks for both and greets by first name.
+    first_name: str = Field(default="", max_length=80)
+    last_name: str = Field(default="", max_length=80)
+
+
+class ProfileUpdate(BaseModel):
+    first_name: str = Field(min_length=1, max_length=80)
+    last_name: str = Field(default="", max_length=80)
+
+
+def _user_out(user: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(user["id"]),
+        "email": user["email"],
+        "first_name": user.get("first_name") or "",
+        "last_name": user.get("last_name") or "",
+    }
+
+
 class SessionCreate(BaseModel):
     title: str | None = None
 
@@ -97,6 +118,8 @@ class SessionRename(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str
     message: str = Field(min_length=1)
+    # "ask": answer the question in hand. "plan": build a whole trip.
+    mode: Literal["ask", "plan"] = "ask"
 
 
 # ----------------------------------------------------------------- health
@@ -140,12 +163,14 @@ async def health_db() -> dict[str, Any]:
 
 # ------------------------------------------------------------------- auth
 @app.post("/auth/register", status_code=status.HTTP_201_CREATED)
-async def register(body: Credentials, response: Response) -> dict[str, Any]:
+async def register(body: Registration, response: Response) -> dict[str, Any]:
     if repository.find_user_by_email(body.email):
         raise HTTPException(status_code=409, detail="That email is already registered")
-    user = repository.create_user(body.email, auth.hash_password(body.password))
+    user = repository.create_user(
+        body.email, auth.hash_password(body.password), body.first_name, body.last_name
+    )
     auth.set_session_cookie(response, str(user["id"]))
-    return {"user": {"id": str(user["id"]), "email": user["email"]}}
+    return {"user": _user_out(user)}
 
 
 @app.post("/auth/login")
@@ -156,7 +181,7 @@ async def login(body: Credentials, response: Response) -> dict[str, Any]:
     if not user or not auth.verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     auth.set_session_cookie(response, str(user["id"]))
-    return {"user": {"id": str(user["id"]), "email": user["email"]}}
+    return {"user": _user_out(user)}
 
 
 @app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -166,7 +191,17 @@ async def logout(response: Response) -> None:
 
 @app.get("/auth/me")
 async def me(user: dict = Depends(auth.current_user)) -> dict[str, Any]:
-    return {"user": {"id": str(user["id"]), "email": user["email"]}}
+    return {"user": _user_out(user)}
+
+
+@app.patch("/auth/me")
+async def update_me(
+    body: ProfileUpdate, user: dict = Depends(auth.current_user)
+) -> dict[str, Any]:
+    updated = repository.update_user_name(str(user["id"]), body.first_name, body.last_name)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return {"user": _user_out(updated)}
 
 
 # --------------------------------------------------------------- sessions
@@ -272,7 +307,7 @@ async def chat_stream(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return StreamingResponse(
-        _stream_turn(session, body.message),
+        _stream_turn(session, body.message, body.mode),
         media_type="text/event-stream",
         # Nginx and some proxies buffer SSE into one chunk at the end, which
         # defeats streaming entirely.
@@ -280,13 +315,28 @@ async def chat_stream(
     )
 
 
+# Plan mode turns a question into a trip. Sent as context ahead of the
+# customer's words (like the remembered facts), never stored as their message.
+# Ask mode needs no instruction: answering the question in hand is the
+# agent's default.
+_MODE_CONTEXT = {
+    "plan": (
+        "[system] Plan mode: the customer wants a complete trip planned, not a "
+        "single answer. If the destination, travel dates, departure city or "
+        "party (adults, children and their ages) is missing, ask for all the "
+        "missing ones in ONE short question. Once known, search live flights, "
+        "a hotel and tours, build the day-by-day plan with plan_itinerary_tool, "
+        "give the trip total from the tools, and offer to change any part.\n\n"
+    ),
+}
+
 _TURN_FAILED = (
     "Sorry, I could not finish that one. Please send it again, and I will "
     "pick up from where we were."
 )
 
 
-async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
+async def _stream_turn(session: dict, message: str, mode: str = "ask") -> AsyncIterator[str]:
     """Run one agent turn, emitting SSE events as tokens arrive."""
     from agent import StreamResult, extract_tool_calls, stream_and_log
 
@@ -377,7 +427,7 @@ async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
                 agent=agent,
                 surface="streamlit",
                 thread_id=thread_id,
-                user_message=memory_prefix + message,
+                user_message=memory_prefix + _MODE_CONTEXT.get(mode, "") + message,
                 result=holder,
             ):
                 # Flush tool progress before the token, so the chips appear in

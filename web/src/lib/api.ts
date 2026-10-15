@@ -80,10 +80,18 @@ export const api = {
   mockMode: MOCK_MODE,
 
   // --- auth ---
-  register: (email: string, password: string): Promise<{ user: User }> =>
+  register: (
+    email: string,
+    password: string,
+    firstName = "",
+    lastName = "",
+  ): Promise<{ user: User }> =>
     MOCK_MODE
       ? mockApi.login(email, password)
-      : request("/auth/register", { method: "POST", body: JSON.stringify({ email, password }) }),
+      : request("/auth/register", {
+          method: "POST",
+          body: JSON.stringify({ email, password, first_name: firstName, last_name: lastName }),
+        }),
 
   login: (email: string, password: string): Promise<{ user: User }> =>
     MOCK_MODE
@@ -94,6 +102,14 @@ export const api = {
     MOCK_MODE ? mockApi.logout() : request("/auth/logout", { method: "POST" }),
 
   me: (): Promise<{ user: User }> => (MOCK_MODE ? mockApi.me() : request("/auth/me")),
+
+  updateProfile: (firstName: string, lastName: string): Promise<{ user: User }> =>
+    MOCK_MODE
+      ? mockApi.me().then(({ user }) => ({ user: { ...user, first_name: firstName, last_name: lastName } }))
+      : request("/auth/me", {
+          method: "PATCH",
+          body: JSON.stringify({ first_name: firstName, last_name: lastName }),
+        }),
 
   // --- sessions ---
   listSessions: (): Promise<ChatSession[]> =>
@@ -150,6 +166,7 @@ export const api = {
     sessionId: string,
     message: string,
     signal?: AbortSignal,
+    mode: "ask" | "plan" = "ask",
   ): AsyncGenerator<StreamEvent> {
     if (MOCK_MODE) {
       yield* mockApi.stream(sessionId, message, signal);
@@ -162,7 +179,7 @@ export const api = {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({ session_id: sessionId, message }),
+        body: JSON.stringify({ session_id: sessionId, message, mode }),
         signal,
       });
     } catch (e) {
