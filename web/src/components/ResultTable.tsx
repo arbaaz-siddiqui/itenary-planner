@@ -14,7 +14,7 @@ import type { OptionItem } from "@/lib/types";
  * rows streamed with the message carry both, so matching by name lets ONE
  * card carry the tour, its image and its "Show details" link.
  */
-export type OptionLookup = (name: string) => OptionItem | null;
+export type OptionLookup = (name: string, hint?: { price?: string | null; nth?: number }) => OptionItem | null;
 
 /**
  * A result comparison (tours, hotels, flights) the agent wrote as a markdown
@@ -203,7 +203,15 @@ export const ResultComparison = memo(function ResultComparison({
   // Rows the agent wrote about real results become the real cards: photo,
   // supplier fields, details and booking. Only rows with nothing behind them
   // stay as text cards.
-  const matched = table.rows.map((row) => ({ row, item: optionFor?.(row.name) ?? null }));
+  // Two results can share a name (two Toyota Hiace transfers at different
+  // prices). The row's own price picks the right one; failing that, its
+  // position among rows of that name.
+  const seen = new Map<string, number>();
+  const matched = table.rows.map((row) => {
+    const nth = seen.get(row.name) ?? 0;
+    seen.set(row.name, nth + 1);
+    return { row, item: optionFor?.(row.name, { price: row.price?.text ?? null, nth }) ?? null };
+  });
   const cards = toCardRefs(matched.flatMap((m) => (m.item ? [m.item] : [])));
   const rest = matched.filter((m) => !m.item).map((m) => m.row);
 

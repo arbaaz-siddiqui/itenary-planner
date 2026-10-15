@@ -46,7 +46,15 @@ export const Markdown = memo(function Markdown({
         remarkPlugins={[remarkGfm]}
         components={{
           table: ({ node, children }) => {
-            const parsed = parseResultTable(node);
+            let parsed = parseResultTable(node);
+            if (!parsed && optionFor) {
+              // A list of results with no price column (packages: name, type,
+              // nights) is still the results: render it as their cards when
+              // most rows name one, instead of a wide table repeating them.
+              const loose = parseResultTable(node, { requirePrice: false });
+              const hits = loose ? loose.rows.filter((r) => optionFor(r.name)).length : 0;
+              if (loose && hits * 2 >= loose.rows.length) parsed = loose;
+            }
             if (parsed) {
               return streaming ? (
                 <CardsLoading label="Loading results" />

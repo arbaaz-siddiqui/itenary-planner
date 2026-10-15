@@ -635,6 +635,14 @@ function headline(o: OptionItem, kind: CardRef["kind"]): { price: string | null;
   }
 }
 
+/** "GF 65 + GF 512": the supplier sends bare numbers, the airline code apart. */
+function flightNumbers(o: OptionItem): string | null {
+  const code = str(o, "airline_code");
+  const nums = strList(obj(o, "outbound"), "flight_numbers");
+  if (!nums.length) return null;
+  return nums.map((n) => (code && !n.toUpperCase().startsWith(code.toUpperCase()) ? `${code} ${n}` : n)).join(" + ");
+}
+
 function subtitle(o: OptionItem, kind: CardRef["kind"]): string | null {
   switch (kind) {
     case "restaurant":
@@ -642,7 +650,7 @@ function subtitle(o: OptionItem, kind: CardRef["kind"]): string | null {
     case "hotel":
       return str(o, "area") || str(o, "full_address");
     case "flight":
-      return [str(o, "route_outbound"), str(o, "airline_code") && strList(obj(o, "outbound"), "flight_numbers").join(" + ")]
+      return [str(o, "route_outbound"), flightNumbers(o)]
         .filter(Boolean)
         .join(", ") || null;
     case "tour":

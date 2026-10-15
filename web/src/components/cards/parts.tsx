@@ -79,17 +79,27 @@ export function RatingPill({ value }: { value: number | null }) {
 export function PriceTag({
   value,
   label,
+  unit,
+  note,
   align = "right",
 }: {
   value: string | null;
   label?: string | null;
+  /** Short suffix beside the value, e.g. "/night". */
+  unit?: string | null;
+  /** A second figure under the value, e.g. the stay total. */
+  note?: string | null;
   align?: "left" | "right";
 }) {
   if (!value) return null;
   return (
     <div className={align === "right" ? "text-right" : ""}>
       {label && <p className="text-[11px] leading-tight text-fg-muted">{label}</p>}
-      <p className="text-lg leading-tight font-semibold tracking-tight tabular-nums text-fg">{value}</p>
+      <p className="text-lg leading-tight font-semibold tracking-tight whitespace-nowrap tabular-nums text-fg">
+        {value}
+        {unit && <span className="ml-0.5 text-xs font-normal tracking-normal text-fg-muted">{unit}</span>}
+      </p>
+      {note && <p className="mt-0.5 text-[11px] leading-tight tabular-nums text-fg-muted">{note}</p>}
     </div>
   );
 }

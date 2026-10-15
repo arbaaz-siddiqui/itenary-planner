@@ -159,8 +159,13 @@ export function HotelCard({ card, eager }: CardProps) {
         {free && <p className="text-xs font-medium text-success">Free cancellation</p>}
         <div className="mt-auto flex items-end justify-between gap-3 pt-1">
           <PriceTag
-            value={formatInr(num(o, "per_night_inr"))}
-            label={nights ? `Per night, ${formatInr(num(o, "price_inr"))} for ${nights} nights` : "Per night"}
+            value={formatInr(num(o, "per_night_inr")) ?? formatInr(num(o, "price_inr"))}
+            unit={num(o, "per_night_inr") != null ? "/night" : null}
+            note={
+              nights && num(o, "per_night_inr") != null && num(o, "price_inr") != null
+                ? `${formatInr(num(o, "price_inr"))} for ${nights} ${nights === 1 ? "night" : "nights"}`
+                : null
+            }
             align="left"
           />
           <BookButton card={card} />
@@ -194,8 +199,8 @@ export function PackageCard({ card, eager }: CardProps) {
         {o.is_free_cancellation === true && <p className="text-xs font-medium text-success">Free cancellation</p>}
         <div className="mt-auto flex items-end justify-between gap-3 pt-1">
           <PriceTag
-            value={formatInr(num(o, "price_inr") ?? num(o, "price_from_inr")) ?? "On request"}
-            label="From"
+            value={formatInr(num(o, "price_inr") ?? num(o, "price_from_inr")) ?? "Price on request"}
+            label={num(o, "price_inr") ?? num(o, "price_from_inr") ? "From" : null}
             align="left"
           />
           <BookButton card={card} label="View package" />

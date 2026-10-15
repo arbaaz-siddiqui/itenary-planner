@@ -170,6 +170,15 @@ export default function ChatPage() {
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, []);
 
+  // Content that fits the view leaves nothing to jump to: a short chat, or a
+  // switch from a long one, must not keep a stale jump arrow.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || el.scrollHeight - el.clientHeight >= 120) return;
+    pinnedRef.current = true;
+    setAtBottom(true);
+  }, [activeId, messages, stream.segments]);
+
   useEffect(() => {
     if (!pinnedRef.current) return;
     const el = scrollRef.current;

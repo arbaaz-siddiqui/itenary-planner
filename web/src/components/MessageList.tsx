@@ -14,13 +14,6 @@ import { normaliseName, refersTo, sameName, shortenedFrom, tableRowNames } from 
 /** A GFM table always renders a header separator row. */
 const SEPARATOR_ROW = /^[ \t]*\|?[ \t:|-]*-{3,}[ \t:|-]*\|/m;
 
-/**
- * A price-ish header is what `parseResultTable` uses to decide a table becomes
- * cards, so this must agree with it: matching any table would also catch a
- * two-column glossary, which stays a plain table.
- */
-const PRICE_HEADER = /\|[^|]*(price|fare|total|rate)[^|]*\|/i;
-
 /** Groups that ride the options channel but are not cards. */
 const NOT_CARDS = new Set(["itinerary_pdf", "suggestions"]);
 
@@ -139,8 +132,10 @@ const Bubble = memo(function Bubble({
   // Lookup from a table row's name to the result behind it, tagged with its
   // group's kind so the row can become the right card.
   const optionFor = useMemo(() => {
-    const byName = new Map<string, OptionItem>();
-    const fullNames = new Map<string, OptionItem>();
+    const byName = new Map<string, OptionItem[]>();
+    const fullNames = new Map<string, OptionItem[]>();
+    const add = (map: Map<string, OptionItem[]>, key: string, item: OptionItem) =>
+      map.set(key, [...(map.get(key) ?? []), item]);
     for (const group of m.options ?? []) {
       if (NOT_CARDS.has(group.kind)) continue;
       for (const raw of group.items ?? []) {
@@ -151,23 +146,37 @@ const Bubble = memo(function Bubble({
           (v): v is string => typeof v === "string" && v.trim() !== "",
         );
         if (name) {
-          byName.set(normaliseName(name), item);
-          fullNames.set(name, item);
+          add(byName, normaliseName(name), item);
+          add(fullNames, name, item);
         }
       }
     }
     if (!byName.size) return undefined;
-    return (name: string) => {
+
+    const PRICE_KEYS = ["price_inr", "price_per_adult_inr", "per_night_inr", "price_per_person_inr", "total_inr"];
+    const pick = (cands: OptionItem[], hint?: { price?: string | null; nth?: number }) => {
+      if (cands.length === 1) return cands[0];
+      const wanted = Number((hint?.price ?? "").replace(/[^0-9.]/g, ""));
+      if (wanted > 0) {
+        const byPrice = cands.find((c) =>
+          PRICE_KEYS.some((k) => typeof c[k] === "number" && Math.abs((c[k] as number) - wanted) < 1),
+        );
+        if (byPrice) return byPrice;
+      }
+      return cands[Math.min(hint?.nth ?? 0, cands.length - 1)];
+    };
+
+    return (name: string, hint?: { price?: string | null; nth?: number }) => {
       const key = normaliseName(name);
       const exact = byName.get(key);
-      if (exact) return exact;
+      if (exact) return pick(exact, hint);
       // The agent shortens long supplier names. Accept a prefix match only
       // when it is unambiguous, so two similar names never swap.
       const hits = [...byName.entries()].filter(([k]) => sameName(k, key));
-      if (hits.length === 1) return hits[0][1];
+      if (hits.length === 1) return pick(hits[0][1], hint);
       if (hits.length > 1) return null;
       const short = [...fullNames.entries()].filter(([full]) => shortenedFrom(name, full));
-      return short.length === 1 ? short[0][1] : null;
+      return short.length === 1 ? pick(short[0][1], hint) : null;
     };
   }, [m.options]);
 
@@ -195,7 +204,10 @@ const Bubble = memo(function Bubble({
 
   // When the reply already contains a result comparison, those rows ARE the
   // cards; the group below would repeat each result a second time.
-  const hasResultTable = SEPARATOR_ROW.test(m.content ?? "") && PRICE_HEADER.test(m.content ?? "");
+  // Any table can carry the results now (a package list has no price
+  // column), so rows it names are not drawn a second time below it. Only the
+  // named ones: a menu table names dishes, never the restaurant's own card.
+  const hasResultTable = SEPARATOR_ROW.test(m.content ?? "");
   const tableNames = hasResultTable ? tableRowNames(m.content ?? "") : [];
   const notInTable = (item: OptionItem): boolean => {
     const name = [item.name, item.hotel_name, item.airline, item.vehicle_name, item.visa_type].find(
