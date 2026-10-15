@@ -43,7 +43,11 @@ _UI_ONLY_IF = {
 UI_NOTE = (
     "The customer sees a card for every option, with its photos and full "
     "details, and can open or book any of them. When they refer to one by "
-    "name, it is the option of that name here."
+    "name, it is the option of that name here. The cards show prices PER "
+    "PERSON, so your reply must give the TOTAL for the customer's party for "
+    "each option you mention, quoted from the result (party_total_display, "
+    "the totals in transfer_prices or prices, price_inr), never worked out "
+    "yourself."
 )
 
 

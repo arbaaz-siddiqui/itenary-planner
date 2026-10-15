@@ -122,3 +122,40 @@ class TestStepBudget:
 
         # pre hook + model + post hook + tools per round.
         assert agent._STEPS_PER_TOOL_ROUND == 4
+
+
+class TestPartyTotalOnSearchRows:
+    """Cards show per-person prices; the reply quotes the party total."""
+
+    def _row(self, prices, per_adult):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(transfer_prices=prices, price_per_adult_inr=per_adult)
+
+    def test_uses_the_supplier_party_total_when_there_is_one(self):
+        from mcp_tools.search_tours import _party_total
+
+        got = _party_total(self._row([{"total_inr": 13290.34}, {"total_inr": 5350.66}], 2675.33), 2, None)
+        assert got == "from ₹5,350.66 total for 2 adults"
+
+    def test_ticket_only_adults_multiply_the_ticket(self):
+        from mcp_tools.search_tours import _party_total
+
+        assert _party_total(self._row([], 1830.0), 2, None) == "₹3,660 total for 2 adults"
+
+    def test_ticket_only_with_children_does_not_guess(self):
+        from mcp_tools.search_tours import _party_total
+
+        assert "child price on request" in _party_total(self._row([], 1830.0), 2, [6])
+
+
+def test_party_totals_line_lists_the_top_three_with_their_totals():
+    from mcp_tools.search_tours import _party_totals_line
+
+    rows = [
+        {"name": "A", "party_total_display": "from ₹9,780.77 total for 2 adults"},
+        {"name": "B", "party_total_display": "₹3,660 total for 2 adults"},
+        {"name": "C", "party_total_display": "₹1,830 per adult; child price on request"},
+        {"name": "D", "party_total_display": "₹4,000 total for 2 adults"},
+    ]
+    assert _party_totals_line(rows, "2 adults") == "**Total for 2 adults:** A from ₹9,780.77, B ₹3,660."
