@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, Menu, SquarePen } from "lucide-react";
+import { Menu, SquarePen } from "lucide-react";
 import { api, isUnauthorized, MOCK_MODE } from "@/lib/api";
 import type { ChatSession, Message, OptionGroup, User } from "@/lib/types";
 import { useStreamSegments } from "@/lib/useStreamSegments";
@@ -58,8 +58,6 @@ export default function ChatPage() {
   const [detail, setDetail] = useState<CardRef | null>(null);
   const detailPushed = useRef(false);
   const [nameLater, setNameLater] = useState(false);
-  /** False once the reader scrolls up during a reply: show "Jump to latest". */
-  const [atBottom, setAtBottom] = useState(true);
   /** True for the moment the home screen hands over to the chat. */
   const [entering, setEntering] = useState(false);
   /** A chat whose reply is still being worked on, by a turn this tab left. */
@@ -160,24 +158,14 @@ export default function ChatPage() {
     const el = scrollRef.current;
     if (!el) return;
     pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-    setAtBottom(pinnedRef.current);
   }, []);
 
-  const jumpToLatest = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    pinnedRef.current = true;
-    setAtBottom(true);
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, []);
-
-  // Content that fits the view leaves nothing to jump to: a short chat, or a
-  // switch from a long one, must not keep a stale jump arrow.
+  // Content that fits the view has nothing to scroll: a short chat, or a
+  // switch from a long one, follows the reply again.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || el.scrollHeight - el.clientHeight >= 120) return;
     pinnedRef.current = true;
-    setAtBottom(true);
   }, [activeId, messages, stream.segments]);
 
   useEffect(() => {
@@ -748,18 +736,6 @@ export default function ChatPage() {
               />
             )}
           </div>
-
-          {!home && !atBottom && (
-            <button
-              type="button"
-              onClick={jumpToLatest}
-              aria-label="Jump to latest"
-              title="Jump to latest"
-              className="press absolute right-5 bottom-32 z-20 grid h-10 w-10 place-items-center rounded-full border border-border bg-surface text-fg shadow-lg hover:bg-surface-2"
-            >
-              <ArrowDown size={18} aria-hidden />
-            </button>
-          )}
 
           {!home && <div className={entering ? "dock-enter" : ""}>{composer("dock")}</div>}
         </div>
