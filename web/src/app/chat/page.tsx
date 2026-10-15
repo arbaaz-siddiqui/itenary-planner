@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, Menu } from "lucide-react";
+import { ArrowDown, Menu, SquarePen } from "lucide-react";
 import { api, isUnauthorized, MOCK_MODE } from "@/lib/api";
 import type { ChatSession, Message, OptionGroup, User } from "@/lib/types";
 import { useStreamSegments } from "@/lib/useStreamSegments";
@@ -10,6 +10,7 @@ import { usePersisted } from "@/lib/usePersisted";
 import { useTheme } from "@/lib/theme";
 import { displayFirstName, serviceById, type ServiceId } from "@/lib/services";
 import { Sidebar } from "@/components/Sidebar";
+import { BrandLogo } from "@/components/BrandLogo";
 import { MessageList } from "@/components/MessageList";
 import { Composer, type ComposerHandle, type ComposerMode } from "@/components/Composer";
 import { HomeHero } from "@/components/HomeHero";
@@ -180,7 +181,9 @@ export default function ChatPage() {
   }, [activeId, messages, stream.segments]);
 
   useEffect(() => {
-    if (!pinnedRef.current) return;
+    // The home screen is not a conversation: keep its heading in view on a
+    // short phone instead of scrolling to the suggestions.
+    if (!pinnedRef.current || messages.length === 0) return;
     const el = scrollRef.current;
     // Smooth, so new text glides into view instead of jumping.
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
@@ -668,17 +671,29 @@ export default function ChatPage() {
 
       {/* min-w-0 here is load-bearing: without it a wide table in a message
           expands this flex child and pushes the whole layout sideways. */}
-      <main className="relative flex min-w-0 flex-1 flex-col p-2">
-        {/* No top bar, as in the reference layout. Below 1024px the sidebar is
-            a drawer, so the menu button floats over the page instead. */}
-        <button
-          type="button"
-          onClick={() => setDrawerOpen(true)}
-          aria-label="Open menu"
-          className="absolute left-3 top-3 z-30 grid h-10 w-10 place-items-center rounded-xl border border-border bg-surface/80 text-fg backdrop-blur hover:bg-surface-2 lg:hidden"
-        >
-          <Menu size={19} aria-hidden />
-        </button>
+      <main className="relative flex min-w-0 flex-1 flex-col p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        {/* No top bar on desktop, as in the reference layout. Below 1024px the
+            sidebar is a drawer, so a slim bar holds its button, the logo and
+            new chat, in the flow so it never covers a message or a card. */}
+        <div className="flex shrink-0 items-center justify-between gap-2 px-1 pt-[env(safe-area-inset-top)] pb-2 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open menu"
+            className="press grid h-10 w-10 place-items-center rounded-xl text-fg hover:bg-surface-2"
+          >
+            <Menu size={20} aria-hidden />
+          </button>
+          <BrandLogo />
+          <button
+            type="button"
+            onClick={() => newChat()}
+            aria-label="New chat"
+            className="press grid h-10 w-10 place-items-center rounded-xl text-fg hover:bg-surface-2"
+          >
+            <SquarePen size={19} aria-hidden />
+          </button>
+        </div>
         {MOCK_MODE && (
           <span className="absolute right-3 top-3 z-30 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
             MOCK

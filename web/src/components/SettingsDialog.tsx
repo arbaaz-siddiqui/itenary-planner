@@ -306,14 +306,14 @@ export function SettingsDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 px-4 backdrop-blur-[2px]" onClick={onClose}>
+    <div className="fixed inset-0 z-50 grid items-end justify-items-center bg-black/55 backdrop-blur-[2px] sm:place-items-center sm:px-4" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === "Escape" && onClose()}
-        className="panel-pop flex max-h-[88dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl"
+        className="panel-pop flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-border bg-surface pb-[env(safe-area-inset-bottom)] shadow-2xl sm:max-h-[88dvh] sm:rounded-2xl sm:pb-0"
       >
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <h2 id="settings-title" className="text-lg font-semibold tracking-tight">
@@ -328,7 +328,7 @@ export function SettingsDialog({
             <X size={18} aria-hidden />
           </button>
         </div>
-        <div role="tablist" aria-label="Settings sections" className="no-scrollbar flex gap-1 overflow-x-auto border-b border-border px-5">
+        <div role="tablist" aria-label="Settings sections" className="no-scrollbar flex gap-1 overflow-x-auto border-b border-border px-3 sm:px-5">
           {TABS.map((t) => (
             <button
               key={t}
@@ -336,7 +336,7 @@ export function SettingsDialog({
               role="tab"
               aria-selected={tab === t}
               onClick={() => setTab(t)}
-              className={`-mb-px border-b-2 px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors ${
+              className={`-mb-px flex-1 border-b-2 px-2 py-2.5 text-sm font-medium whitespace-nowrap transition-colors sm:flex-none sm:px-3 ${
                 tab === t ? "border-brand-blue text-fg" : "border-transparent text-fg-muted hover:text-fg"
               }`}
             >

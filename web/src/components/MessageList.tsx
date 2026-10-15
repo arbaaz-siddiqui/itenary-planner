@@ -189,7 +189,7 @@ const Bubble = memo(function Bubble({
             onClick={() => onEdit(m.content)}
             aria-label="Edit message"
             title="Edit"
-            className={`${actionBtn} mt-1 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100`}
+            className={`${actionBtn} mt-1 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100`}
           >
             <Pencil size={14} aria-hidden />
           </button>

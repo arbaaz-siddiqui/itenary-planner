@@ -94,14 +94,14 @@ function SessionRow({
         type="button"
         onClick={onSelect}
         aria-current={active ? "page" : undefined}
-        className={`${ROW} py-1.5 pr-2.5 group-hover:pr-20 group-focus-within:pr-20 ${active ? ROW_ACTIVE : ROW_IDLE} ${FOCUS}`}
+        className={`${ROW} py-1.5 pr-2.5 group-hover:pr-20 group-focus-within:pr-20 [@media(hover:none)]:pr-20 ${active ? ROW_ACTIVE : ROW_IDLE} ${FOCUS}`}
       >
         <span className="truncate">{session.title || "Untitled"}</span>
       </button>
 
       <div
         className={`absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 ${
-          confirming ? "" : "opacity-0 transition group-hover:opacity-100 focus-within:opacity-100"
+          confirming ? "" : "opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"
         }`}
       >
         {confirming ? (
@@ -213,7 +213,10 @@ export function Sidebar(p: SidebarProps) {
   );
 
   return (
-    <div className="flex h-full flex-col bg-sidebar text-sidebar-fg">
+    // On short screens (a phone on its side) the chat list would be squeezed
+    // to nothing between the services and the footer, so the whole column
+    // scrolls as one instead.
+    <div className="no-scrollbar flex h-full flex-col overflow-y-auto bg-sidebar text-sidebar-fg">
       {/* Header: wordmark + collapse toggle (or close, in the drawer). */}
       <div className={`flex h-14 shrink-0 items-center ${collapsed ? "justify-center" : "justify-between px-3"}`}>
         {!collapsed && <BrandLogo />}
@@ -260,7 +263,7 @@ export function Sidebar(p: SidebarProps) {
           <button type="button" onClick={p.onSearch} className={`${ROW} ${ROW_IDLE} ${FOCUS}`}>
             <Search size={17} aria-hidden />
             <span className="flex-1">Search</span>
-            <kbd className="rounded border border-sidebar-border px-1.5 text-[10px] text-sidebar-muted">Ctrl K</kbd>
+            <kbd className="rounded border border-sidebar-border px-1.5 text-[10px] text-sidebar-muted [@media(hover:none)]:hidden">Ctrl K</kbd>
           </button>
         )}
       </div>
@@ -275,7 +278,7 @@ export function Sidebar(p: SidebarProps) {
       </nav>
 
       {/* Chats and saved items: hidden in the rail, where a title cannot fit. */}
-      <nav aria-label="Chat sessions" className="no-scrollbar mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-2">
+      <nav aria-label="Chat sessions" className="no-scrollbar mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-2 [@media(max-height:600px)]:flex-none [@media(max-height:600px)]:overflow-visible">
         {!collapsed && p.saved.length > 0 && (
           <section className="mb-3">
             <p className="px-2.5 pb-1 text-xs font-medium text-sidebar-muted">Saved</p>

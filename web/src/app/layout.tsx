@@ -21,6 +21,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   // Prevents iOS Safari zooming the page when the composer gets focus.
   maximumScale: 1,
+  // Edge to edge on notched phones; the layout pads with safe-area insets.
+  viewportFit: "cover",
   themeColor: "#0b0b0f",
 };
 

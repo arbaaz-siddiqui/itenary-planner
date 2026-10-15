@@ -804,15 +804,16 @@ export function DetailPanel({
           <button
             type="button"
             onClick={() => onAsk(card)}
-            className="press inline-flex h-10 items-center gap-1.5 rounded-[10px] border border-border px-3 text-sm font-medium text-fg hover:bg-surface-2"
+            aria-label="Ask the agent"
+            className="press inline-flex h-10 shrink-0 items-center gap-1.5 rounded-[10px] border border-border px-3 text-sm font-medium text-fg hover:bg-surface-2"
           >
             <MessageCircle size={15} aria-hidden />
-            Ask the agent
+            <span className="max-[400px]:hidden">Ask the agent</span>
           </button>
           <button
             type="button"
             onClick={() => onBook(card)}
-            className="press inline-flex h-10 items-center rounded-[10px] bg-brand-blue px-4 text-sm font-medium text-white hover:bg-brand-blue-dark"
+            className="press inline-flex h-10 shrink-0 items-center rounded-[10px] bg-brand-blue px-4 text-sm font-medium whitespace-nowrap text-white hover:bg-brand-blue-dark"
           >
             {BOOK_LABEL[card.kind]}
           </button>

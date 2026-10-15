@@ -1,6 +1,5 @@
 /**
- * The GujjuTours wordmark: "gujju" in brand blue, "tours" in brand red, as on
- * the website header. `compact` is the single-letter mark for the icon rail.
+ * The GujjuTours logo, as on the website header. `compact` is the single-letter mark for the icon rail.
  */
 export function BrandLogo({ compact = false }: { compact?: boolean }) {
   if (compact) {
@@ -13,10 +12,10 @@ export function BrandLogo({ compact = false }: { compact?: boolean }) {
       </span>
     );
   }
+  // The client's own logo, self-hosted (public/brand) so the app never
+  // depends on their CDN. It reads on both themes as is.
   return (
-    <span aria-label="GujjuTours" className="text-[21px] font-bold leading-none tracking-tight">
-      <span className="text-brand-blue">gujju</span>
-      <span className="text-brand-red">tours</span>
-    </span>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src="/brand/gujju-logo.svg" alt="GujjuTours" width={124} height={30} className="h-[30px] w-auto shrink-0 self-start select-none" draggable={false} />
   );
 }

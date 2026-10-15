@@ -167,8 +167,8 @@ body {
   animation-delay: var(--rise-delay, 0ms);
 }
 
-/* The auth arch lifts into place once, a beat after the gradient blooms. */
-@keyframes arch-rise {
+/* The auth wordmark lifts into place once, a beat after the gradient blooms. */
+@keyframes word-rise {
   from {
     opacity: 0;
     transform: translateY(24px) scale(0.98);
@@ -178,8 +178,8 @@ body {
     transform: none;
   }
 }
-.arch-rise {
-  animation: arch-rise 900ms cubic-bezier(0.16, 1, 0.3, 1) 150ms both;
+.word-rise {
+  animation: word-rise 900ms cubic-bezier(0.16, 1, 0.3, 1) 150ms both;
 }
 
 /* Menus drop from their trigger: quick, small, and from the top edge. */

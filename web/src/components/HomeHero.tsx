@@ -32,7 +32,7 @@ export function HomeHero({
   return (
     // Fills the rounded page panel the chat page provides.
     <div className="flex min-h-full flex-col">
-      <div className="hero-glow hero-bloom flex flex-1 flex-col items-center justify-center px-4 py-16">
+      <div className="hero-glow hero-bloom flex flex-1 flex-col items-center justify-center px-4 py-8 sm:py-16">
         <div className="w-full max-w-[720px]">
           <div className="hero-rise mb-5 flex justify-center">
             <span className={`inline-flex items-center gap-2 rounded-full border py-1 pl-1 pr-3 text-xs backdrop-blur ${ON_GLOW}`}>
@@ -42,7 +42,7 @@ export function HomeHero({
           </div>
 
           <h2
-            className="hero-rise mb-8 text-balance text-center text-[34px] font-semibold leading-[1.1] tracking-[-0.03em] text-white sm:text-[44px] [[data-theme=light]_&]:text-fg"
+            className="hero-rise mb-6 text-balance text-center text-[30px] sm:mb-8 font-semibold leading-[1.1] tracking-[-0.03em] text-white sm:text-[44px] [[data-theme=light]_&]:text-fg"
             style={{ "--rise-delay": "60ms" } as React.CSSProperties}
           >
             {svc ? `${svc.label}: what do you need?` : <>Where to next{name ? `, ${name}` : ""}?</>}
@@ -53,7 +53,7 @@ export function HomeHero({
           </div>
 
           <div
-            className="hero-rise mt-6 flex flex-wrap justify-center gap-2"
+            className="hero-rise mt-5 flex flex-wrap justify-center gap-2 sm:mt-6"
             style={{ "--rise-delay": "180ms" } as React.CSSProperties}
             aria-label="Suggestions"
           >
@@ -62,7 +62,7 @@ export function HomeHero({
                 key={text}
                 type="button"
                 onClick={() => onPick(text)}
-                className={`press inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm backdrop-blur focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${ON_GLOW}`}
+                className={`press inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[13px] backdrop-blur sm:px-3.5 sm:py-2 sm:text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${ON_GLOW}`}
               >
                 <Icon size={15} strokeWidth={1.75} aria-hidden />
                 {text}
