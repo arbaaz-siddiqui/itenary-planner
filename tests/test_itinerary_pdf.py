@@ -396,3 +396,35 @@ class TestServeRoute:
         assert ok.content[:5] == b"%PDF-"
 
         assert client.get("/itinerary/missing12345.pdf").status_code == 404
+
+
+class TestNoRawUrlReachesTheModel:
+    """The tool must not hand the model a URL to paste into its reply.
+
+    It used to return `download_url`, and the model wrote that link into chat.
+    The customer then saw a bare URL instead of a button -- and the link 404'd
+    whenever PUBLIC_BASE_URL pointed at a host that did not hold the file
+    (a local run configured with the production domain, or a container whose
+    /tmp had been wiped). The surfaces build their own link from itinerary_id.
+    """
+
+    def _run(self):
+        from agent_tools import generate_itinerary_pdf_tool
+
+        return generate_itinerary_pdf_tool.invoke(
+            {
+                "destination": "Dubai",
+                "day_plans": [{"day": 1, "title": "Arrival", "items": ["Transfer"]}],
+            }
+        )
+
+    def test_returns_an_id_not_a_url(self) -> None:
+        out = self._run()
+        assert not out.get("error"), out.get("message")
+        assert out.get("itinerary_id")
+        assert "download_url" not in out
+
+    def test_no_field_carries_an_http_link(self) -> None:
+        out = self._run()
+        for key, value in out.items():
+            assert "http://" not in str(value) and "https://" not in str(value), key

@@ -1308,7 +1308,7 @@ def _process_message(user_message: str, *, display_as: str | None = None) -> Non
             tool_names = [tc.get("tool_name", "") for tc in calls]
 
             # A tool that already produced a customer-ready sentence — the PDF
-            # builder returns `summary` WITH the download link. Prefer that over
+            # builder returns `summary` plus an itinerary_id. Prefer that over
             # any apology: the work succeeded, so saying "I didn't get a reply
             # out" is simply false (the customer saw the download appear and was
             # told it had failed).
@@ -1316,7 +1316,7 @@ def _process_message(user_message: str, *, display_as: str | None = None) -> Non
             for tc in calls:
                 out = _coerce_output(tc.get("output"))
                 if isinstance(out, dict) and not out.get("error"):
-                    if out.get("summary") and out.get("download_url"):
+                    if out.get("summary") and out.get("itinerary_id"):
                         done_msg = str(out["summary"])
                         break
             if done_msg:

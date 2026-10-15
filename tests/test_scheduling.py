@@ -823,7 +823,7 @@ class TestPdfReusesThePlan:
             }
         )
         assert not out.get("error"), out
-        assert out.get("download_url")
+        assert out.get("itinerary_id")
 
     def test_still_refuses_when_no_plan_was_ever_built(self) -> None:
         """The guard must not become a rubber stamp — a hollow PDF is worse."""

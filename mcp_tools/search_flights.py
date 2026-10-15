@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -84,6 +85,33 @@ def _search_one_provider(
     except Exception as e:
         logger.debug("Provider %s failed: %s", airline_code, e)
         return airline_code, []
+
+
+def _origin_from_conversation(destination_city: str) -> str:
+    """A departure city the customer named, read back from their own words.
+
+    Only returns a city that resolves to an airport AND appears in what the
+    customer typed, so it can never invent an origin -- it just recovers one
+    the model dropped from the call.
+    """
+    from reference_data_loader import resolve_city
+    from rules import _CONVERSATION_TEXT
+
+    said = (_CONVERSATION_TEXT.get() or "").lower()
+    if not said:
+        return ""
+
+    dest = (destination_city or "").strip().lower()
+    for token in re.findall(r"[a-z]{3,}", said):
+        if token == dest:
+            continue
+        city = resolve_city(token)
+        if not city or not city.get("iata"):
+            continue
+        if str(city.get("name", "")).strip().lower() == dest:
+            continue
+        return str(city["name"])
+    return ""
 
 
 def _forward_date(date_str: str) -> str:
@@ -242,7 +270,11 @@ def _slim_for_model(option: dict[str, Any]) -> dict[str, Any]:
 
 def _to_dict(o: Any, searched_pax: int) -> dict[str, Any]:
     d = o.model_dump()
-    d["price_total_inr"] = o.price_inr
+    # price_inr is the whole-party total. Emitting a second key holding that
+    # same number (price_total_inr) and a raw-float twin (price_original) gave
+    # the model four price fields for two prices, and it quoted the per-adult
+    # figure as the total. One name per number.
+    d.pop("price_original", None)
     d["price_per_adult_inr"] = _per_adult(o, searched_pax)
     d["pax_count"] = o.pax_count or searched_pax
     d["duration_display"] = _fmt_hm(d.get("duration_min"))
@@ -317,6 +349,17 @@ def _impl(
     # fills the gap with a plausible one and a trip with no stated origin was
     # quoted BOM->DXB fares as fact.
     stated_origin = origin_city if customer_said(origin_city) else ""
+    if not stated_origin:
+        # The customer named a city and the model dropped it from the call.
+        # Asked for "flights from hyd to dubai" it sent destination and date
+        # but no origin, got the refusal, and answered it with four invented
+        # airlines and fares. Recovering the city from their own words keeps
+        # the anti-invention guard (the value still has to be something they
+        # said) while not costing them a turn for data they already gave.
+        stated_origin = _origin_from_conversation(destination_city)
+        if stated_origin:
+            origin_city = stated_origin
+
     missing = missing_search_fields(
         origin_city=stated_origin, departure_date=departure_date, adults=adults
     )
@@ -360,7 +403,7 @@ def _impl(
                 "providers_still_loading": cached.providers_pending,
                 "from_cache": True,
                 "trip_type": trip_type,
-                "pricing_note": "price_total_inr is full party; price_per_adult_inr is per adult.",
+                "pricing_note": "price_inr is the whole-party total for pax_count travellers; price_per_adult_inr is one adult. Quote price_inr as the trip price.",
                 # STOP signal — these results are ready. The model must present
                 # them now and NOT call search_flights again this turn.
                 "agent_instructions": (
@@ -460,7 +503,7 @@ def _impl(
             "providers_still_loading": [],
             "from_cache": False,
             "trip_type": trip_type,
-            "pricing_note": "price_total_inr is full party; price_per_adult_inr is per adult.",
+            "pricing_note": "price_inr is the whole-party total for pax_count travellers; price_per_adult_inr is one adult. Quote price_inr as the trip price.",
             # STOP signal — same as the cached path. Without this the model often
             # re-calls search_flights, and that extra LLM round truncates the
             # streamed reply mid-sentence (seen as "Quick question: How" cut off).
