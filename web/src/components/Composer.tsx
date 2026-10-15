@@ -124,7 +124,7 @@ export const Composer = forwardRef<
           hero ? "pt-4 text-base" : "pt-3 text-[15px]"
         }`}
       />
-      <div className="flex items-center gap-2 px-2 pb-2 pl-3 pt-1">
+      <div className="flex items-center gap-2 px-2 pb-2 pl-3 pt-3">
         {/* Ask answers the question in hand; Plan builds the whole trip. The
             server turns Plan into an instruction to gather the essentials and
             produce a priced day-by-day itinerary. */}
