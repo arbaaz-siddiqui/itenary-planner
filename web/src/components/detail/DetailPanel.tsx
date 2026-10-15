@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, MapPin, MessageCircle, X } from "lucide-react";
+import { Check, ExternalLink, MapPin, MessageCircle, Plane, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { CardRef } from "@/lib/cardActions";
 import { formatInr, imagesOf, num, obj, objList, str, strList, titleOf } from "@/lib/cards";
@@ -13,36 +13,91 @@ import { KIND_ICON, openDuration } from "../cards/Cards";
 // ------------------------------------------------------------------ pieces
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="border-t border-border px-5 py-4">
-      <h3 className="mb-2.5 text-sm font-semibold text-fg">{title}</h3>
+    <section className="px-5 py-4">
+      <h3 className="mb-3 text-[15px] font-semibold tracking-tight text-fg">{title}</h3>
       {children}
     </section>
   );
 }
 
+/**
+ * Facts as tiles, two to a row: a label above its value reads faster than a
+ * two-column table, and long values (a list of cuisines) take a full row.
+ */
 function Facts({ rows }: { rows: [string, string | null | undefined][] }) {
   const shown = rows.filter((r): r is [string, string] => typeof r[1] === "string" && r[1].trim() !== "");
   if (!shown.length) return null;
   return (
-    <dl className="grid grid-cols-[minmax(0,40%)_1fr] gap-x-4 gap-y-2 text-sm">
+    <dl className="grid grid-cols-2 gap-2">
       {shown.map(([k, v]) => (
-        <div key={k} className="contents">
-          <dt className="text-fg-muted">{k}</dt>
-          <dd className="text-fg">{v}</dd>
+        <div
+          key={k}
+          className={`rounded-xl border border-border bg-bg/40 px-3 py-2.5 ${v.length > 26 ? "col-span-2" : ""}`}
+        >
+          <dt className="text-[11px] text-fg-muted">{k}</dt>
+          <dd className="mt-0.5 text-sm leading-snug font-medium text-fg">{v}</dd>
         </div>
       ))}
     </dl>
   );
 }
 
+/** A price breakdown read like a bill: lines, then the total in bold. */
+function Receipt({ rows, total }: { rows: [string, string | null][]; total: [string, string | null] }) {
+  const shown = rows.filter((r): r is [string, string] => Boolean(r[1]));
+  if (!shown.length && !total[1]) return null;
+  return (
+    <div className="rounded-xl border border-border bg-bg/40 p-4">
+      <dl className="space-y-2 text-sm">
+        {shown.map(([k, v]) => (
+          <div key={k} className="flex items-baseline justify-between gap-4">
+            <dt className="text-fg-muted">{k}</dt>
+            <dd className="font-medium tabular-nums text-fg">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      {total[1] && (
+        <div className="mt-3 flex items-baseline justify-between gap-4 border-t border-border pt-3">
+          <span className="text-sm font-semibold text-fg">{total[0]}</span>
+          <span className="text-lg font-semibold tracking-tight tabular-nums text-fg">{total[1]}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Small facts under the title, the ones a customer decides on. */
+function Highlights({ items }: { items: { text: string; tone?: "good" | "brand" }[] }) {
+  const shown = items.filter((i) => i.text);
+  if (!shown.length) return null;
+  return (
+    <ul className="ui-list mt-3 flex flex-wrap gap-1.5">
+      {shown.map((i) => (
+        <li
+          key={i.text}
+          className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+            i.tone === "good"
+              ? "bg-success/15 text-success"
+              : i.tone === "brand"
+                ? "bg-brand-blue/15 text-link"
+                : "bg-surface-2 text-fg"
+          }`}
+        >
+          {i.text}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Bullets({ items }: { items: string[] }) {
   if (!items.length) return null;
   return (
-    <ul className="ui-list space-y-1.5 text-sm text-fg">
+    <ul className="ui-list space-y-2 text-sm text-fg">
       {items.map((t, i) => (
-        <li key={i} className="flex gap-2">
-          <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-fg-muted" aria-hidden />
-          <span>{t}</span>
+        <li key={i} className="flex gap-2.5">
+          <Check size={16} className="mt-0.5 shrink-0 text-success" aria-hidden />
+          <span className="leading-relaxed">{t}</span>
         </li>
       ))}
     </ul>
@@ -166,7 +221,7 @@ function RestaurantBody({ o }: { o: OptionItem }) {
 
 function FlightLeg({ title, leg }: { title: string; leg: OptionItem }) {
   return (
-    <Section title={title}>
+    <Section title={`${title} details`}>
       <ol className="ui-list relative space-y-4 border-l border-border pl-5">
         <li>
           <span className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border-2 border-brand-blue bg-surface" aria-hidden />
@@ -192,6 +247,7 @@ function FlightLeg({ title, leg }: { title: string; leg: OptionItem }) {
           <p className="text-xs text-fg-muted">{str(leg, "arrival_date")}</p>
         </li>
       </ol>
+      <div className="mt-4" />
       <Facts
         rows={[
           ["Flights", strList(leg, "flight_numbers").join(" + ") || null],
@@ -206,25 +262,66 @@ function FlightLeg({ title, leg }: { title: string; leg: OptionItem }) {
   );
 }
 
+function RouteSummary({ leg, label }: { leg: OptionItem; label: string }) {
+  const stops = num(leg, "stops") ?? 0;
+  return (
+    <div className="rounded-2xl border border-border bg-bg/40 p-4">
+      <p className="mb-3 text-xs font-medium text-fg-muted">{label}</p>
+      <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4">
+        <div>
+          <p className="text-2xl leading-none font-semibold tabular-nums text-fg">{str(leg, "departure_time")}</p>
+          <p className="mt-1 text-sm font-medium text-fg-muted">{str(leg, "from_airport")}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-xs text-fg-muted">{str(leg, "duration_display")}</p>
+          <div className="relative my-1.5 h-px bg-border">
+            <Plane size={15} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rotate-90 bg-surface px-0.5 text-brand-red" aria-hidden />
+          </div>
+          <p className="text-xs text-fg-muted">{stops === 0 ? "Non-stop" : `${stops} stop${stops > 1 ? "s" : ""}`}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-2xl leading-none font-semibold tabular-nums text-fg">
+            {str(leg, "arrival_time")}
+            {leg.next_day === true && <sup className="ml-0.5 text-xs text-brand-red">+1</sup>}
+          </p>
+          <p className="mt-1 text-sm font-medium text-fg-muted">{str(leg, "to_airport")}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FlightBody({ o }: { o: OptionItem }) {
   const outbound = obj(o, "outbound");
   const inbound = obj(o, "inbound");
   return (
     <>
+      <div className="space-y-2 px-5 pb-2">
+        {outbound && <RouteSummary leg={outbound} label={`Outbound${str(outbound, "departure_date") ? `, ${str(outbound, "departure_date")}` : ""}`} />}
+        {inbound && Object.keys(inbound).length > 0 && (
+          <RouteSummary leg={inbound} label={`Return${str(inbound, "departure_date") ? `, ${str(inbound, "departure_date")}` : ""}`} />
+        )}
+      </div>
       {outbound && <FlightLeg title="Outbound" leg={outbound} />}
       {inbound && Object.keys(inbound).length > 0 && <FlightLeg title="Return" leg={inbound} />}
       <Section title="Fare">
-        <Facts
+        <Receipt
           rows={[
-            ["Refund", o.refundable === true ? "Refundable" : o.refundable === false ? "Non-refundable" : null],
-            ["Fare type", str(o, "fare_type")],
-            ["Baggage", str(o, "baggage_display")],
             ["Base fare", formatInr(num(o, "base_fare_inr"))],
-            ["Taxes", formatInr(num(o, "total_tax_inr"))],
+            ["Taxes and fees", formatInr(num(o, "total_tax_inr"))],
             ["Per adult", formatInr(num(o, "price_per_adult_inr"))],
-            ["Total", formatInr(num(o, "price_inr"))],
           ]}
+          total={[num(o, "pax_count") ? `Total for ${num(o, "pax_count")}` : "Total", formatInr(num(o, "price_inr"))]}
         />
+        <div className="mt-2">
+          <Facts
+            rows={[
+              ["Refund", o.refundable === true ? "Refundable" : o.refundable === false ? "Non-refundable" : null],
+              ["Fare type", str(o, "fare_type")],
+              ["Baggage", str(o, "baggage_display")],
+            ]}
+          />
+        </div>
       </Section>
     </>
   );
@@ -431,9 +528,13 @@ function VisaBody({ o }: { o: OptionItem }) {
             ["Validity", str(o, "validity")],
             ["Processing", str(o, "processing_time_text") ?? str(o, "processing_display")],
             ["Format", o.is_evisa === true ? "e-Visa" : null],
-            ["Fee per adult", formatInr(num(o, "price_per_person_inr"))],
-            ["Fee per child", formatInr(num(o, "child_price_inr"))],
           ]}
+        />
+      </Section>
+      <Section title="Fees">
+        <Receipt
+          rows={[["Per child", formatInr(num(o, "child_price_inr"))]]}
+          total={["Per adult", formatInr(num(o, "price_per_person_inr"))]}
         />
       </Section>
       {docs.length > 0 ? (
@@ -493,6 +594,74 @@ function headline(o: OptionItem, kind: CardRef["kind"]): { price: string | null;
   }
 }
 
+function subtitle(o: OptionItem, kind: CardRef["kind"]): string | null {
+  switch (kind) {
+    case "restaurant":
+      return [str(o, "area"), str(o, "cuisine")].filter(Boolean).join(", ") || null;
+    case "hotel":
+      return str(o, "area") || str(o, "full_address");
+    case "flight":
+      return [str(o, "route_outbound"), str(o, "airline_code") && strList(obj(o, "outbound"), "flight_numbers").join(" + ")]
+        .filter(Boolean)
+        .join(", ") || null;
+    case "tour":
+      return [str(o, "category"), str(o, "duration")].filter(Boolean).join(", ") || null;
+    case "package":
+      return [str(o, "city"), num(o, "nights") ? `${num(o, "nights")} nights` : null].filter(Boolean).join(", ") || null;
+    case "transfer":
+      return [str(o, "vehicle_type"), str(o, "estimated_time")].filter(Boolean).join(", ") || null;
+    case "visa":
+      return str(o, "validity") ? `Valid ${str(o, "validity")!.toLowerCase()}` : null;
+  }
+}
+
+function highlights(o: OptionItem, kind: CardRef["kind"]): { text: string; tone?: "good" | "brand" }[] {
+  const out: { text: string; tone?: "good" | "brand" }[] = [];
+  const add = (text: string | null | undefined | false, tone?: "good" | "brand") => {
+    if (text) out.push({ text, tone });
+  };
+  switch (kind) {
+    case "restaurant":
+      add(str(o, "veg_type"), "good");
+      add(str(o, "opening_time") && str(o, "closing_time") && `${str(o, "opening_time")} to ${str(o, "closing_time")}`);
+      strList(o, "tags").slice(0, 2).forEach((t) => add(t, "brand"));
+      break;
+    case "hotel": {
+      const stars = Math.round(num(o, "stars") ?? 0);
+      add(stars > 0 && `${stars}-star`);
+      add(o.has_free_cancellation === true && "Free cancellation", "good");
+      add(str(o, "cheapest_board"));
+      break;
+    }
+    case "flight":
+      add(o.refundable === true ? "Refundable" : o.refundable === false ? "Non-refundable" : null, o.refundable === true ? "good" : undefined);
+      add(str(o, "baggage_display") && `Bags ${str(o, "baggage_display")}`);
+      add(num(obj(o, "outbound"), "seats_remaining") != null && `${num(obj(o, "outbound"), "seats_remaining")} seats left`, "brand");
+      break;
+    case "tour": {
+      const cancel = str(o, "cancellation") ?? str(o, "cancellation_display");
+      add(cancel, cancel && /free/i.test(cancel) ? "good" : undefined);
+      add(str(o, "timing") ?? str(o, "slots_display"));
+      break;
+    }
+    case "package":
+      add(o.is_free_cancellation === true && "Free cancellation", "good");
+      strList(o, "tags").slice(0, 3).forEach((t) => add(t, "brand"));
+      break;
+    case "transfer":
+      add(str(o, "transfer_type"), "brand");
+      add(num(o, "capacity") != null && `${num(o, "capacity")} seats`);
+      add(num(o, "luggage_capacity") != null && `${num(o, "luggage_capacity")} bags`);
+      break;
+    case "visa":
+      add(o.is_evisa === true && "e-Visa", "brand");
+      add(str(o, "stay_duration") && `Stay ${str(o, "stay_duration")}`);
+      add(str(o, "processing_time_text") && `Ready in ${str(o, "processing_time_text")}`, "good");
+      break;
+  }
+  return out;
+}
+
 const BOOK_LABEL: Record<CardRef["kind"], string> = {
   restaurant: "Book table",
   flight: "Book now",
@@ -539,7 +708,7 @@ export function DetailPanel({
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={title}>
       <div className="absolute inset-0 bg-black/45 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
       <div className="panel-in absolute inset-y-0 right-0 flex w-full flex-col bg-surface shadow-2xl sm:w-[480px] sm:border-l sm:border-border">
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
           <div className="relative">
             {card.kind !== "flight" && card.kind !== "visa" ? (
               <Gallery images={images} alt={title} kind={card.kind} />
@@ -558,14 +727,18 @@ export function DetailPanel({
             <HeartButton card={card} className="absolute top-3 right-3" />
           </div>
 
-          <header className="px-5 pt-4 pb-4">
+          <header className="px-5 pt-5 pb-3">
             <div className="flex items-start justify-between gap-3">
-              <h2 className="text-xl leading-snug font-semibold tracking-tight text-fg">{title}</h2>
+              <h2 className="text-[22px] leading-tight font-semibold tracking-tight text-fg">{title}</h2>
               <RatingPill value={num(o, "rating")} />
             </div>
+            {subtitle(o, card.kind) && <p className="mt-1 text-sm text-fg-muted">{subtitle(o, card.kind)}</p>}
+            <Highlights items={highlights(o, card.kind)} />
           </header>
 
-          <Body o={o} />
+          <div className="divide-y divide-border border-t border-border pb-4">
+            <Body o={o} />
+          </div>
         </div>
 
         <footer className="flex items-center gap-3 border-t border-border bg-surface px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">

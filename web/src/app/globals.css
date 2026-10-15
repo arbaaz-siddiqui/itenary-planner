@@ -555,3 +555,25 @@ ul.ui-list {
 .panel-pop {
   animation: pop 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+
+/* Home to chat: the gradient fades out over the chat, the thread rises in,
+   and the composer settles at the bottom. One 700ms hand-over. */
+@keyframes glow-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.glow-out {
+  animation: glow-out 650ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.chat-enter {
+  animation: hero-rise 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 120ms;
+}
+.dock-enter {
+  animation: hero-rise 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 60ms;
+}

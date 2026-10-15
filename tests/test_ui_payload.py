@@ -56,3 +56,34 @@ def test_wrapping_a_tool_keeps_its_schema():
     out = t.invoke({"city": "Dubai"})
     assert "image_url" not in out["options"][0]
     assert "city" in t.args
+
+
+def test_hotels_get_their_cdn_photos_by_id():
+    from parsers import hotel_image_urls
+
+    urls = hotel_image_urls(509)
+    assert urls[0].endswith("/hotel-images/509/1.webp") and len(urls) == 8
+    assert hotel_image_urls(None) == [] and hotel_image_urls(0) == []
+
+
+def test_every_kind_searched_in_a_turn_gets_its_cards():
+    import json
+
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    from agent import extract_all_search_options
+
+    msgs = [
+        AIMessage(content="", tool_calls=[
+            {"id": "a", "name": "search_hotels", "args": {}},
+            {"id": "b", "name": "search_airport_transfer_dubai", "args": {}},
+        ]),
+        ToolMessage(content=json.dumps(split({"options": [{"hotel_name": "Social Hotel", "image_urls": ["x"]}]})),
+                    tool_call_id="a", name="search_hotels"),
+        ToolMessage(content=json.dumps({"options": [{"vehicle_name": "Toyota Hiace"}]}),
+                    tool_call_id="b", name="search_airport_transfer_dubai"),
+    ]
+    groups = extract_all_search_options({"messages": msgs})
+    assert [g["kind"] for g in groups] == ["hotel", "transfer"]
+    # Hotels come back in full for the cards, photos included.
+    assert groups[0]["options"][0]["image_urls"] == ["x"]

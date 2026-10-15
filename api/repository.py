@@ -163,7 +163,7 @@ def list_messages(session_id: str, include_tool_calls: bool = False) -> list[dic
     # `options` IS loaded with the transcript, unlike tool_calls: the cards are
     # part of the reply the customer is reading, and without them every tour
     # image disappeared on reload while the text stayed.
-    cols = "id, role, content, created_at, options"
+    cols = "id, role, content, created_at, options, feedback"
     if include_tool_calls:
         cols += ", tool_calls"
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -173,6 +173,33 @@ def list_messages(session_id: str, include_tool_calls: bool = False) -> list[dic
             (session_id,),
         )
         return cur.fetchall()
+
+
+def set_feedback(message_id: str, user_id: str, value: int | None) -> bool:
+    """Rate one assistant reply in one of the user's own chats. False if not theirs."""
+    with get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE chat_messages m SET feedback = %s FROM chat_sessions s "
+            "WHERE m.id = %s AND m.session_id = s.id AND s.user_id = %s "
+            "AND m.role = 'assistant'",
+            (value, message_id, user_id),
+        )
+        return cur.rowcount == 1
+
+
+def delete_last_reply(session_id: str) -> None:
+    """Remove the newest assistant reply of a chat, before it is regenerated.
+
+    Without this a regenerated answer was stored next to the one it replaced,
+    and the question once per attempt, so a reload showed both.
+    """
+    with get_pool().connection() as conn:
+        conn.execute(
+            "DELETE FROM chat_messages WHERE id = ("
+            "SELECT id FROM chat_messages WHERE session_id = %s AND role = 'assistant' "
+            "ORDER BY created_at DESC LIMIT 1)",
+            (session_id,),
+        )
 
 
 def get_message_tool_calls(message_id: str) -> list[dict[str, Any]]:

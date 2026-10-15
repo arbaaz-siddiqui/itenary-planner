@@ -144,6 +144,14 @@ export const api = {
       ? mockApi.deleteSession(id)
       : request(`/chat/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
+  rateMessage: (id: string, value: "up" | "down" | null): Promise<void> =>
+    MOCK_MODE
+      ? Promise.resolve()
+      : request(`/chat/messages/${encodeURIComponent(id)}/feedback`, {
+          method: "POST",
+          body: JSON.stringify({ value }),
+        }),
+
   listMessages: (id: string): Promise<Message[]> =>
     MOCK_MODE
       ? mockApi.listMessages(id)
@@ -175,6 +183,7 @@ export const api = {
     message: string,
     signal?: AbortSignal,
     mode: "ask" | "plan" = "ask",
+    regenerate = false,
   ): AsyncGenerator<StreamEvent> {
     if (MOCK_MODE) {
       yield* mockApi.stream(sessionId, message, signal);
@@ -187,7 +196,7 @@ export const api = {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({ session_id: sessionId, message, mode }),
+        body: JSON.stringify({ session_id: sessionId, message, mode, regenerate }),
         signal,
       });
     } catch (e) {

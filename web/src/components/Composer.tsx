@@ -86,6 +86,9 @@ export const Composer = forwardRef<
         hero ? "shadow-black/30" : "shadow-black/10"
       }`}
     >
+      {/* Text and mode toggle on the left; send, centred on the right. */}
+      <div className="flex items-center gap-2 pr-3">
+      <div className="min-w-0 flex-1">
       {svc && (
         <div className="px-4 pt-3">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-blue/15 py-1 pl-2.5 pr-1 text-xs font-medium text-link">
@@ -147,26 +150,28 @@ export const Composer = forwardRef<
           {MODES.find((m) => m.id === mode)?.hint}
         </p>
         <div className="flex-1 sm:hidden" />
-        {streaming ? (
-          <button
-            type="button"
-            onClick={onStop}
-            aria-label="Stop generating"
-            className="press grid h-10 w-10 shrink-0 place-items-center rounded-full bg-fg text-bg hover:opacity-85"
-          >
-            <Square size={13} fill="currentColor" aria-hidden />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!text.trim() || disabled}
-            aria-label="Send message"
-            className="press grid h-10 w-10 shrink-0 place-items-center rounded-full bg-fg text-bg hover:opacity-85 disabled:opacity-30"
-          >
-            <ArrowUp size={19} strokeWidth={2.25} aria-hidden />
-          </button>
-        )}
+      </div>
+      </div>
+          {streaming ? (
+            <button
+              type="button"
+              onClick={onStop}
+              aria-label="Stop generating"
+              className="press grid h-11 w-11 shrink-0 place-items-center rounded-full bg-fg text-bg hover:opacity-85"
+            >
+              <Square size={13} fill="currentColor" aria-hidden />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!text.trim() || disabled}
+              aria-label="Send message"
+              className="press grid h-11 w-11 shrink-0 place-items-center rounded-full bg-fg text-bg hover:opacity-85 disabled:opacity-30"
+            >
+              <ArrowUp size={19} strokeWidth={2.25} aria-hidden />
+            </button>
+          )}
       </div>
     </div>
   );

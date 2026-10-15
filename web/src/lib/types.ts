@@ -75,6 +75,8 @@ export interface Message {
    * refreshing the page dropped every card and every tour image with it.
    */
   options?: OptionGroup[];
+  /** The customer's thumbs up / down on an assistant reply. */
+  feedback?: "up" | "down" | null;
   /** Client-side only: streaming/errored state for the live bubble. */
   pending?: boolean;
   error?: string | null;

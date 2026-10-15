@@ -137,6 +137,12 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
     # "ask": answer the question in hand. "plan": build a whole trip.
     mode: Literal["ask", "plan"] = "ask"
+    # Answer the last question again, replacing the reply it got.
+    regenerate: bool = False
+
+
+class Feedback(BaseModel):
+    value: Literal["up", "down"] | None = None
 
 
 # ----------------------------------------------------------------- health
@@ -285,9 +291,20 @@ async def get_messages(
             # Without this the option cards -- and every tour image on them --
             # were gone the moment the page reloaded.
             "options": m.get("options") or [],
+            "feedback": {1: "up", -1: "down"}.get(m.get("feedback")),
         }
         for m in repository.list_messages(session_id)
     ]
+
+
+@app.post("/chat/messages/{message_id}/feedback", status_code=status.HTTP_204_NO_CONTENT)
+async def rate_message(
+    message_id: str, body: Feedback, user: dict = Depends(auth.current_user)
+) -> Response:
+    value = {"up": 1, "down": -1}.get(body.value or "")
+    if not repository.set_feedback(message_id, str(user["id"]), value):
+        raise HTTPException(status_code=404, detail="Message not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/chat/messages/{message_id}/tool-calls")
@@ -341,7 +358,7 @@ async def chat_stream(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return StreamingResponse(
-        _stream_turn(session, body.message, body.mode),
+        _stream_turn(session, body.message, body.mode, body.regenerate),
         media_type="text/event-stream",
         # Nginx and some proxies buffer SSE into one chunk at the end, which
         # defeats streaming entirely.
@@ -377,13 +394,36 @@ _FOLLOW_UPS: dict[str, list[str]] = {
     "packages": ["Show package details", "Compare the top two", "Plan a custom trip"],
 }
 
+def _step_summary(out: Any) -> dict[str, Any]:
+    """What the step line needs from a tool result: a count or a failure.
+
+    The full result stays on the server. Sending it made every step event as
+    large as the search itself, and the browser only ever showed a count.
+    """
+    if not isinstance(out, dict):
+        return {}
+    if out.get("error"):
+        return {"error": str(out.get("message") or "failed")[:200]}
+    for key in ("options", "results", "items"):
+        if isinstance(out.get(key), list):
+            return {"count": len(out[key])}
+    return {}
+
+
+_REGENERATE_CONTEXT = (
+    "[system] The customer asked for a fresh answer to the message below, "
+    "which they already sent once. Answer it again from live tool results.\n\n"
+)
+
 _TURN_FAILED = (
     "Sorry, I could not finish that one. Please send it again, and I will "
     "pick up from where we were."
 )
 
 
-async def _stream_turn(session: dict, message: str, mode: str = "ask") -> AsyncIterator[str]:
+async def _stream_turn(
+    session: dict, message: str, mode: str = "ask", regenerate: bool = False
+) -> AsyncIterator[str]:
     """Run one agent turn, emitting SSE events as tokens arrive."""
     from agent import StreamResult, extract_tool_calls, stream_and_log
 
@@ -392,7 +432,11 @@ async def _stream_turn(session: dict, message: str, mode: str = "ask") -> AsyncI
 
     # Persist the customer's message BEFORE streaming: an interrupted stream
     # must not lose what they asked.
-    repository.add_message(str(session["id"]), "user", message)
+    if regenerate:
+        # The question is already stored; only its old answer goes.
+        repository.delete_last_reply(str(session["id"]))
+    else:
+        repository.add_message(str(session["id"]), "user", message)
 
     # Carry known facts across sessions so a returning customer is not re-asked
     # their departure city every time. Prepended as context rather than written
@@ -459,9 +503,10 @@ async def _stream_turn(session: dict, message: str, mode: str = "ask") -> AsyncI
                         seen_results.add(cid)
                         raw = getattr(m, "content", "")
                         try:
-                            out = json.loads(raw) if isinstance(raw, str) else raw
+                            parsed = json.loads(raw) if isinstance(raw, str) else raw
                         except (ValueError, TypeError):
-                            out = {"raw": str(raw)[:2000]}
+                            parsed = None
+                        out = _step_summary(parsed)
                         loop.call_soon_threadsafe(
                             queue.put_nowait,
                             ("tool", {"id": cid,
@@ -469,12 +514,19 @@ async def _stream_turn(session: dict, message: str, mode: str = "ask") -> AsyncI
                                       "output": out, "status": "done"}),
                         )
 
+        # Steps reach the browser as they happen, not when text next arrives.
+        holder.on_update = _drain_tool_events
         try:
             for token in stream_and_log(
                 agent=agent,
                 surface="streamlit",
                 thread_id=thread_id,
-                user_message=memory_prefix + _MODE_CONTEXT.get(mode, "") + message,
+                user_message=(
+                    memory_prefix
+                    + (_REGENERATE_CONTEXT if regenerate else "")
+                    + _MODE_CONTEXT.get(mode, "")
+                    + message
+                ),
                 result=holder,
             ):
                 # Flush tool progress before the token, so the chips appear in
@@ -523,13 +575,15 @@ async def _stream_turn(session: dict, message: str, mode: str = "ask") -> AsyncI
     # disappeared on reload while the reply text stayed.
     option_groups: list[dict[str, Any]] = []
     try:
-        from agent import extract_search_options
+        from agent import extract_all_search_options
 
-        # Returns a single {kind, options, raw} for the most recent search, not
-        # a dict of groups — the UI's `items` key maps to `options` here.
-        found = extract_search_options(holder.response) or {}
-        items = found.get("options") or []
-        if items:
+        # One group per kind searched this turn (hotels AND their transfer),
+        # latest search of each kind; the UI's `items` key maps to `options`.
+        follow: list[str] | None = None
+        for found in extract_all_search_options(holder.response):
+            items = found.get("options") or []
+            if not items:
+                continue
             # The extractor returns a singular kind ("tour", "hotel") but the
             # UI selects its card component on the plural. Left unmapped, a
             # hotel search silently rendered with the tour card layout.
@@ -539,14 +593,14 @@ async def _stream_turn(session: dict, message: str, mode: str = "ask") -> AsyncI
                 "restaurant": "restaurants", "transfer": "transfers",
                 "package": "packages", "visa": "visa",
             }
-            option_groups = [{"kind": plural.get(kind, kind), "items": items}]
-            follow = _FOLLOW_UPS.get(plural.get(kind, kind))
-            if follow:
-                # Next steps for what was just shown, as tappable chips. Same
-                # persisted channel as the cards, so they survive a reload.
-                option_groups.append(
-                    {"kind": "suggestions", "items": [{"text": t} for t in follow]}
-                )
+            option_groups.append({"kind": plural.get(kind, kind), "items": items})
+            follow = _FOLLOW_UPS.get(plural.get(kind, kind)) or follow
+        if follow:
+            # Next steps for the last thing shown, as tappable chips. Same
+            # persisted channel as the cards, so they survive a reload.
+            option_groups.append(
+                {"kind": "suggestions", "items": [{"text": t} for t in follow]}
+            )
     except Exception as e:  # noqa: BLE001 — cards are a bonus, never the reply
         log.warning("option_extraction_failed: %s", e)
 

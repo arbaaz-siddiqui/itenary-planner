@@ -24,39 +24,37 @@ const PRICE_HEADER = /\|[^|]*(price|fare|total|rate)[^|]*\|/i;
 /** Groups that ride the options channel but are not cards. */
 const NOT_CARDS = new Set(["itinerary_pdf", "suggestions"]);
 
-const FEEDBACK_KEY = "message-feedback";
-
-function readFeedback(id: string): "up" | "down" | null {
-  try {
-    const all = JSON.parse(window.localStorage.getItem(FEEDBACK_KEY) ?? "{}") as Record<string, string>;
-    return all[id] === "up" || all[id] === "down" ? all[id] : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeFeedback(id: string, v: "up" | "down" | null) {
-  try {
-    const all = JSON.parse(window.localStorage.getItem(FEEDBACK_KEY) ?? "{}") as Record<string, string>;
-    if (v) all[id] = v;
-    else delete all[id];
-    window.localStorage.setItem(FEEDBACK_KEY, JSON.stringify(all));
-  } catch {
-    /* storage blocked: feedback lasts for this page only */
-  }
-}
-
 const actionBtn =
   "press grid h-8 w-8 place-items-center rounded-lg text-fg-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-brand-blue";
 
-function AssistantActions({ m, canRegenerate, onRegenerate }: { m: Message; canRegenerate: boolean; onRegenerate: () => void }) {
+function AssistantActions({
+  m,
+  canRegenerate,
+  onRegenerate,
+  onRate,
+}: {
+  m: Message;
+  canRegenerate: boolean;
+  onRegenerate: () => void;
+  onRate: (id: string, value: "up" | "down" | null) => Promise<void>;
+}) {
   const [copied, setCopied] = useState(false);
-  const [vote, setVote] = useState<"up" | "down" | null>(() => (typeof window === "undefined" ? null : readFeedback(m.id)));
+  const [vote, setVote] = useState<"up" | "down" | null>(m.feedback ?? null);
+  const [rateError, setRateError] = useState(false);
+  // A reply still carrying its client id has not been saved yet: nothing to rate.
+  const saved = !m.id.startsWith("local-");
 
-  const rate = (v: "up" | "down") => {
+  const rate = async (v: "up" | "down") => {
     const next = vote === v ? null : v;
+    const before = vote;
     setVote(next);
-    writeFeedback(m.id, next);
+    setRateError(false);
+    try {
+      await onRate(m.id, next);
+    } catch {
+      setVote(before);
+      setRateError(true);
+    }
   };
 
   return (
@@ -89,6 +87,7 @@ function AssistantActions({ m, canRegenerate, onRegenerate }: { m: Message; canR
         aria-pressed={vote === "up"}
         title="Good reply"
         className={`${actionBtn} ${vote === "up" ? "text-success" : ""}`}
+        disabled={!saved}
         onClick={() => rate("up")}
       >
         <ThumbsUp size={15} aria-hidden />
@@ -99,10 +98,14 @@ function AssistantActions({ m, canRegenerate, onRegenerate }: { m: Message; canR
         aria-pressed={vote === "down"}
         title="Bad reply"
         className={`${actionBtn} ${vote === "down" ? "text-brand-red" : ""}`}
+        disabled={!saved}
         onClick={() => rate("down")}
       >
         <ThumbsDown size={15} aria-hidden />
       </button>
+      {copied && <span className="ml-1 text-xs text-success" role="status">Copied</span>}
+      {vote && !rateError && <span className="ml-1 text-xs text-fg-muted" role="status">Thanks for the feedback</span>}
+      {rateError && <span className="ml-1 text-xs text-brand-red" role="alert">Not saved. Try again.</span>}
     </div>
   );
 }
@@ -117,6 +120,7 @@ const Bubble = memo(function Bubble({
   onSuggest,
   onRegenerate,
   onEdit,
+  onRate,
 }: {
   m: Message;
   /** Live segments for the streaming bubble only. Persisted messages render
@@ -130,6 +134,7 @@ const Bubble = memo(function Bubble({
   onSuggest: (text: string) => void;
   onRegenerate: () => void;
   onEdit: (text: string) => void;
+  onRate: (id: string, value: "up" | "down" | null) => Promise<void>;
 }) {
   // Lookup from a table row's name to the result behind it, tagged with its
   // group's kind so the row can become the right card.
@@ -262,7 +267,7 @@ const Bubble = memo(function Bubble({
         )}
 
         {!m.pending && m.content && (
-          <AssistantActions m={m} canRegenerate={isLastAssistant && !busy} onRegenerate={onRegenerate} />
+          <AssistantActions m={m} canRegenerate={isLastAssistant && !busy} onRegenerate={onRegenerate} onRate={onRate} />
         )}
 
         {isLastAssistant && !busy && suggestions.length > 0 && (
@@ -293,6 +298,7 @@ export function MessageList({
   onSuggest,
   onRegenerate,
   onEdit,
+  onRate,
 }: {
   messages: Message[];
   /** Id of the bubble currently streaming, if any. */
@@ -302,6 +308,7 @@ export function MessageList({
   onSuggest: (text: string) => void;
   onRegenerate: () => void;
   onEdit: (text: string) => void;
+  onRate: (id: string, value: "up" | "down" | null) => Promise<void>;
 }) {
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")?.id;
   const lastUser = [...messages].reverse().find((m) => m.role === "user")?.id;
@@ -321,6 +328,7 @@ export function MessageList({
             onSuggest={onSuggest}
             onRegenerate={onRegenerate}
             onEdit={onEdit}
+            onRate={onRate}
           />
         );
       })}

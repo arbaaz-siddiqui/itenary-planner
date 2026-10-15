@@ -57,6 +57,8 @@ export default function ChatPage() {
   const [nameLater, setNameLater] = useState(false);
   /** False once the reader scrolls up during a reply: show "Jump to latest". */
   const [atBottom, setAtBottom] = useState(true);
+  /** True for the moment the home screen hands over to the chat. */
+  const [entering, setEntering] = useState(false);
 
   // Live segments + the idle "Thinking…" timer. Segments are a streaming-only
   // view; the settled message still persists as content + tool_calls.
@@ -164,7 +166,8 @@ export default function ChatPage() {
   useEffect(() => {
     if (!pinnedRef.current) return;
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    // Smooth, so new text glides into view instead of jumping.
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     // Segments grow without `messages` changing identity while streaming, so
     // they have to be a dependency or the view stops following the reply.
   }, [messages, stream.segments]);
@@ -269,11 +272,12 @@ export default function ChatPage() {
   function regenerate() {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     if (!lastUser || streaming) return;
+    // Keep the question, drop the reply it got; the server does the same.
     setMessages((prev) => {
       const i = prev.findIndex((m) => m.id === lastUser.id);
-      return i >= 0 ? prev.slice(0, i) : prev;
+      return i >= 0 ? prev.slice(0, i + 1) : prev;
     });
-    void send(lastUser.content);
+    void send(lastUser.content, { regenerate: true });
   }
 
   /** Download the open chat as plain text. */
@@ -364,11 +368,17 @@ export default function ChatPage() {
 
   // --- the streaming turn ---
 
-  async function send(typed: string) {
+  async function send(typed: string, opts: { regenerate?: boolean } = {}) {
     // A service picked in the sidebar names the intent for the agent, once.
-    const svc = serviceById(service);
+    const svc = opts.regenerate ? null : serviceById(service);
     const text =
       svc && !typed.toLowerCase().includes(svc.label.toLowerCase()) ? `${svc.label}: ${typed}` : typed;
+    // Leaving the home screen: the gradient fades into the chat instead of
+    // cutting to it.
+    if (messages.length === 0) {
+      setEntering(true);
+      window.setTimeout(() => setEntering(false), 700);
+    }
     setService(null);
     let sessionId = activeId;
 
@@ -405,7 +415,8 @@ export default function ChatPage() {
     };
 
     pinnedRef.current = true;
-    setMessages((prev) => [...prev, userMsg, draft]);
+    // A regenerated answer reuses the question already on screen.
+    setMessages((prev) => (opts.regenerate ? [...prev, draft] : [...prev, userMsg, draft]));
     setLiveId(draftId);
     stream.begin();
     setStreaming(true);
@@ -440,7 +451,7 @@ export default function ChatPage() {
     };
 
     try {
-      for await (const ev of api.stream(sessionId, text, ctrl.signal, mode)) {
+      for await (const ev of api.stream(sessionId, text, ctrl.signal, mode, Boolean(opts.regenerate))) {
         // Every event feeds the reducer and re-arms the idle timer, including
         // the ones that produce no segment.
         stream.push(ev);
@@ -630,7 +641,13 @@ export default function ChatPage() {
         <div
           className={`relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[22px] ${home ? "" : "chat-canvas border border-border"}`}
         >
-          <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+          {/* The home gradient fading out over the chat as it arrives. */}
+          {entering && !home && <div className="hero-glow glow-out pointer-events-none absolute inset-0 z-10" aria-hidden />}
+          <div
+            ref={scrollRef}
+            onScroll={onScroll}
+            className={`no-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${entering && !home ? "chat-enter" : ""}`}
+          >
             {messagesLoading && messages.length === 0 ? (
               <div className="mx-auto w-full max-w-[820px] space-y-4 px-4 py-10" role="status" aria-label="Loading messages">
                 <div className="skeleton ml-auto h-10 w-1/3 rounded-2xl" />
@@ -650,6 +667,7 @@ export default function ChatPage() {
                 onSuggest={(t) => send(t)}
                 onRegenerate={regenerate}
                 onEdit={(t) => composerRef.current?.prefill(t)}
+                onRate={(id, v) => api.rateMessage(id, v)}
               />
             )}
           </div>
@@ -658,14 +676,14 @@ export default function ChatPage() {
             <button
               type="button"
               onClick={jumpToLatest}
-              className="press absolute bottom-28 left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-medium text-fg shadow-lg hover:bg-surface-2"
+              className="press absolute right-5 bottom-32 z-20 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-medium text-fg shadow-lg hover:bg-surface-2"
             >
               <ArrowDown size={14} aria-hidden />
               Jump to latest
             </button>
           )}
 
-          {!home && composer("dock")}
+          {!home && <div className={entering ? "dock-enter" : ""}>{composer("dock")}</div>}
         </div>
       </main>
 

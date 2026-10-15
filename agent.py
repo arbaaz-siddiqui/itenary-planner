@@ -18,6 +18,7 @@ import re
 import sqlite3
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -703,6 +704,29 @@ def extract_search_options(response: dict[str, Any]) -> dict[str, Any]:
                 "raw": parsed,
             }
     return {"kind": None, "options": [], "raw": None}
+
+
+def extract_all_search_options(response: dict[str, Any]) -> list[dict[str, Any]]:
+    """One card group per kind of result this turn produced, in order.
+
+    A reply often covers two things at once (hotels and the airport transfer
+    to them). Taking only the last search left the hotels without cards. The
+    latest search of each kind wins, so a refined search replaces the first.
+    """
+    from mcp_tools.ui_payload import full_result
+
+    by_kind: dict[str, dict[str, Any]] = {}
+    for tc in extract_tool_calls(response):
+        parsed = _coerce_to_dict(tc.get("output"))
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("options"), list):
+            continue
+        parsed = full_result(parsed)
+        if not parsed.get("options"):
+            continue
+        kind = _kind_from_tool_name(tc.get("tool_name") or "")
+        by_kind.pop(kind, None)  # re-insert so order follows the latest search
+        by_kind[kind] = {"kind": kind, "options": parsed["options"], "raw": parsed}
+    return list(by_kind.values())
 
 
 def _kind_from_tool_name(name: str) -> str:
@@ -1439,6 +1463,11 @@ class StreamResult:
         self.messages: list[Any] = []
         self.tool_event_log: list[dict[str, Any]] = []
         self.latency_seconds: float = 0.0
+        # Called whenever a node finishes (a tool was chosen, a tool returned).
+        # Text tokens are yielded, but a turn spends most of its time in tools
+        # and yields nothing then; this is how a caller shows each step the
+        # moment it happens instead of when the next token arrives.
+        self.on_update: Callable[[], None] | None = None
 
     @property
     def response(self) -> dict[str, Any]:
@@ -1525,6 +1554,11 @@ def stream_and_log(
                 for m in msgs or []:
                     holder.messages.append(m)
                     _record_tool_events(m, node_name, holder)
+            if holder.on_update is not None:
+                try:
+                    holder.on_update()
+                except Exception:  # progress is cosmetic; never fail the turn over it
+                    logging.getLogger("agent.turn").debug("on_update failed", exc_info=True)
         return tokens
 
     def _clear_thread() -> None:
