@@ -1,109 +1,95 @@
-"""get_restaurant_details — agent + MCP tool."""
+"""get_restaurant_details — agent + MCP tool.
+
+One restaurant in full: rating, cuisines, feature tags, the priced menu
+(adult and child price per item), opening hours per weekday, meal windows,
+and the hours that apply on the requested date.
+
+Two things this deliberately does NOT claim:
+- Table availability. The supplier publishes none (the website books on date,
+  guests and dishes only). "Is it available on the 21st?" is answered with the
+  published hours for that weekday, said as such -- never as a confirmation.
+- A meal price. `price_from_display` is the cheapest menu item; meal costs are
+  read from `dishes`.
+"""
 
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any
 
 from langchain_core.tools import tool
 
-from booking_api import call_restaurant_details
-from core import TripPlannerError
+from core import RestaurantDish, TripPlannerError, supplier_today
+from mcp_tools.restaurant_catalog import fetch_restaurant, resolve_destination
+from mcp_tools.search_restaurants import restaurant_row, unsupported_destination
 from mcp_tools.server import mcp
-from reference_data_loader import resolve_city
 
 logger = logging.getLogger(__name__)
+
+
+def _dish_row(d: RestaurantDish) -> dict[str, Any]:
+    # Keys up to `images` are the original shape and stay as they were;
+    # `price_inr` now keeps paise (1624.75), matching the website.
+    return {
+        "dish_id": d.dish_id,
+        "name": d.name,
+        "description": d.description,
+        "cuisine": d.cuisine,
+        "price_inr": d.adult_price_inr,
+        "rate_key": d.rate_key or None,
+        "pax_rate_key": d.pax_rate_key or None,
+        "images": d.image_urls,
+        "child_price_inr": d.child_price_inr,
+        "price_display": d.price_display,
+        "child_price_display": d.child_price_display,
+    }
 
 
 def _impl(
     restaurant_id: int,
     destination_city: str,
-    search_date: str,
+    search_date: str = "",
     adults: int = 1,
     children: int = 0,
 ) -> dict[str, Any]:
-    """Get details for a specific restaurant (id from search_restaurants result)."""
+    """Get one restaurant's full details: menu with prices, rating, cuisines,
+    feature tags, opening hours per day and the hours on `search_date`
+    (YYYY-MM-DD, optional: today when left out). `restaurant_id` comes
+    from search_restaurants."""
+    search_date = (search_date or "").strip() or supplier_today().isoformat()
     try:
-        city = resolve_city(destination_city)
-        if city is None or not city.get("city_id"):
-            return {
-                "error": True,
-                "message": (
-                    f"We do not sell restaurants in {destination_city!r} — the "
-                    f"supplier's inventory for this service is Dubai only."
-                ),
-                "error_type": "UnsupportedRoute",
-                # A bare "Unsupported destination" got paraphrased to the
-                # customer as "I don't have that in my database", which reads
-                # as OUR system being broken rather than us not selling it.
-                "agent_instructions": (
-                    f"Say plainly that we do not offer restaurants in that city — we "
-                    f"cover Dubai for this service. Never say the data is "
-                    f"missing, unavailable, or not in your database, and never "
-                    f"imply a technical problem. Offer the Dubai equivalent "
-                    f"instead, and do not ask the customer for more details "
-                    f"first — the city is the blocker, not their input."
-                ),
-            }
-        from parsers import parse_restaurant_response
-        from fx import live_rate_map
-        from core import to_inr
-        raw = call_restaurant_details(
-            restaurant_id=restaurant_id,
-            city_id=int(city["city_id"]),
+        dest = resolve_destination(destination_city)
+        if dest.city is None:
+            return unsupported_destination(destination_city)
+        found = fetch_restaurant(
+            int(restaurant_id),
+            city_id=int(dest.city["city_id"]),
             search_date=search_date,
             adults=adults,
             children=children,
         )
-        options = parse_restaurant_response(raw)
-        restaurant = None
-        if options:
-            # model_dump() drops @property values; attach the display strings
-            # the agent quotes (rating + supplier verdict, per-meal hours).
-            first = options[0]
-            restaurant = first.model_dump()
-            restaurant["price_display"] = first.price_display
-            restaurant["rating_display"] = first.rating_display
-            restaurant["meal_timings_display"] = first.meal_timings_display
-        # Also extract dish rates with INR prices for easy agent access
-        dishes: list[dict] = []
-        result = raw.get("result") or {}
-        detail_list = result.get("detail") or [] if isinstance(result, dict) else []
-        detail = detail_list[0] if detail_list else {}
-        rates = live_rate_map()
-        image_base = "https://stagingapi.gujjutours.com"
-        for dish in detail.get("dishAndBuffetRates") or []:
-            if not isinstance(dish, dict):
-                continue
-            fare_infos = dish.get("fareInfo") or []
-            price_inr = None
-            rate_key = None
-            pax_rate_key = None
-            for fi in fare_infos:
-                if isinstance(fi, dict) and fi.get("paxType", "").lower() == "adult":
-                    try:
-                        currency = (fi.get("currency") or "AED").strip()
-                        price_inr = to_inr(float(fi["price"]), currency, rates=rates)
-                        rate_key = dish.get("rateKey")
-                        pax_rate_key = fi.get("paxRateKey")
-                    except Exception:
-                        pass
-                    break
-            dish_images = [
-                f"{image_base}/{img['imagePath']}"
-                for img in dish.get("dishImages") or []
-                if isinstance(img, dict) and img.get("imagePath")
-            ]
-            dishes.append({
-                "dish_id": dish.get("dishId"),
-                "name": dish.get("dishName"),
-                "description": dish.get("description", ""),
-                "cuisine": dish.get("cuisineName"),
-                "price_inr": round(price_inr) if price_inr else None,
-                "rate_key": rate_key,
-                "pax_rate_key": pax_rate_key,
-                "images": dish_images,
-            })
+        if found is None:
+            return {
+                "error": True,
+                "error_type": "NotFound",
+                "message": (
+                    f"We do not sell a restaurant with id {restaurant_id} in "
+                    f"{dest.city.get('name') or destination_city}."
+                ),
+                "agent_instructions": (
+                    "Do not describe this restaurant from memory. Call "
+                    "search_restaurants for the city and use an id it returns."
+                ),
+            }
+        try:
+            on: date | None = date.fromisoformat(str(search_date)[:10])
+        except ValueError:
+            on = None
+        # The card gets every dish photo; the agent's `restaurant` view keeps
+        # them out because `dishes` already lists each dish with its images.
+        card = restaurant_row(found, on=on, photo_limit=None)
+        restaurant = {k: v for k, v in card.items() if k != "dish_photos"}
         return {
             "agent_instructions": (
                 "Quote `rating_display` (number + the supplier's verdict) and "
@@ -111,12 +97,23 @@ def _impl(
                 "— Breakfast / Lunch / Dinner, each with its own hours — so show "
                 "them as separate lines or a small table when the customer asks "
                 "about timings. `meal_timings` has the weekdays each window "
-                "applies to. An empty value means the supplier published none: "
-                "say so, never guess an hour."
+                "applies to; `hours_on_date` is what applies on the requested "
+                "date, and `opening_hours_display` is the week. An empty value "
+                "means the supplier published none: say so, never guess an "
+                "hour. These are published hours, not a table availability "
+                "check — the supplier publishes no availability — so say 'its "
+                "published dinner hours on <day> are ...', never that it is "
+                "available or open for you. Prices: quote `dishes[].price_display` "
+                "(and `child_price_display` when a child price exists); "
+                "`price_from_display` is the cheapest item, not a meal. Describe "
+                "cuisines from `cuisines` and features only from `tags`."
             ),
             "restaurant": restaurant,
-            "dishes": dishes,
-            "restaurant_id": restaurant_id,
+            "dishes": [_dish_row(d) for d in found.dishes],
+            "restaurant_id": found.restaurant_id,
+            # The same restaurant as a card, with its full photo menu. The chat
+            # API renders a tool result's `options` as cards.
+            "options": [card],
         }
     except TripPlannerError as e:
         logger.warning("get_restaurant_details error: %s", e)

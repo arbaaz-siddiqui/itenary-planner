@@ -35,7 +35,7 @@ export interface ToolCall {
   status?: "running" | "done" | "error";
 }
 
-export type OptionKind = "tours" | "hotels" | "flights";
+export type OptionKind = "tours" | "hotels" | "flights" | "restaurants";
 
 /** An option card. Keys are kind-dependent; see components/OptionCards.tsx. */
 export type OptionItem = Record<string, unknown>;

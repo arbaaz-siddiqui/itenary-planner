@@ -3,7 +3,7 @@
 Sections (search by `# ===`):
     # === PRICING — child discount, infant, group, peak, markup, GST, tourism dirham
     # === POLICIES — cancellation (DYNAMIC from supplier), payment schedule, TCS, EMI
-    # === POLICIES — airport routing, food, visa, handoff
+    # === POLICIES — airport routing, visa, handoff
     # === BUDGET — floor check, remaining, selection tracking
 
 Per client direction (Tanvir, 2026-05): child pricing, cancellation, and
@@ -465,38 +465,6 @@ def suggest_uae_airport(*, budget_inr: float, stay_area: str = "", primary: str 
     if 0 < budget_inr < 30000:
         return "SHJ"
     return primary
-
-
-# =============================================================================
-# === POLICIES — food handling
-# =============================================================================
-# CLIENT_PLACEHOLDER: actual restaurants client books for these groups
-JAIN_FRIENDLY_RESTAURANTS: Final[list[str]] = [
-    "Rasoi Ghar (Bur Dubai)",
-    "Govinda's (Karama)",
-    "Maharaja Bhog (Bur Dubai)",
-]
-SWAMINARAYAN_FRIENDLY_RESTAURANTS: Final[list[str]] = [
-    "BAPS Hindu Mandir Restaurant (Abu Dhabi)",
-    "Govinda's (Karama)",
-    "Maharaja Bhog (Bur Dubai)",
-]
-HALAL_ONLY_RESTAURANTS: Final[list[str]] = [
-    "Bait Al Mandi",
-    "Al Mallah",
-    "Ravi Restaurant",
-]
-
-
-def suggest_restaurants(diet: str = "") -> list[str]:
-    d = diet.lower()
-    if "jain" in d:
-        return JAIN_FRIENDLY_RESTAURANTS
-    if "swami" in d:
-        return SWAMINARAYAN_FRIENDLY_RESTAURANTS
-    if "halal" in d:
-        return HALAL_ONLY_RESTAURANTS
-    return []
 
 
 # =============================================================================
@@ -992,7 +960,15 @@ def normalize_reply(text: str) -> str:
         text,
         flags=re.I,
     )
+    # Links the model writes are guesses: restaurant names came back linked to
+    # https://example.com, to a Google search and to a photo URL. Keep the
+    # label, drop the link. Image embeds (`![..](..)`) are left alone.
+    text = _MODEL_LINK_RE.sub(r"\1", text)
     return re.sub(r"[~≈]\s*(₹|Rs\.?\s)", r"\1", text).strip()
+
+
+#: A markdown link `[label](http...)` that is not an image embed.
+_MODEL_LINK_RE = re.compile(r"(?<!!)\[([^\]\n]+)\]\((?:https?://|www\.)[^)\s]*\)")
 
 _FIELD_PROMPTS: dict[str, str] = {
     "origin_city": "which city they are flying from",

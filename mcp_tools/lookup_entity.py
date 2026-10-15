@@ -9,13 +9,13 @@ tour_id / restaurant_id used everywhere else in the system.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from langchain_core.tools import tool
 
 from booking_api import call_entity_search
 from mcp_tools.server import mcp
+from text_match import match_fraction, matches, terms, without_words
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,35 @@ _NEXT_STEP: dict[str, str] = {
 _DEFAULT_NEXT_STEP = (
     "Use best_match_id / best_match_name in the matching search or detail "
     "tool — do not weigh up the other rows, and do not answer from memory."
+)
+
+# Services whose rows only mean something when their NAME matches the query.
+# For restaurants the supplier returns the city's whole list when nothing
+# matches: "Armani Ristorante" came back as Rangoli, Atithi, Bombay Bites...,
+# and naming the first of those "the one they meant" sent the agent to fetch
+# Rangoli's details for a question about Armani. Tours are left out on
+# purpose: their search matches on content ("dune bashing" -> a desert
+# safari), so the top row is meaningful even without a name match.
+_NAME_MATCH_REQUIRED = {"restaurants"}
+
+# What to do when nothing we sell matches. Never the hotel wording ("do not
+# tell the customer the hotel doesn't exist") -- for a restaurant we do not
+# sell, saying so plainly is the correct answer.
+_NOT_FOUND_STEP: dict[str, str] = {
+    "restaurants": (
+        "We do not sell a restaurant matching {query!r}{where}. Tell the "
+        "customer that plainly, in one sentence. Do NOT describe it — not its "
+        "cuisine, style (fine dining / café), price, rating or location — even "
+        "if you have heard of it: we hold no data on it, and describing it from "
+        "general knowledge is how wrong locations were invented. Then offer "
+        "what we do sell: search_restaurants(destination_city=<city>) lists it. "
+        "Do not promise a kind of restaurant ('other fine dining options') — "
+        "offer to show what we have."
+    ),
+}
+_DEFAULT_NOT_FOUND_STEP = (
+    "Nothing named {query!r}{where} was found. Do not describe it from general "
+    "knowledge; use the matching search tool for the destination instead."
 )
 
 
@@ -197,12 +226,12 @@ def _impl(
     # three near-identical candidates and no signal which was meant, the model
     # stalled and returned an EMPTY reply to the customer. Rank the rows that
     # actually contain the query words first.
-    terms = [w for w in re.split(r"\W+", query.lower()) if len(w) > 2]
-    if terms and hotel_results:
+    if terms(query) and hotel_results:
         def _relevance(pair: tuple[int, dict[str, Any]]) -> tuple[int, int, int]:
             i, row = pair
-            name = str(row.get("name", "")).lower()
-            hits = sum(1 for w in terms if w in name)
+            # Any query word present counts as relevant here (ranking only);
+            # spelling variants count too ("Kathiyawadi" / "Kathhiyawadi").
+            hits = match_fraction(query, str(row.get("name", ""))) > 0
             # City first: sorting on name alone put Abu Dhabi desert safaris
             # above Dubai ones, undoing the scoping directly above.
             off_city = (
@@ -221,28 +250,39 @@ def _impl(
             row for _i, row in sorted(enumerate(hotel_results), key=_relevance)
         ]
 
-    scoped_note = ""
-    if city_filter:
-        if out_of_city and hotel_results and city_filter in str(hotel_results[0].get("city", "")).lower():
-            scoped_note = (
-                f"Ranked {len(hotel_results) - out_of_city} match(es) in {city} first; "
-                f"{out_of_city} result(s) are in other cities — do NOT offer those."
-            )
-        elif out_of_city == len(hotel_results):
-            scoped_note = (
-                f"NONE of these results are in {city} — this endpoint searches worldwide. "
-                f"Do NOT tell the customer the hotel doesn't exist. "
-                f"Call search_hotels(destination_city='{city}', hotel_name=...) instead, "
-                f"which resolves the property against local inventory."
-            )
-
     # The resolved target, stated once. Handing over five rows and a hint to
     # "pass results[0]['id']" is not a decision: asked for Burj Khalifa the
     # supplier returns three near-identical Burj rows, and the model deliberated
     # instead of acting, emitting an EMPTY message to the customer (5 empty
     # turns in 5 runs; 0 when the same call returned a single row). Naming the
     # top-ranked row removes the choice.
-    best = hotel_results[0] if hotel_results else None
+    in_scope = [
+        r for r in hotel_results
+        if not city_filter or city_filter in str(r.get("city", "")).lower()
+    ]
+    if svc in _NAME_MATCH_REQUIRED:
+        identity = without_words(query, city) if city else query
+        best = next((r for r in in_scope if _names_query(r, identity, in_scope)), None)
+    else:
+        best = hotel_results[0] if hotel_results else None
+
+    where = f" in {city}" if city else ""
+    not_found = (
+        svc in _NAME_MATCH_REQUIRED and best is None
+    ) or (bool(city_filter) and not in_scope)
+
+    scoped_note = ""
+    if not_found:
+        scoped_note = _NOT_FOUND_STEP.get(svc, _DEFAULT_NOT_FOUND_STEP).format(
+            query=query.strip(), where=where
+        )
+        if hotel_results:
+            scoped_note += " The rows in `results` are other entries, not the one asked about."
+    elif city_filter and out_of_city:
+        scoped_note = (
+            f"Ranked {len(hotel_results) - out_of_city} match(es) in {city} first; "
+            f"{out_of_city} result(s) are in other cities — do NOT offer those."
+        )
 
     return {
         "results": hotel_results,
@@ -264,9 +304,34 @@ def _impl(
             "Also capture best_match['latitude'] and best_match['longitude'] — "
             "you will need these as hotel_lat/hotel_lng for search_airport_transfer_dubai."
             if svc == "hotels" else
+            scoped_note if not_found else
             _NEXT_STEP.get(svc, _DEFAULT_NEXT_STEP)
         ),
     }
+
+
+def _names_query(row: dict[str, Any], identity: str, rows: list[dict[str, Any]]) -> bool:
+    """Is `row` the entity the customer named, not just a row that came back?
+
+    At least half the query's words must appear in the name, and at least one
+    of those must be DISTINCTIVE -- found in fewer than half of the returned
+    names. "Veganesha restaurant" names Veganesha: "restaurant" is in most
+    rows and proves nothing, "veganesha" is in one. "Armani Ristorante" names
+    none of the five restaurants returned for it. With a single row there is
+    nothing to compare against, so any matching word counts.
+    """
+    name = str(row.get("name", ""))
+    q = terms(identity)
+    if not q or match_fraction(identity, name) < 0.5:
+        return False
+    names = [str(r.get("name", "")) for r in rows]
+
+    def distinctive(term: str) -> bool:
+        if len(names) < 2:
+            return True
+        return sum(1 for n in names if matches(term, n)) * 2 < len(names)
+
+    return any(matches(t, name) and distinctive(t) for t in q)
 
 
 from mcp_tools.result_cache import cache_impl

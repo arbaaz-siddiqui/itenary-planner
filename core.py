@@ -19,7 +19,7 @@ Sections (search by `# ===`):
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 from typing import Any, Final
@@ -310,6 +310,21 @@ def format_inr(amount: float | int | Decimal | None, include_symbol: bool = True
 # === DATES
 # =============================================================================
 _ISO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+#: The supplier's clock. Every request is sent with `X-Time-Zone: Arabian
+#: Standard Time`, and dates before "today" there are rejected. The UAE keeps
+#: UTC+4 all year (no daylight saving), so a fixed offset is exact and needs
+#: no time-zone database on the server.
+SUPPLIER_TZ: Final = timezone(timedelta(hours=4), "Arabian Standard Time")
+
+
+def supplier_today() -> date:
+    """Today's date as the supplier counts it.
+
+    A server on UTC is still on "yesterday" for the first four hours of a
+    Dubai day; a date taken from its clock is rejected as being in the past.
+    """
+    return datetime.now(SUPPLIER_TZ).date()
 
 
 def _parse_iso(iso_date: str) -> date:
@@ -672,36 +687,142 @@ class TransferOption(BaseModel):
 # =============================================================================
 # === MODELS — restaurant
 # =============================================================================
+#: Weekday names in calendar order, as the supplier spells them. The supplier
+#: sends its per-day rows alphabetically (Friday, Monday, Saturday, ...).
+WEEKDAYS: Final[tuple[str, ...]] = (
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+)
+
+
+def weekday_order(day: str) -> int:
+    """Sort key putting supplier weekday names in calendar order."""
+    try:
+        return WEEKDAYS.index(day.strip().title())
+    except ValueError:
+        return len(WEEKDAYS)
+
+
+def _opening_minutes(window: str) -> int:
+    """Minutes past midnight at which "07:00 PM-11:15 PM" opens (for sorting)."""
+    try:
+        t = datetime.strptime(window.split("-", 1)[0].strip(), "%I:%M %p")
+    except ValueError:
+        return 24 * 60
+    return t.hour * 60 + t.minute
+
+
+def _days_label(days: list[str]) -> str:
+    """"Mon, Tue" for a subset of the week; "" when it is every day."""
+    known = sorted({d.strip().title() for d in days if d}, key=weekday_order)
+    if len(known) >= len(WEEKDAYS):
+        return ""
+    return ", ".join(d[:3] for d in known)
+
+
+class RestaurantDish(BaseModel):
+    """One priced item on a restaurant's menu (`dishAndBuffetRates`).
+
+    Prices are kept to the paisa: the website shows "1,624.75" for the thali
+    the agent used to quote as a rounded "1,625".
+    """
+
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+    dish_id: int | None = None
+    name: str
+    cuisine: str = ""
+    description: str = ""
+    adult_price_inr: float | None = None
+    child_price_inr: float | None = None
+    price_original: float = 0.0
+    currency_original: str = ""
+    rate_key: str = ""
+    pax_rate_key: str = ""
+    image_urls: list[str] = Field(default_factory=list)
+
+    @property
+    def price_display(self) -> str:
+        return format_inr(self.adult_price_inr) if self.adult_price_inr else ""
+
+    @property
+    def child_price_display(self) -> str:
+        return format_inr(self.child_price_inr) if self.child_price_inr else ""
+
+
 class RestaurantOption(BaseModel):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
     restaurant_id: int
     name: str
+    # The supplier's `priceStarts.perPersonPrice`: the cheapest item on the
+    # menu, NOT the cost of a meal. Atithi's "₹340.67" is a fried papad. Kept
+    # under its original name for compatibility; say it as `price_from_display`.
     price_per_adult_inr: float
     price_original: float = 0.0
     currency_original: str = "INR"
+    # Primary cuisine as the supplier files it. One label only, and sometimes
+    # a misleading one (Atithi Veg is filed as "Italian"); `cuisines` is the
+    # full list.
     cuisine: str = ""
+    cuisines: list[str] = Field(default_factory=list)
     veg_type: str = ""
+    # The supplier's own feature tags (`componentName`): "Jain Friendly",
+    # "Budget Friendly", "Premium Dining", "Unlimited Thali" ... The website
+    # shows them on every card; they are the only basis for calling a place
+    # Jain-friendly, budget or premium.
+    tags: list[str] = Field(default_factory=list)
     full_address: str = ""
+    # Neighbourhood, read from the address ("Al Karama"). Empty when the
+    # address does not name one (a plus code, or no address at all).
+    area: str = ""
     city: str = ""
     opening_time: str = ""
     closing_time: str = ""
+    # Opening hours per weekday (`restaurantTiming`, details only):
+    # [{"day": "Saturday", "hours": "09:30 AM-10:45 PM", "closed": False}].
+    opening_hours: list[dict[str, Any]] = Field(default_factory=list)
     seating_capacity: int = 0
     rating: float = 0.0
     # Supplier's own verdict from `review.reviewCount` ("Very Good"), which
     # arrives HTML-wrapped. Named for what it is, not what the key suggests.
     review_label: str = ""
     # Per-meal service windows from `restaurantMealTiming`: Breakfast, Lunch,
-    # Dinner, each with its own days and hours.
+    # Dinner. One entry per distinct window, with the days it applies to.
     meal_timings: list[dict[str, Any]] = Field(default_factory=list)
     description: str = ""
     image_url: str = ""
     image_urls: list[str] = Field(default_factory=list)
     latitude: float | None = None
     longitude: float | None = None
+    # The menu (details only).
+    dishes: list[RestaurantDish] = Field(default_factory=list)
+    # Straight-line km from the place the customer asked about, when one was.
+    distance_km: float | None = None
 
     @property
     def price_display(self) -> str:
         return format_inr(self.price_per_adult_inr)
+
+    @property
+    def price_from_display(self) -> str:
+        """"from ₹445.50 per person" — the starting price, said as one."""
+        if not self.price_per_adult_inr:
+            return ""
+        return f"from {format_inr(self.price_per_adult_inr)} per person"
+
+    @property
+    def menu_price_range(self) -> tuple[float, float] | None:
+        prices = [d.adult_price_inr for d in self.dishes if d.adult_price_inr]
+        return (min(prices), max(prices)) if prices else None
+
+    @property
+    def menu_price_range_display(self) -> str:
+        """"₹445.50 – ₹1,624.75 per item" across the priced menu."""
+        rng = self.menu_price_range
+        if rng is None:
+            return ""
+        lo, hi = rng
+        if lo == hi:
+            return f"{format_inr(lo)} per item"
+        return f"{format_inr(lo)} – {format_inr(hi)} per item"
 
     @property
     def rating_display(self) -> str:
@@ -713,14 +834,94 @@ class RestaurantOption(BaseModel):
     @property
     def meal_timings_display(self) -> str:
         """"Breakfast 08:00 AM-11:30 AM · Lunch 11:30 AM-03:30 PM" — one entry
-        per meal the restaurant serves, so a customer can plan around it."""
-        parts: list[str] = []
+        per meal the restaurant serves, so a customer can plan around it. A
+        window that does not run every day names its days."""
+        order: list[str] = []
+        windows: dict[str, list[str]] = {}
         for meal in self.meal_timings:
             name = str(meal.get("meal_type") or "").strip()
             hours = str(meal.get("hours") or "").strip()
-            if name and hours:
-                parts.append(f"{name} {hours}")
-        return " · ".join(parts)
+            if not (name and hours):
+                continue
+            days = _days_label(list(meal.get("days") or []))
+            if name not in windows:
+                order.append(name)
+                windows[name] = []
+            windows[name].append(f"{hours} ({days})" if days else hours)
+        return " · ".join(f"{name} {' / '.join(windows[name])}" for name in order)
+
+    def _hours_by_day(self) -> dict[str, str]:
+        """{"Monday": "12:00 PM-04:00 PM, 07:00 PM-11:15 PM", "Friday": "Closed"}.
+
+        A day can have several rows: restaurants that close between lunch and
+        dinner publish one row per shift. Reading only the first row reported
+        such a place as open for lunch only.
+        """
+        shifts: dict[str, list[str]] = {}
+        closed: set[str] = set()
+        for row in self.opening_hours:
+            day = str(row.get("day") or "").strip().title()
+            if not day:
+                continue
+            if row.get("closed"):
+                closed.add(day)
+                shifts.setdefault(day, [])
+            elif row.get("hours"):
+                shifts.setdefault(day, []).append(str(row["hours"]))
+        return {
+            day: ", ".join(sorted(set(hours), key=_opening_minutes))
+            if hours else ("Closed" if day in closed else "")
+            for day, hours in sorted(shifts.items(), key=lambda kv: weekday_order(kv[0]))
+        }
+
+    @property
+    def opening_hours_display(self) -> str:
+        """Opening hours by day, grouped: "07:30 AM-11:45 PM (Mon, Tue, ...)"."""
+        groups: dict[str, list[str]] = {}
+        for day, label in self._hours_by_day().items():
+            if label:
+                groups.setdefault(label, []).append(day)
+        if not groups:
+            if self.opening_time and self.closing_time:
+                return f"{self.opening_time}-{self.closing_time}"
+            return ""
+        if len(groups) == 1:
+            ((label, days),) = groups.items()
+            suffix = _days_label(days)
+            return f"{label} ({suffix})" if suffix else label
+        return " · ".join(
+            f"{label} ({_days_label(days) or 'every day'})" for label, days in groups.items()
+        )
+
+    def schedule_on(self, day: date) -> dict[str, Any]:
+        """The published hours that apply on one calendar date.
+
+        Published hours only: the supplier has no table availability, so this
+        says when the kitchen serves, never whether a table is free.
+        """
+        weekday = WEEKDAYS[day.weekday()]
+        by_day = self._hours_by_day()
+        if weekday in by_day:
+            closed = by_day[weekday] == "Closed"
+            hours = "" if closed else by_day[weekday]
+        else:
+            closed = False
+            hours = (
+                f"{self.opening_time}-{self.closing_time}"
+                if self.opening_time and self.closing_time else ""
+            )
+        meals = [
+            {"meal_type": m.get("meal_type"), "hours": m.get("hours")}
+            for m in self.meal_timings
+            if weekday in {str(d).title() for d in (m.get("days") or [])}
+        ]
+        return {
+            "date": day.isoformat(),
+            "weekday": weekday,
+            "closed": closed,
+            "opening_hours": hours,
+            "meals": [] if closed else meals,
+        }
 
 
 # =============================================================================

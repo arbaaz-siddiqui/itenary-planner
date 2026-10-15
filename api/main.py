@@ -427,7 +427,10 @@ async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
             # UI selects its card component on the plural. Left unmapped, a
             # hotel search silently rendered with the tour card layout.
             kind = str(found.get("kind") or "tour")
-            plural = {"tour": "tours", "hotel": "hotels", "flight": "flights"}
+            plural = {
+                "tour": "tours", "hotel": "hotels", "flight": "flights",
+                "restaurant": "restaurants",
+            }
             option_groups = [{"kind": plural.get(kind, kind), "items": items}]
     except Exception as e:  # noqa: BLE001 — cards are a bonus, never the reply
         log.warning("option_extraction_failed: %s", e)

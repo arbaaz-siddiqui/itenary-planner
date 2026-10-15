@@ -3,12 +3,13 @@
 import pytest
 
 from mcp_tools.tour_pricing import tour_options, transfer_prices
+from tests.factories import future_date
 
 
 class TestVariantsAreExposed:
     @pytest.fixture(scope="class")
     def burj(self):
-        return tour_options(30614, "2026-09-30", 2)
+        return tour_options(30614, future_date(14), 2)
 
     def test_burj_variants_carry_real_prices(self, burj):
         assert [o for o in burj["options"] if o.get("price_total_inr")]
@@ -99,7 +100,7 @@ class TestRoeCaching:
 class TestAddonsAndGroupPricing:
     @pytest.fixture(scope="class")
     def desert(self):
-        return tour_options(30647, "2026-09-15", 4)
+        return tour_options(30647, future_date(14), 4)
 
     def test_addons_are_flagged(self, desert):
         addons = [o for o in desert["options"] if o.get("is_addon")]

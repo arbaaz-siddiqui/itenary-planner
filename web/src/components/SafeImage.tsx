@@ -19,7 +19,9 @@ export function normalizeImageUrl(raw: unknown): string | null {
   if (/^https?:\/\//i.test(s) || s.startsWith("data:")) return s;
   const path = s.replace(/^\/+/, "");
   if (CDN_PREFIXES.some((p) => path.startsWith(p))) return `${MEDIA_CDN_BASE}/${path}`;
-  if (CDN_UPLOADS_MARKERS.some((m) => `/${path}`.includes(m)))
+  // Case-insensitive: restaurant media arrives as ".../restaurantmedia/...".
+  const lowered = `/${path}`.toLowerCase();
+  if (CDN_UPLOADS_MARKERS.some((m) => lowered.includes(m.toLowerCase())))
     return `${MEDIA_CDN_BASE}/uploads/${path}`;
   return `${MEDIA_CDN_BASE}/${path}`;
 }

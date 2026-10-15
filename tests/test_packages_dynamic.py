@@ -15,6 +15,7 @@ fallback survived. Those 5 rows happened to be the 3-night ones.
 """
 
 from typing import Any
+from tests.factories import future_date
 
 
 class TestPackageListParsing:
@@ -86,8 +87,8 @@ class TestPackagesCarryNoPricing:
     def _packages(self):
         from mcp_tools.list_packages import _impl
 
-        return _impl(destination_city="Dubai", check_in="2026-09-15",
-                     check_out="2026-09-19", adults=2)
+        return _impl(destination_city="Dubai", check_in=future_date(14),
+                     check_out=future_date(18), adults=2)
 
     def test_no_price_key_survives_anywhere(self):
         r = self._packages()

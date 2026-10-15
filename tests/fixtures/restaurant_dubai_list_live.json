@@ -1,0 +1,736 @@
+{
+ "statusCode": 200,
+ "error": null,
+ "result": {
+  "list": [
+   {
+    "restaurantId": 1,
+    "restaurantName": "Kathhiyawadi Thali Restaurant",
+    "restaurantNameDefault": "Kathhiyawadi Thali Restaurant",
+    "rating": "4.4",
+    "address": {
+     "countryId": 213,
+     "cityId": 244520,
+     "fullAddress": "Al Kifaf - Dubai - United Arab Emirates",
+     "country": "United Arab Emirates",
+     "city": "Dubai, Dubai, United Arab Emirates",
+     "cityNameDefault": "Dubai, Dubai, United Arab Emirates",
+     "countryNameDefault": "United Arab Emirates"
+    },
+    "description": "<div>If you are searching for an authentic Kathiyawadi vegetarian dining experience in Dubai, Kathhiyawadi Thali Restaurant in Al Kifaf is your destination. Rooted in the bold, rustic, and intensely flavourful culinary traditions of the Kathiyawad region of Gujarat, this restaurant brings the true taste of Saurashtra to the heart of Dubai.</div><div><br></div><div>Kathiyawadi cuisine is known for its generous use of whole spices, lentils, and farm-fresh ingredients \u2014 producing dishes that are deeply satisfying, wholesome, and unmistakably authentic. At Kathiyawadi Thali Restaurant, every plate is a reflection of this proud culinary heritage, served with warmth and the generous spirit that defines Kathiyawadi hospitality.</div>",
+    "coordinates": {
+     "latitude": 25.2346972,
+     "longitude": 55.2963797
+    },
+    "review": {
+     "rating": "4.4",
+     "reviewCount": "<p>Very Good</p>"
+    },
+    "restaurantType": {
+     "restaurantTypeId": 1,
+     "restaurantTypeName": "Vegetarian"
+    },
+    "foodType": {
+     "foodTypeId": 1,
+     "foodTypeName": "Kathiyawadi Gujarati"
+    },
+    "operatingHours": {
+     "openingTime": "12:00 PM",
+     "closingTime": "11:15 PM"
+    },
+    "menuFilePath": "",
+    "restaurantImagePath": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/1/bddeb784-ddfb-473d-aa31-6c910b35667c_IMG-20250226-WA0046_R.webp",
+    "priceStarts": {
+     "perPersonPrice": 56.0,
+     "currency": "AED ",
+     "discount": {
+      "perPersonDiscountedPrice": 0
+     }
+    },
+    "distanceFromSearchedEntity": "",
+    "seatingCapacity": 50,
+    "componentName": "Loved by Indians, Pure Veg, Family Friendly, Gujarati Food, Kathiyawadi Food, Swaminarayan Food, North Indian",
+    "promoText": "",
+    "tags": {
+     "tagName": "",
+     "description": ""
+    },
+    "imageInfoList": [
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/1/bddeb784-ddfb-473d-aa31-6c910b35667c_IMG-20250226-WA0046_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/1/b1f128ac-108e-4f27-a82a-9fdb2a0623cb_IMG-20250226-WA0044_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/1/9e0eb512-a2e8-4564-8f46-b67314a2a1be_IMG-20250226-WA0045_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/1/6002213b-e55a-44f6-a4c2-09cdcc9ba6d7_IMG-20250226-WA0047_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/1/d14c9e9c-743a-4401-a038-9a782b4a6152_Kathiyawadi1_R.webp",
+      "caption": "",
+      "category": ""
+     }
+    ],
+    "cancellationPolicy": [],
+    "seoMeta": []
+   },
+   {
+    "restaurantId": 2,
+    "restaurantName": "Atithi Veg Restaurant",
+    "restaurantNameDefault": "Atithi Veg Restaurant",
+    "rating": "4.5",
+    "address": {
+     "countryId": 213,
+     "cityId": 244520,
+     "fullAddress": "772R+QGR - Dubai - United Arab Emirates",
+     "country": "United Arab Emirates",
+     "city": "Dubai, Dubai, United Arab Emirates",
+     "cityNameDefault": "Dubai, Dubai, United Arab Emirates",
+     "countryNameDefault": "United Arab Emirates"
+    },
+    "description": "<p><b>Atithi Veg Restaurant in Al Mankhool, Dubai</b>, is a pure vegetarian restaurant that serves various cuisines. Located in the heart of Bur Dubai, it has quickly built a loyal following among Indian expats, families, and vegetarian food lovers from across the globe.</p><p>At GujjuTours, we make it effortless for you to <b>book a table at Atithi Veg Dubai</b>. Whether you are planning a family dinner, a business lunch, or a special celebration, our team is ready to assist. Explore the Atithi Veg menu, check availability, and secure your reservation \u2014 all in one place at GujjuTours.</p>",
+    "coordinates": {
+     "latitude": 25.2519875,
+     "longitude": 55.2912656
+    },
+    "review": {
+     "rating": "4.5",
+     "reviewCount": ""
+    },
+    "restaurantType": {
+     "restaurantTypeId": 1,
+     "restaurantTypeName": "Vegetarian"
+    },
+    "foodType": {
+     "foodTypeId": 9,
+     "foodTypeName": "Italian"
+    },
+    "operatingHours": {
+     "openingTime": "07:30 AM",
+     "closingTime": "11:45 PM"
+    },
+    "menuFilePath": "",
+    "restaurantImagePath": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/2/d4248fac-65c8-41e6-9eb7-99a907cd2937_AtithiVegRestaurantinDubai_R.webp",
+    "priceStarts": {
+     "perPersonPrice": 13.0,
+     "currency": "AED ",
+     "discount": {
+      "perPersonDiscountedPrice": 0
+     }
+    },
+    "distanceFromSearchedEntity": "",
+    "seatingCapacity": 180,
+    "componentName": "Loved by Indians, Pure Veg, Jain Friendly, Family Friendly, Indian Cuisine, Swaminarayan Food, North Indian",
+    "promoText": "",
+    "tags": {
+     "tagName": "",
+     "description": ""
+    },
+    "imageInfoList": [
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/2/d4248fac-65c8-41e6-9eb7-99a907cd2937_AtithiVegRestaurantinDubai_R.webp",
+      "caption": "",
+      "category": ""
+     }
+    ],
+    "cancellationPolicy": [],
+    "seoMeta": []
+   },
+   {
+    "restaurantId": 3,
+    "restaurantName": "Rangoli Restaurant",
+    "restaurantNameDefault": "Rangoli Restaurant",
+    "rating": "4.0",
+    "address": {
+     "countryId": 213,
+     "cityId": 244520,
+     "fullAddress": "10 4A St - Al Karama - Dubai - United Arab Emirates",
+     "country": "United Arab Emirates",
+     "city": "Dubai, Dubai, United Arab Emirates",
+     "cityNameDefault": "Dubai, Dubai, United Arab Emirates",
+     "countryNameDefault": "United Arab Emirates"
+    },
+    "description": "<p>If you are searching for a restaurant in Dubai that specialises in pure vegetarian Indian food, Rangoli Restaurant is a top choice. Located in Bur Dubai, it is a trusted destination for families, tourists, and anyone following a vegetarian or Jain diet. Known for its homestyle cooking, warm service, and a wide variety of dishes spanning multiple Indian culinary traditions, Rangoli makes you feel at home with every meal.</p>",
+    "coordinates": {
+     "latitude": 25.252258,
+     "longitude": 55.3043508
+    },
+    "review": {
+     "rating": "4.4",
+     "reviewCount": "<p>Very Good</p>"
+    },
+    "restaurantType": {
+     "restaurantTypeId": 1,
+     "restaurantTypeName": "Vegetarian"
+    },
+    "foodType": {
+     "foodTypeId": 12,
+     "foodTypeName": "Snacks"
+    },
+    "operatingHours": {
+     "openingTime": "07:30 AM",
+     "closingTime": "11:45 PM"
+    },
+    "menuFilePath": "",
+    "restaurantImagePath": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/3/efd1187a-9db4-441d-9b84-27a0253e3a04_rangoli-restaurant_R.webp",
+    "priceStarts": {
+     "perPersonPrice": 17.0,
+     "currency": "AED ",
+     "discount": {
+      "perPersonDiscountedPrice": 0
+     }
+    },
+    "distanceFromSearchedEntity": "",
+    "seatingCapacity": 0,
+    "componentName": "Loved by Indians, Family Friendly, Indian Cuisine, Unlimited Thali, North Indian",
+    "promoText": "",
+    "tags": {
+     "tagName": "",
+     "description": ""
+    },
+    "imageInfoList": [
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/3/efd1187a-9db4-441d-9b84-27a0253e3a04_rangoli-restaurant_R.webp",
+      "caption": "",
+      "category": ""
+     }
+    ],
+    "cancellationPolicy": [],
+    "seoMeta": []
+   },
+   {
+    "restaurantId": 4,
+    "restaurantName": "Khandani Rajdhani - Indian Restaurant in Karama",
+    "restaurantNameDefault": "Khandani Rajdhani - Indian Restaurant in Karama",
+    "rating": "4.3",
+    "address": {
+     "countryId": 213,
+     "cityId": 244520,
+     "fullAddress": "Zaa'beel St - Al Karama - Dubai - United Arab Emirates",
+     "country": "United Arab Emirates",
+     "city": "Dubai, Dubai, United Arab Emirates",
+     "cityNameDefault": "Dubai, Dubai, United Arab Emirates",
+     "countryNameDefault": "United Arab Emirates"
+    },
+    "description": "<p>Khandani Rajdhani is one of India\u2019s most iconic and beloved vegetarian restaurant chains, celebrated across the country for its lavish, unlimited thali experience rooted in authentic Indian culinary tradition. Its Dubai outpost, situated on Za\u2019abeel Street in Al Karama, brings this legendary dining experience to the heart of the UAE \u2014 serving generous, soul-satisfying Indian thalis to Indian expats, vegetarian food enthusiasts, and curious diners from across the globe.</p><p>At GujjuTours, we make it easy for you to discover and book a table at Khandani Rajdhani Al Karama. Whether you are planning a family dinner, a business lunch, or simply want to enjoy an authentic Indian thali in Dubai, our team is here to help. Browse the Rajdhani Dubai menu, check availability, and confirm your reservation at GujjuTours.</p>",
+    "coordinates": {
+     "latitude": 25.2441766,
+     "longitude": 55.3072475
+    },
+    "review": {
+     "rating": "4.3",
+     "reviewCount": ""
+    },
+    "restaurantType": {
+     "restaurantTypeId": 1,
+     "restaurantTypeName": "Vegetarian"
+    },
+    "foodType": {
+     "foodTypeId": 26,
+     "foodTypeName": "Indian Main Course"
+    },
+    "operatingHours": {
+     "openingTime": "07:00 AM",
+     "closingTime": "11:45 PM"
+    },
+    "menuFilePath": "",
+    "restaurantImagePath": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/4/9f8478a9-d079-444e-9afc-e4779ddae545_khandani-rajdhani-indian-restaurant_R.webp",
+    "priceStarts": {
+     "perPersonPrice": 28.0,
+     "currency": "AED ",
+     "discount": {
+      "perPersonDiscountedPrice": 0
+     }
+    },
+    "distanceFromSearchedEntity": "",
+    "seatingCapacity": 0,
+    "componentName": "Loved by Indians, Pure Veg, Jain Friendly, Family Friendly, Gujarati Food, Premium Dining, Unlimited Thali, Swaminarayan Food, North Indian",
+    "promoText": "",
+    "tags": {
+     "tagName": "",
+     "description": ""
+    },
+    "imageInfoList": [
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/4/9f8478a9-d079-444e-9afc-e4779ddae545_khandani-rajdhani-indian-restaurant_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/4/7c6f9706-5934-468f-b64d-8fda661022c9_khandani-rajdhani-restaurant_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/4/b0ac2212-4c9c-4723-a327-665d674a6f01_khandani-rajdhani-indian_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/4/044a2c55-4696-4d48-a1bd-dd32203bd928_khandani-rajdhani-indian_R.webp",
+      "caption": "",
+      "category": ""
+     }
+    ],
+    "cancellationPolicy": [],
+    "seoMeta": []
+   },
+   {
+    "restaurantId": 5,
+    "restaurantName": "Aamras Thali Restaurant, Dubai",
+    "restaurantNameDefault": "Aamras Thali Restaurant, Dubai",
+    "rating": "4.7",
+    "address": {
+     "countryId": 213,
+     "cityId": 244520,
+     "fullAddress": "15 24 Street - Al Karama - Dubai - United Arab Emirates",
+     "country": "United Arab Emirates",
+     "city": "Dubai, Dubai, United Arab Emirates",
+     "cityNameDefault": "Dubai, Dubai, United Arab Emirates",
+     "countryNameDefault": "United Arab Emirates"
+    },
+    "description": "<p>Aamras Thali Restaurant in Al Karama, Dubai, is one of the city's most celebrated pure vegetarian dining destinations \u2014 earning a remarkable 4.7-star rating on Google from a growing community of loyal diners. Whether you are a vegetarian resident, a Gujarati traveller, or simply someone who appreciates honest, flavourful Indian cooking, Aamras delivers a dining experience that is both memorable and deeply satisfying.</p><p>Born and built in Dubai, Aamras is not an imported brand \u2014 it is a homegrown story of culinary passion, rooted in the philosophy that vegetarian food deserves the same prestige, craft, and ambition as any other cuisine. From its signature unlimited rotating thali to a thoughtfully curated menu spanning tandoor, Indo-Chinese, and South Indian traditions, Aamras has set a new benchmark for vegetarian restaurants in Dubai.</p>",
+    "coordinates": {
+     "latitude": 25.247589,
+     "longitude": 55.3099803
+    },
+    "review": {
+     "rating": "4.7",
+     "reviewCount": "<p>Very Good</p>"
+    },
+    "restaurantType": {
+     "restaurantTypeId": 1,
+     "restaurantTypeName": "Vegetarian"
+    },
+    "foodType": {
+     "foodTypeId": 26,
+     "foodTypeName": "Indian Main Course"
+    },
+    "operatingHours": {
+     "openingTime": "12:00 PM",
+     "closingTime": "11:30 PM"
+    },
+    "menuFilePath": "",
+    "restaurantImagePath": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/5/5ffbcbbd-4151-41e4-aa59-cdd17e3e85c4_aamras-thali-restaurant-dubai_R.webp",
+    "priceStarts": {
+     "perPersonPrice": 62.0,
+     "currency": "AED ",
+     "discount": {
+      "perPersonDiscountedPrice": 0
+     }
+    },
+    "distanceFromSearchedEntity": "",
+    "seatingCapacity": 100,
+    "componentName": "Loved by Indians, Pure Veg, Jain Friendly, Family Friendly, Budget Friendly, Gujarati Food, Swaminarayan Food, North Indian",
+    "promoText": "",
+    "tags": {
+     "tagName": "",
+     "description": ""
+    },
+    "imageInfoList": [
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/5/5ffbcbbd-4151-41e4-aa59-cdd17e3e85c4_aamras-thali-restaurant-dubai_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/5/b88e7c6d-64be-4053-9872-4826331be485_aamras-thali-restaurant-dubai_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/5/b0605665-d126-4684-8812-6f2df74b1683_aamras-thali-restaurant-dubai_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/5/5da93222-d9a2-42f3-855e-a880ba82f0d3_aamras-thali-restaurant-dubai_R.webp",
+      "caption": "",
+      "category": ""
+     }
+    ],
+    "cancellationPolicy": [],
+    "seoMeta": []
+   },
+   {
+    "restaurantId": 6,
+    "restaurantName": "Maharaja Bhog Al Karama - Pure Vegetarian Thali Restaurant",
+    "restaurantNameDefault": "Maharaja Bhog Al Karama - Pure Vegetarian Thali Restaurant",
+    "rating": "4.3",
+    "address": {
+     "countryId": 213,
+     "cityId": 244520,
+     "fullAddress": "106, Hamsa \u2018A\u2019 building - Zaa'beel St - next to Ansar Gallery - Al Karama - Dubai - United Arab Emirates",
+     "country": "United Arab Emirates",
+     "city": "Dubai, Dubai, United Arab Emirates",
+     "cityNameDefault": "Dubai, Dubai, United Arab Emirates",
+     "countryNameDefault": "United Arab Emirates"
+    },
+    "description": "<p><b>Maharaja Bhog Al Karama </b>is one of Dubai's most celebrated pure vegetarian dining destinations, renowned for its traditional Indian thali experience served in true royal style. Located at Hamsah Mall in the heart of Al Karama, this restaurant has earned a devoted following among Indian expats, vegetarian families, and food lovers who crave the authentic taste of home-style Indian cooking in the UAE.</p>",
+    "coordinates": {
+     "latitude": 25.2512427,
+     "longitude": 55.309154
+    },
+    "review": {
+     "rating": "4.3",
+     "reviewCount": "<p>Very Good</p>"
+    },
+    "restaurantType": {
+     "restaurantTypeId": 1,
+     "restaurantTypeName": "Vegetarian"
+    },
+    "foodType": {
+     "foodTypeId": 26,
+     "foodTypeName": "Indian Main Course"
+    },
+    "operatingHours": {
+     "openingTime": "12:00 PM",
+     "closingTime": "11:30 PM"
+    },
+    "menuFilePath": "",
+    "restaurantImagePath": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/6/777a8549-987a-4495-a4e6-2ee7854b66ee_maharaja-bhog-al-karama-dubai_R.webp",
+    "priceStarts": {
+     "perPersonPrice": 39.0,
+     "currency": "AED ",
+     "discount": {
+      "perPersonDiscountedPrice": 0
+     }
+    },
+    "distanceFromSearchedEntity": "",
+    "seatingCapacity": 120,
+    "componentName": "Loved by Indians, Pure Veg, Jain Friendly, Family Friendly, Gujarati Food, Highly Rated, Premium Dining, Unlimited Thali, Swaminarayan Food, North Indian",
+    "promoText": "",
+    "tags": {
+     "tagName": "",
+     "description": ""
+    },
+    "imageInfoList": [
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/6/777a8549-987a-4495-a4e6-2ee7854b66ee_maharaja-bhog-al-karama-dubai_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/6/058f456b-c564-4a8b-90ca-20f445e13d17_maharaja-bhog-al-karama-dubaii_R.webp",
+      "caption": "",
+      "category": ""
+     }
+    ],
+    "cancellationPolicy": [],
+    "seoMeta": []
+   },
+   {
+    "restaurantId": 8,
+    "restaurantName": "Puranmal Vegetarian Restaurant",
+    "restaurantNameDefault": "Puranmal Vegetarian Restaurant",
+    "rating": "3.8",
+    "address": {
+     "countryId": 213,
+     "cityId": 244520,
+     "fullAddress": "1 41st St - Al Souq Al Kabeer - Al Fahidi - Dubai - United Arab Emirates",
+     "country": "United Arab Emirates",
+     "city": "Dubai, Dubai, United Arab Emirates",
+     "cityNameDefault": "Dubai, Dubai, United Arab Emirates",
+     "countryNameDefault": "United Arab Emirates"
+    },
+    "description": "<p>Puranmal is a legendary name in authentic Indian vegetarian cuisine, with a legacy spanning over 100 years. Located in the heart of Meena Bazar \u2014 the bustling Indian commercial hub of Dubai \u2014 this iconic restaurant and sweet shop serves a wide range of North Indian, South Indian, chaat, street food, and vegetarian Chinese dishes. HACCP and ISO 22000 certified, Puranmal is a trusted choice for vegetarian travellers seeking a taste of home in the UAE.</p>",
+    "coordinates": {
+     "latitude": 25.2602658,
+     "longitude": 55.2953036
+    },
+    "review": {
+     "rating": "3.8",
+     "reviewCount": "<p>Very Good</p>"
+    },
+    "restaurantType": {
+     "restaurantTypeId": 1,
+     "restaurantTypeName": "Vegetarian"
+    },
+    "foodType": {
+     "foodTypeId": 2,
+     "foodTypeName": "Punjabi"
+    },
+    "operatingHours": {
+     "openingTime": "09:00 AM",
+     "closingTime": "10:30 PM"
+    },
+    "menuFilePath": "",
+    "restaurantImagePath": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/8/d2fbac4b-c410-477f-b26c-7e34759c69ff_puranmal-vegetarian-restaurant_R.webp",
+    "priceStarts": {
+     "perPersonPrice": 25.0,
+     "currency": "AED ",
+     "discount": {
+      "perPersonDiscountedPrice": 0
+     }
+    },
+    "distanceFromSearchedEntity": "",
+    "seatingCapacity": 50,
+    "componentName": "Pure Veg, Jain Friendly, Budget Friendly, South Indian, Swaminarayan Food, North Indian",
+    "promoText": "",
+    "tags": {
+     "tagName": "",
+     "description": ""
+    },
+    "imageInfoList": [
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/8/d2fbac4b-c410-477f-b26c-7e34759c69ff_puranmal-vegetarian-restaurant_R.webp",
+      "caption": "",
+      "category": ""
+     }
+    ],
+    "cancellationPolicy": [],
+    "seoMeta": []
+   },
+   {
+    "restaurantId": 9,
+    "restaurantName": "Bombay Bites Restaurant",
+    "restaurantNameDefault": "Bombay Bites Restaurant",
+    "rating": "3.8",
+    "address": {
+     "countryId": 213,
+     "cityId": 244520,
+     "fullAddress": "124 Khalid Bin Al Waleed Rd - Al Mankhool - Dubai - United Arab Emirates",
+     "country": "United Arab Emirates",
+     "city": "Dubai, Dubai, United Arab Emirates",
+     "cityNameDefault": "Dubai, Dubai, United Arab Emirates",
+     "countryNameDefault": "United Arab Emirates"
+    },
+    "description": "<p>Bombay Bites is a beloved vegetarian eatery in Al Mankhool, Dubai, serving the Indian community and travellers for over 15 years. Specialising in authentic Maharashtrian street food and Indo-Chinese cuisine, the restaurant is renowned for its vada pav, chai, puran poli, misal pav, chaat, and a hearty South Indian breakfast spread. A favourite among Gujarati and Maharashtrian travellers, Bombay Bites delivers the true flavours of Mumbai right in the heart of Dubai.</p>",
+    "coordinates": {
+     "latitude": 25.2569465,
+     "longitude": 55.2988848
+    },
+    "review": {
+     "rating": "3.8",
+     "reviewCount": "<p>Very Good</p>"
+    },
+    "restaurantType": {
+     "restaurantTypeId": 1,
+     "restaurantTypeName": "Vegetarian"
+    },
+    "foodType": {
+     "foodTypeId": 26,
+     "foodTypeName": "Indian Main Course"
+    },
+    "operatingHours": {
+     "openingTime": "08:30 AM",
+     "closingTime": "11:30 PM"
+    },
+    "menuFilePath": "",
+    "restaurantImagePath": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/9/45a7d1f8-09b5-4d0a-9110-259601cc45af_bombay-bites-restaurant_R.webp",
+    "priceStarts": {
+     "perPersonPrice": 27.0,
+     "currency": "AED ",
+     "discount": {
+      "perPersonDiscountedPrice": 0
+     }
+    },
+    "distanceFromSearchedEntity": "",
+    "seatingCapacity": 80,
+    "componentName": "",
+    "promoText": "",
+    "tags": {
+     "tagName": "",
+     "description": ""
+    },
+    "imageInfoList": [
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/9/45a7d1f8-09b5-4d0a-9110-259601cc45af_bombay-bites-restaurant_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/9/0fccbbea-919e-4cd1-bd4e-cca5c638e064_bombay-bites_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/9/357e4f4c-7194-4882-a042-dd5b8d7cb080_bombay-bites-restaurant_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/9/06c4590a-4928-4584-b9c5-05d9ddaec469_bombay-bites-restaurant_R.webp",
+      "caption": "",
+      "category": ""
+     }
+    ],
+    "cancellationPolicy": [],
+    "seoMeta": []
+   },
+   {
+    "restaurantId": 11,
+    "restaurantName": "Veganesha",
+    "restaurantNameDefault": "Veganesha",
+    "rating": "4.8",
+    "address": {
+     "countryId": 213,
+     "cityId": 244520,
+     "fullAddress": "",
+     "country": "United Arab Emirates",
+     "city": "Dubai, Dubai, United Arab Emirates",
+     "cityNameDefault": "Dubai, Dubai, United Arab Emirates",
+     "countryNameDefault": "United Arab Emirates"
+    },
+    "description": "<p>Tucked in the heart of Meena Bazaar, one of Bur Dubai's most iconic and bustling neighbourhoods, Veganesha is a modern, vibrant pure vegetarian and vegan restaurant that has carved out a distinct identity in Dubai's dining scene. Whether you are a committed vegan, a vegetarian traveller, a Jain diner, or simply someone who appreciates clean, creative, plant-based food \u2014 Veganesha offers a dining experience that is as varied as it is satisfying.</p>",
+    "coordinates": {
+     "latitude": 25.2625,
+     "longitude": 55.2974
+    },
+    "review": {
+     "rating": "4.8",
+     "reviewCount": "<p>Very Good</p>"
+    },
+    "restaurantType": {
+     "restaurantTypeId": 1,
+     "restaurantTypeName": "Vegetarian"
+    },
+    "foodType": {
+     "foodTypeId": 3,
+     "foodTypeName": "South Indian"
+    },
+    "operatingHours": {
+     "openingTime": "10:00 AM",
+     "closingTime": "12:00 AM"
+    },
+    "menuFilePath": "",
+    "restaurantImagePath": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/11/5863138b-b182-4d8a-be3b-808f063d4c0a_veganesha_R.webp",
+    "priceStarts": {
+     "perPersonPrice": 40.0,
+     "currency": "AED ",
+     "discount": {
+      "perPersonDiscountedPrice": 0
+     }
+    },
+    "distanceFromSearchedEntity": "",
+    "seatingCapacity": 20,
+    "componentName": "",
+    "promoText": "",
+    "tags": {
+     "tagName": "",
+     "description": ""
+    },
+    "imageInfoList": [
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/11/5863138b-b182-4d8a-be3b-808f063d4c0a_veganesha_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/11/58fb9426-c95a-49f4-8299-6ec99ceecf56_veganesha_R.webp",
+      "caption": "",
+      "category": ""
+     },
+     {
+      "url": "a29cd3ee-d050-a34a-3a53-3a20e4faf5f3/restaurantmedia/11/0bd1fb5f-e4e5-4807-9020-3aaa814a64a5_veganesha_R.webp",
+      "caption": "",
+      "category": ""
+     }
+    ],
+    "cancellationPolicy": [],
+    "seoMeta": []
+   }
+  ],
+  "filters": {
+   "restaurantType": [
+    {
+     "id": 1,
+     "name": "Vegetarian"
+    }
+   ],
+   "restaurantFoodType": [
+    {
+     "foodTypeId": 1,
+     "foodType": "Kathiyawadi Gujarati"
+    },
+    {
+     "foodTypeId": 9,
+     "foodType": "Italian"
+    },
+    {
+     "foodTypeId": 10,
+     "foodType": "Salads And Raitas"
+    },
+    {
+     "foodTypeId": 12,
+     "foodType": "Snacks"
+    },
+    {
+     "foodTypeId": 14,
+     "foodType": "Pulav And Biryanis"
+    },
+    {
+     "foodTypeId": 17,
+     "foodType": "Soups"
+    },
+    {
+     "foodTypeId": 19,
+     "foodType": "Indian Chaat"
+    },
+    {
+     "foodTypeId": 21,
+     "foodType": "Vegetables"
+    },
+    {
+     "foodTypeId": 25,
+     "foodType": "Chinese Main Course"
+    },
+    {
+     "foodTypeId": 27,
+     "foodType": "Continental Starters"
+    },
+    {
+     "foodTypeId": 28,
+     "foodType": "Chinese Starters"
+    },
+    {
+     "foodTypeId": 26,
+     "foodType": "Indian Main Course"
+    },
+    {
+     "foodTypeId": 30,
+     "foodType": "Breakfast"
+    },
+    {
+     "foodTypeId": 2,
+     "foodType": "Punjabi"
+    },
+    {
+     "foodTypeId": 3,
+     "foodType": "South Indian"
+    },
+    {
+     "foodTypeId": 4,
+     "foodType": "North Indian"
+    },
+    {
+     "foodTypeId": 11,
+     "foodType": "Hot & Cold Beverages"
+    },
+    {
+     "foodTypeId": 20,
+     "foodType": "Desserts"
+    },
+    {
+     "foodTypeId": 33,
+     "foodType": "Street Food & Chaat"
+    }
+   ]
+  },
+  "totalServices": 9,
+  "slug": null,
+  "uniqueId": "00000000-0000-0000-0000-000000000000"
+ },
+ "elapsedTime": 87
+}
