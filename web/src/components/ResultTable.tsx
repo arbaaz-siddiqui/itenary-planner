@@ -5,6 +5,7 @@ import { looksNumeric, splitParts, type ResultCell, type ResultRow, type ResultT
 import { Carousel } from "./Carousel";
 import { CardCarousel } from "./cards/CardCarousel";
 import { toCardRefs } from "@/lib/cardRefs";
+import { oneCardPerOption } from "@/lib/optionMatch";
 import type { OptionItem } from "@/lib/types";
 
 /**
@@ -207,11 +208,13 @@ export const ResultComparison = memo(function ResultComparison({
   // prices). The row's own price picks the right one; failing that, its
   // position among rows of that name.
   const seen = new Map<string, number>();
-  const matched = table.rows.map((row) => {
-    const nth = seen.get(row.name) ?? 0;
-    seen.set(row.name, nth + 1);
-    return { row, item: optionFor?.(row.name, { price: row.price?.text ?? null, nth }) ?? null };
-  });
+  const matched = oneCardPerOption(
+    table.rows.map((row) => {
+      const nth = seen.get(row.name) ?? 0;
+      seen.set(row.name, nth + 1);
+      return { row, item: optionFor?.(row.name, { price: row.price?.text ?? null, nth }) ?? null };
+    }),
+  );
   const cards = toCardRefs(matched.flatMap((m) => (m.item ? [m.item] : [])));
   const rest = matched.filter((m) => !m.item).map((m) => m.row);
 

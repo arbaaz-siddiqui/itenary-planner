@@ -80,6 +80,12 @@ def _impl(
             # so the agent relays it rather than deriving (or inventing) it.
             d["child_price_display"] = o.child_price_display
             d["fare_lines"] = o.fare_lines
+            # What the whole party pays, per processing track, so the reply can
+            # quote it instead of multiplying (asked for "2 adults and 1 child",
+            # it gave only the adult fare). Uses each pax type's own fare.
+            d["party_totals"] = _party_totals(o, adults, children)
+            if d["party_totals"]:
+                d["party_total_display"] = d["party_totals"][0]["display"]
             # Refund answer, verbatim from the published policy.
             d["refund_display"] = o.refund_policy or (
                 "Non-refundable." if o.refundable is False else ""
@@ -123,6 +129,34 @@ def _impl(
     except Exception as e:
         logger.exception("get_visa_info unexpected error")
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
+
+
+def _party_totals(option: Any, adults: int, children: int) -> list[dict[str, Any]]:
+    """[{track, total_inr, display}] for this party, one per priced track.
+
+    Nothing when a fare the party needs is missing (a child with no child
+    fare): a partial total quoted as the whole would be wrong.
+    """
+    from core import format_inr
+
+    party = " + ".join(
+        x for x in (
+            f"{adults} adult{'s' if adults != 1 else ''}" if adults else "",
+            f"{children} child{'ren' if children != 1 else ''}" if children else "",
+        ) if x
+    )
+    by_track: dict[str, dict[str, float]] = {}
+    for f in option.fares:
+        if f.price_inr > 0:
+            by_track.setdefault(f.process_type or "Normal", {})[f.pax_type.lower()[:5]] = f.price_inr
+    out = []
+    for track, fares in by_track.items():
+        if (adults and "adult" not in fares) or (children and "child" not in fares):
+            continue
+        total = round(adults * fares.get("adult", 0) + children * fares.get("child", 0), 2)
+        out.append({"track": track, "total_inr": total,
+                    "display": f"{format_inr(total)} for {party} ({track})"})
+    return out
 
 
 _IST = timezone(timedelta(hours=5, minutes=30))

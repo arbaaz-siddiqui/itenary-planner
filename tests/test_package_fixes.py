@@ -416,3 +416,63 @@ def test_check_in_is_never_before_landing() -> None:
     day1 = out["days"][0]["items"]
     rest = next(i for i in day1 if i["title"] == "Check in and rest")
     assert rest["start"] >= "18:35"
+
+
+class TestVisaTimingGuard:
+    """Live retest: asked on 16 Oct about a 20 Oct flight, with the tool's
+    timeline saying one working day was left, the model still replied "Yes,
+    your visa can definitely be ready in time"."""
+
+    NOTE = ("Travel is 4 days away, which leaves 1 working day for processing (UAE "
+            "weekends excluded). Neither Normal (2–4 Working Days) nor Express (24–48 Hours) "
+            "is sure to finish before departure. Apply today and speak to the booking team.")
+
+    def _turn(self, reply: str, recommended: str = ""):
+        import json
+
+        from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+        out = {"options": [{"visa_type": "30 Days Single Entry Tourist Visa"}],
+               "timeline": {"recommended_track": recommended, "note": self.NOTE}}
+        return {"messages": [
+            HumanMessage(content="Can our visa be ready before 20 October?"),
+            AIMessage(content="", tool_calls=[{"name": "get_visa_info", "args": {}, "id": "c1"}]),
+            ToolMessage(content=json.dumps(out), tool_call_id="c1", name="get_visa_info"),
+            AIMessage(content=reply),
+        ]}
+
+    def test_guarantee_removed_and_timing_added(self) -> None:
+        from agent import _apply_reply_guards, _final_reply
+
+        r = self._turn("Yes, your visa can definitely be ready in time. For a flight on 20 "
+                       "October, apply at least 7–10 days before you fly.\n\n| Visa | Price |\n|---|---|")
+        _apply_reply_guards(r)
+        text = _final_reply(r)
+        assert "definitely" not in text
+        assert text.startswith("**Timing:**") and "Neither Normal" in text
+        assert "| Visa | Price |" in text  # the rest of the reply is untouched
+
+    def test_a_fitting_timeline_only_loses_the_guarantee(self) -> None:
+        from agent import _apply_reply_guards, _final_reply
+
+        r = self._turn("Your visa will certainly be approved. Normal processing fits.", "Normal")
+        _apply_reply_guards(r)
+        text = _final_reply(r)
+        assert "certainly" not in text and "Normal processing fits." in text
+        assert "**Timing:**" not in text
+
+
+def test_visa_party_total_for_a_family() -> None:
+    """Asked for 2 adults and 1 child, the reply gave only the adult fare."""
+    from core import VisaFare, VisaOption
+    from mcp_tools.get_visa_info import _party_totals
+
+    o = VisaOption(visa_id=1, visa_type="30 Days Single Entry Tourist Visa", fares=[
+        VisaFare(process_type="Normal", pax_type="Adult", price_inr=7753.36),
+        VisaFare(process_type="Normal", pax_type="Child", price_inr=2206.36),
+        VisaFare(process_type="Express", pax_type="Adult", price_inr=9753.36),
+    ])
+    totals = _party_totals(o, 2, 1)
+    # Express has no child fare, so no Express total is offered for this party.
+    assert totals == [{"track": "Normal", "total_inr": 17713.08,
+                       "display": "₹17,713.08 for 2 adults + 1 child (Normal)"}]

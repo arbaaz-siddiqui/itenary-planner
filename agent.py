@@ -1241,6 +1241,53 @@ def _apply_reply_guards(response: dict[str, Any]) -> None:
     _replace_invented_results(response)
     _strip_pdf_links(response)
     _correct_unbuilt_pdf_claim(response)
+    _enforce_visa_timeline(response)
+
+
+# A promise about a visa's outcome or timing. Approval is UAE immigration's
+# decision, so none of these can be honest.
+_VISA_GUARANTEE = re.compile(
+    r"\b(definitely|certainly|surely|guarantee[ds]?|no problem|for sure)\b", re.IGNORECASE
+)
+
+
+def _enforce_visa_timeline(response: dict[str, Any]) -> None:
+    """Make the visa-timing answer match get_visa_info's timeline.
+
+    Asked on 16 Oct about a 20 Oct flight, with the tool's timeline saying one
+    working day was left and neither track was sure to finish, the model
+    replied "Yes, your visa can definitely be ready in time" -- the report's
+    original finding, unchanged by a prompt rule. So in code: when this turn
+    looked a visa up, any sentence promising readiness or approval is removed,
+    and when time is tight the tool's own note is added if the reply lacks it.
+    """
+    turn = _this_turn((response or {}).get("messages") or [])
+    timeline: dict[str, Any] | None = None
+    for call in extract_tool_calls({"messages": turn}):
+        if str(call.get("tool_name") or call.get("name") or "") != "get_visa_info":
+            continue
+        out = _coerce_to_dict(call.get("output"))
+        if isinstance(out, dict) and isinstance(out.get("timeline"), dict):
+            timeline = out["timeline"]
+    if not timeline or not timeline.get("note"):
+        return
+    text = _final_reply(response)
+    if not text:
+        return
+    # Drop just the offending sentences, in place, so tables and line breaks
+    # in the rest of the reply survive.
+    fixed = text
+    for m in reversed(list(re.finditer(r"[^.!?\n]*[.!?]", text))):
+        s = m.group(0)
+        if _VISA_GUARANTEE.search(s) and re.search(r"ready|in time|approv|visa", s, re.I):
+            fixed = fixed[:m.start()] + fixed[m.end():]
+    fixed = re.sub(r"[ \t]{2,}", " ", fixed).strip()
+    tight = timeline.get("recommended_track") != "Normal"
+    note = str(timeline["note"])
+    if tight and note[:40] not in fixed and "may not finish" not in fixed and "Neither" not in fixed:
+        fixed = f"**Timing:** {note}\n\n{fixed}"
+    if fixed != text:
+        _set_final_reply(response, fixed)
 
 
 def _final_reply(response: dict[str, Any]) -> str:

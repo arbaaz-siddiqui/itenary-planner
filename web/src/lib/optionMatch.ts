@@ -60,3 +60,19 @@ export function refersTo(typed: string, full: string): boolean {
   return sameName(normaliseName(typed), normaliseName(full)) || shortenedFrom(typed, full);
 }
 
+/**
+ * Two table rows can name the same result: a visa listed once for Normal and
+ * once for Express processing. Both matched the one option, so the Express row
+ * became a second copy of the Normal card, showing the Normal price. Only the
+ * first row keeps the option's card; a repeat becomes a text card that shows
+ * its own row, price included.
+ */
+export function oneCardPerOption<R, I>(rows: { row: R; item: I | null }[]): { row: R; item: I | null }[] {
+  const used = new Set<I>();
+  return rows.map((m) => {
+    if (m.item === null) return m;
+    if (used.has(m.item)) return { row: m.row, item: null };
+    used.add(m.item);
+    return m;
+  });
+}
