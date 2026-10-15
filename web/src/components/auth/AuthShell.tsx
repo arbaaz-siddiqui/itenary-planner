@@ -1,13 +1,25 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { BedDouble, Plane, Ticket } from "lucide-react";
 import { BrandLogo } from "@/components/BrandLogo";
 
+/** The client's hero reel (also on gujjutours.com). Overridable per deploy. */
+const HERO_VIDEO =
+  process.env.NEXT_PUBLIC_AUTH_VIDEO_URL ||
+  "https://video.gumlet.io/6a200c2c40fe2ab6282883ef/6a20209f40fe2ab6282aefb1/download.mp4";
+const HERO_POSTER = "/auth/poster.webp";
+// The reel is a 3:1 banner with its tagline burned into the left half; every
+// crop here shows only the right side, which is clean in every scene.
+const VIDEO_FOCUS = "88% 50%";
+
 /**
- * Sign-in and sign-up frame: the form on the left, and on wide screens the
- * home screen's gradient on the right with a glimpse of what the agent does.
- * The gradient is the one bold element; everything around the form stays
- * quiet so the fields read first.
+ * Sign-in and sign-up frame. The form sits on the left; on wide screens the
+ * right is the brand gradient with the client's travel reel playing inside a
+ * tall arch, a doorway onto the trip, with a glimpse of the agent's answer
+ * resting against it. On narrow screens the reel rises faintly behind the
+ * heading instead. Only one video element is ever mounted, so the reel
+ * downloads once.
  */
 export function AuthShell({
   title,
@@ -20,16 +32,17 @@ export function AuthShell({
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {
+  const wide = useWide();
   return (
     <main className="relative flex min-h-dvh overflow-hidden bg-bg">
-      {/* Narrow screens have no gradient panel, so the brand colour rises
-          faintly from the bottom edge instead. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-[45%] opacity-40 [mask-image:linear-gradient(to_top,black,transparent)] lg:hidden"
-      >
-        <div className="hero-glow h-full w-full" />
-      </div>
+      {wide === false && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-[46%] opacity-55 [mask-image:linear-gradient(to_bottom,black_20%,transparent)]"
+        >
+          <Reel className="h-full w-full" />
+        </div>
+      )}
       <section className="relative flex w-full flex-col px-5 py-6 sm:px-10 lg:w-[46%] lg:max-w-[640px] lg:px-14">
         <BrandLogo />
         <div className="flex flex-1 items-center py-10">
@@ -46,11 +59,71 @@ export function AuthShell({
       {/* The panel keeps the dark gradient in both themes: the light one is
           too pale to carry white type. */}
       <aside aria-hidden className="hidden flex-1 p-3 lg:block">
-        <div className="hero-glow hero-glow-fixed hero-bloom relative flex h-full flex-col justify-end overflow-hidden rounded-[28px] p-12">
-          <TripPreview />
+        <div className="hero-glow hero-glow-fixed hero-bloom relative h-full overflow-hidden rounded-[28px]">
+          {wide && (
+            <div className="arch-rise absolute top-12 right-12 bottom-12 w-[min(46%,460px)]">
+              {/* A hairline echo of the arch, set just outside it. */}
+              <div className="absolute -inset-3.5 rounded-t-full rounded-b-[38px] border border-white/20" />
+              <div className="relative h-full overflow-hidden rounded-t-full rounded-b-[26px] shadow-[0_40px_80px_-30px_rgba(0,0,0,0.65)] ring-1 ring-white/25">
+                <Reel className="h-full w-full scale-[1.04]" />
+                {/* Grade the reel toward the brand sunset so it sits in the
+                    gradient instead of on top of it. */}
+                <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(43,127,200,0.35),transparent_45%,rgba(232,80,58,0.45))] mix-blend-soft-light" />
+                <div className="absolute inset-0 rounded-[inherit] shadow-[inset_0_0_60px_rgba(0,0,0,0.35)]" />
+              </div>
+            </div>
+          )}
+          <div className="absolute bottom-12 left-12 z-10 max-w-[440px]">
+            <TripPreview />
+          </div>
         </div>
       </aside>
     </main>
+  );
+}
+
+/** True at the `lg` breakpoint and up; null until the first client render. */
+function useWide(): boolean | null {
+  const [wide, setWide] = useState<boolean | null>(null);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setWide(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  return wide;
+}
+
+/** The looping reel. Holds on the poster when the visitor asks for less motion. */
+function Reel({ className }: { className?: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => {
+      if (mq.matches) v.pause();
+      else v.play().catch(() => {});
+    };
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  return (
+    <video
+      ref={ref}
+      className={`object-cover ${className ?? ""}`}
+      style={{ objectPosition: VIDEO_FOCUS }}
+      src={HERO_VIDEO}
+      poster={HERO_POSTER}
+      muted
+      loop
+      playsInline
+      preload="auto"
+      disablePictureInPicture
+      tabIndex={-1}
+    />
   );
 }
 
@@ -68,7 +141,7 @@ function TripPreview() {
         <br />
         Get a plan you can book.
       </p>
-      <div className="mt-8 space-y-3">
+      <div className="mt-8 hidden space-y-3 xl:block">
         <p className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-md bg-white/15 px-4 py-2.5 text-sm backdrop-blur-md">
           3 nights in Dubai for 2 of us, mid November
         </p>

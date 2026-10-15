@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Download, Monitor, Moon, Sun, Trash2, X } from "lucide-react";
 import { api } from "@/lib/api";
+import { Select } from "@/components/Select";
 import type { ThemePref } from "@/lib/theme";
 import type { Preferences, User } from "@/lib/types";
 
@@ -10,6 +11,13 @@ const THEMES: { id: ThemePref; label: string; icon: typeof Sun }[] = [
   { id: "dark", label: "Dark", icon: Moon },
   { id: "light", label: "Light", icon: Sun },
   { id: "system", label: "System", icon: Monitor },
+];
+
+const DIETS = [
+  { value: "", label: "No preference" },
+  { value: "Veg", label: "Vegetarian" },
+  { value: "Jain", label: "Jain" },
+  { value: "Vegan", label: "Vegan" },
 ];
 
 const TABS = ["Profile", "Travel", "Appearance", "Chats"] as const;
@@ -154,17 +162,12 @@ function TravelTab() {
           <label htmlFor="st-diet" className={LABEL}>
             Food
           </label>
-          <select
+          <Select
             id="st-diet"
             value={prefs.diet ?? ""}
-            onChange={(e) => setPrefs({ ...prefs, diet: e.target.value as Preferences["diet"] })}
-            className={FIELD}
-          >
-            <option value="">No preference</option>
-            <option value="Veg">Vegetarian</option>
-            <option value="Jain">Jain</option>
-            <option value="Vegan">Vegan</option>
-          </select>
+            options={DIETS}
+            onChange={(v) => setPrefs({ ...prefs, diet: v as Preferences["diet"] })}
+          />
         </div>
       </div>
       <div>
