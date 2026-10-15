@@ -675,7 +675,7 @@ export default function ChatPage() {
         {/* No top bar on desktop, as in the reference layout. Below 1024px the
             sidebar is a drawer, so a slim bar holds its button, the logo and
             new chat, in the flow so it never covers a message or a card. */}
-        <div className="flex shrink-0 items-center justify-between gap-2 px-1 pt-[env(safe-area-inset-top)] pb-2 lg:hidden">
+        <div className="flex shrink-0 items-center justify-between gap-2 px-1 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 lg:hidden">
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}

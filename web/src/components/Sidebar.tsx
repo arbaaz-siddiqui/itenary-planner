@@ -217,15 +217,16 @@ export function Sidebar(p: SidebarProps) {
     // to nothing between the services and the footer, so the whole column
     // scrolls as one instead.
     <div className="no-scrollbar flex h-full flex-col overflow-y-auto bg-sidebar text-sidebar-fg">
-      {/* Header: wordmark + collapse toggle (or close, in the drawer). */}
-      <div className={`flex h-14 shrink-0 items-center ${collapsed ? "justify-center" : "justify-between px-3"}`}>
+      {/* Header: the logo centred, the collapse toggle (or close, in the
+          drawer) pinned to the right edge so it never pulls the logo aside. */}
+      <div className={`relative flex h-16 shrink-0 items-center justify-center pt-2 ${collapsed ? "" : "px-12"}`}>
         {!collapsed && <BrandLogo />}
         {p.onClose ? (
           <button
             type="button"
             onClick={p.onClose}
             aria-label="Close menu"
-            className={`grid h-8 w-8 place-items-center rounded-lg text-sidebar-muted hover:bg-sidebar-2 hover:text-sidebar-fg ${FOCUS}`}
+            className={`absolute top-1/2 right-3 mt-1 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-sidebar-muted hover:bg-sidebar-2 hover:text-sidebar-fg ${FOCUS}`}
           >
             <X size={18} aria-hidden />
           </button>
@@ -236,7 +237,7 @@ export function Sidebar(p: SidebarProps) {
               onClick={p.onToggleCollapse}
               aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
               title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className={`grid h-8 w-8 place-items-center rounded-lg text-sidebar-muted hover:bg-sidebar-2 hover:text-sidebar-fg ${FOCUS}`}
+              className={`${collapsed ? "" : "absolute top-1/2 right-3 mt-1 -translate-y-1/2"} grid h-8 w-8 place-items-center rounded-lg text-sidebar-muted hover:bg-sidebar-2 hover:text-sidebar-fg ${FOCUS}`}
             >
               {collapsed ? <PanelLeftOpen size={18} aria-hidden /> : <PanelLeftClose size={18} aria-hidden />}
             </button>

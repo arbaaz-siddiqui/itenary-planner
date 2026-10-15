@@ -2,6 +2,7 @@
 
 import { forwardRef, useId, useState } from "react";
 import { AlertCircle, Check, Eye, EyeOff, Loader2 } from "lucide-react";
+import { TravelLoader } from "@/components/TravelLoader";
 
 type FieldProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, "id"> & {
   label: string;
@@ -107,7 +108,7 @@ export function FormError({ message }: { message: string | null }) {
 export function AuthChecking() {
   return (
     <main className="grid min-h-dvh place-items-center bg-bg" aria-busy>
-      <Loader2 className="h-5 w-5 animate-spin text-fg-muted" aria-label="Loading" />
+      <TravelLoader size="lg" label="Loading" />
     </main>
   );
 }

@@ -13,11 +13,9 @@ const HERO_POSTER = "/auth/poster.webp";
 const VIDEO_FOCUS = "100% 50%";
 
 /**
- * Sign-in and sign-up frame. The form sits on the left; on wide screens the
- * right is the brand gradient with GUJJU / TOURS set huge, and the client's
- * travel reel plays only inside the letters. On phones the reel fades in
- * behind the heading instead. Only one video element is ever mounted, so the
- * reel downloads once.
+ * Sign-in and sign-up frame. The form sits on the black page; on wide
+ * screens the brand gradient card on the right carries one line, set big.
+ * On phones the client's travel reel fades in behind the heading.
  */
 export function AuthShell({
   title,
@@ -30,10 +28,12 @@ export function AuthShell({
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {
-  const wide = useWide();
+  const narrow = useNarrow();
   return (
     <main className="relative flex min-h-dvh overflow-hidden bg-bg">
-      {wide === false && (
+      {/* Phones only: the reel fades in behind the heading. Desktop keeps
+          the plain black page, and never mounts (or downloads) the video. */}
+      {narrow && (
         <div
           aria-hidden
           className="pointer-events-none absolute inset-x-0 top-0 h-[46%] opacity-55 [mask-image:linear-gradient(to_bottom,black_20%,transparent)]"
@@ -41,116 +41,69 @@ export function AuthShell({
           <Reel className="h-full w-full" />
         </div>
       )}
-      <section className="relative flex w-full flex-col px-5 py-6 sm:px-10 lg:w-[46%] lg:max-w-[640px] lg:px-14">
-        <BrandLogo />
-        <div className="flex flex-1 items-center py-10">
+      <section className="relative flex w-full flex-col px-5 pt-10 pb-6 sm:px-10 sm:pt-12 lg:w-[46%] lg:max-w-[640px] lg:px-14">
+        <div className="relative flex">
+          <BrandLogo />
+        </div>
+        <div className="relative flex flex-1 items-center py-10">
           <div className="hero-rise mx-auto w-full max-w-[380px]">
-            <h1 className="text-[28px] leading-tight font-semibold tracking-tight text-fg">{title}</h1>
+            <h1 className="text-[30px] leading-tight font-semibold text-fg">{title}</h1>
             <p className="mt-2 text-sm leading-relaxed text-fg-muted">{subtitle}</p>
             <div className="mt-8">{children}</div>
             {footer && <div className="mt-8 text-sm text-fg-muted">{footer}</div>}
           </div>
         </div>
-        <p className="text-xs text-fg-muted">Flights, hotels, tours, transfers and visas for Dubai, in one chat.</p>
-      </section>
+        </section>
 
       {/* The panel keeps the dark gradient in both themes: the light one is
           too pale to carry white type. */}
       <aside aria-hidden className="hidden flex-1 p-3 lg:block">
-        <div className="hero-glow hero-glow-fixed hero-bloom relative flex h-full flex-col justify-between overflow-hidden rounded-[28px] p-12">
-          <div className="flex flex-1 items-center justify-center">
-            {wide && <ReelWordmark className="word-rise w-full" />}
+        <div className="hero-glow hero-glow-fixed hero-bloom relative flex h-full flex-col justify-end overflow-hidden rounded-[28px] p-12">
+          <div className="word-rise text-white">
+            <p className="font-display text-[clamp(28px,3vw,44px)] leading-[1.05] font-semibold tracking-tight">
+              Plan a trip
+              <br />
+              that lasts
+            </p>
+            {/* FOREVER is stretched to the panel's full width, so it always
+                fills the line exactly, whatever the screen size. */}
+            <svg viewBox="0 0 1000 170" className="mt-3 block w-full" role="presentation">
+              <text
+                x="0"
+                y="160"
+                textLength="1000"
+                lengthAdjust="spacingAndGlyphs"
+                fill="white"
+                style={{ fontFamily: "var(--font-display-face), sans-serif", fontWeight: 800, fontSize: 220 }}
+              >
+                FOREVER
+              </text>
+            </svg>
+            <p className="mt-6 max-w-[420px] text-sm leading-relaxed text-white/80">
+              Flights, hotels, tours and visas, planned in one conversation and priced live.
+            </p>
           </div>
-          <p className="text-[30px] leading-[1.15] font-semibold tracking-tight text-white">
-            Tell it the trip.
-            <br />
-            Get a plan you can book.
-          </p>
         </div>
       </aside>
     </main>
   );
 }
 
-// The wordmark lives in a 2400 x 300 box: one line, cap height filling the
-// box, stretched to its full width so it reads as one solid band.
-const BOX = { w: 2400, h: 300 };
-const WORDS = [{ text: "GUJJU TOURS", y: 290 }];
-const WORD_STYLE = { fontFamily: "var(--font-poppins), sans-serif", fontWeight: 700, fontSize: 400 } as const;
-// The band shows the reel's full width, so crop to the top of the frame: the
-// burned-in tagline sits in its lower half.
-const WORD_FOCUS = "50% 0%";
-const CLIP_ID = "gt-reel-letters";
-
-/** GUJJU TOURS with the reel playing inside the letters and nowhere else. */
-function ReelWordmark({ className }: { className?: string }) {
-  return (
-    <div className={`relative ${className ?? ""}`} style={{ aspectRatio: `${BOX.w} / ${BOX.h}` }}>
-      {/* Letters as a clip path in the box's own units (0..1), drawn in the
-          box's own space and scaled down to fit. */}
-      <svg width="0" height="0" className="absolute" aria-hidden>
-        <clipPath id={CLIP_ID} clipPathUnits="objectBoundingBox">
-          {/* Each line carries the scale itself: a clip path takes only
-              shapes and text, never a group. */}
-          {WORDS.map((w) => (
-            <text
-              key={w.text}
-              x="0"
-              y={w.y}
-              transform={`scale(${1 / BOX.w} ${1 / BOX.h})`}
-              textLength={BOX.w}
-              lengthAdjust="spacingAndGlyphs"
-              style={WORD_STYLE}
-            >
-              {w.text}
-            </text>
-          ))}
-        </clipPath>
-      </svg>
-      <div
-        className="absolute inset-0 bg-white/15"
-        style={{ clipPath: `url(#${CLIP_ID})`, WebkitClipPath: `url(#${CLIP_ID})` }}
-      >
-        <Reel className="h-full w-full" focus={WORD_FOCUS} />
-      </div>
-      {/* A hairline on the letter edges so they hold their shape over the
-          reel's bright and dark scenes alike. */}
-      <svg viewBox={`0 0 ${BOX.w} ${BOX.h}`} className="absolute inset-0 h-full w-full" aria-hidden>
-        {WORDS.map((w) => (
-          <text
-            key={w.text}
-            x="0"
-            y={w.y}
-            textLength={BOX.w}
-            lengthAdjust="spacingAndGlyphs"
-            style={WORD_STYLE}
-            fill="none"
-            stroke="rgba(255,255,255,0.22)"
-            strokeWidth="1.25"
-          >
-            {w.text}
-          </text>
-        ))}
-      </svg>
-    </div>
-  );
-}
-
-/** True at the `lg` breakpoint and up; null until the first client render. */
-function useWide(): boolean | null {
-  const [wide, setWide] = useState<boolean | null>(null);
+/** True below the `lg` breakpoint, where the gradient panel is hidden. */
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(false);
   useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1024px)");
-    const sync = () => setWide(mq.matches);
+    const mq = window.matchMedia("(max-width: 1023px)");
+    const sync = () => setNarrow(mq.matches);
     sync();
     mq.addEventListener("change", sync);
     return () => mq.removeEventListener("change", sync);
   }, []);
-  return wide;
+  return narrow;
 }
 
 /** The looping reel. Holds on the poster when the visitor asks for less motion. */
-function Reel({ className, focus = VIDEO_FOCUS }: { className?: string; focus?: string }) {
+function Reel({ className }: { className?: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const v = ref.current;
@@ -168,7 +121,7 @@ function Reel({ className, focus = VIDEO_FOCUS }: { className?: string; focus?: 
     <video
       ref={ref}
       className={`object-cover ${className ?? ""}`}
-      style={{ objectPosition: focus }}
+      style={{ objectPosition: VIDEO_FOCUS }}
       src={HERO_VIDEO}
       poster={HERO_POSTER}
       muted

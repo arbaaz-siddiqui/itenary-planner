@@ -10,7 +10,8 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @theme {
-  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: var(--font-sans-face), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-display-face), var(--font-sans-face), ui-sans-serif, system-ui, sans-serif;
 
   --color-bg: var(--c-bg);
   --color-surface: var(--c-surface);
@@ -77,6 +78,16 @@
 html,
 body {
   height: 100%;
+}
+
+/* Headings take the display face everywhere: page titles, the hero, card
+   and detail titles, dialog titles. */
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
 }
 
 body {
@@ -196,6 +207,39 @@ body {
 .select-pop {
   transform-origin: top center;
   animation: select-pop 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Travel loader: each icon holds the centre for one slot of the cycle. It
+   glides in from its own side (--from-x/--from-y), rests, then shrinks away
+   in place for the next. 0.75s per icon. */
+@keyframes travel-turn {
+  0% {
+    opacity: 0;
+    transform: translate(var(--from-x), var(--from-y)) scale(0.85);
+  }
+  9%,
+  20% {
+    opacity: 1;
+    transform: none;
+  }
+  25%,
+  100% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+.travel-loader-icon {
+  opacity: 0;
+  animation: travel-turn calc(var(--n) * 750ms) cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  animation-delay: calc(var(--i) * 750ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .travel-loader-icon {
+    animation: none !important;
+  }
+  .travel-loader-icon:first-child {
+    opacity: 1;
+  }
 }
 
 /* Tactile press for buttons: a small physical push, nothing more. */
@@ -319,50 +363,156 @@ ul.ui-list {
 }
 
 /* --- Ordinary prose tables ---------------------------------------------
-   A glossary or a day-plan table. Wrapper scrolls; the table itself may
-   exceed the column. Result comparisons do NOT come through here — see
-   .md-result-table below. */
+   A day plan, a menu, a comparison. A quiet card: soft header in the muted
+   ink, generous rows, the first column as the row's name, figures aligned
+   right in tabular digits, prices in the strong ink. Long text wraps (a day
+   plan is sentences, not codes); only a genuinely wide table scrolls. On
+   phones each row becomes its own small card, every value labelled with its
+   column. Result comparisons do NOT come through here: see .md-result-table
+   below. */
 .md-table-wrap {
   overflow-x: auto;
   max-width: 100%;
-  margin-top: 0.85rem;
+  margin-top: 0.9rem;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  /* Momentum scroll on iOS + a hint that there's more to the right. */
+  border-radius: 16px;
+  background: var(--color-surface);
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+.md-table-wrap::-webkit-scrollbar {
+  height: 6px;
+}
+.md-table-wrap::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--color-border);
+}
+.md-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+.md-table-wrap:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-brand-blue) 55%, transparent);
+  outline-offset: 2px;
 }
 
 .md-table-wrap table {
-  border-collapse: collapse;
-  width: max-content;
-  min-width: 100%;
-  font-size: 0.86rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 
 .md-table-wrap th,
 .md-table-wrap td {
-  border-bottom: 1px solid var(--color-border);
-  padding: 0.5rem 0.7rem;
+  padding: 0.75rem 1rem;
   text-align: left;
   vertical-align: top;
-  white-space: nowrap;
+  min-width: 7rem;
+  max-width: 22rem;
 }
 
-.md-table-wrap th {
-  background: var(--color-surface-2);
+.md-table-wrap thead th {
+  background: color-mix(in srgb, var(--color-surface-2) 70%, transparent);
+  color: var(--color-fg-muted);
+  font-size: 0.78rem;
   font-weight: 600;
-  position: sticky;
-  top: 0;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--color-border);
 }
 
-.md-table-wrap tr:last-child td {
+.md-table-wrap tbody td {
+  color: color-mix(in srgb, var(--color-fg) 82%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  transition: background-color 150ms ease-out;
+}
+.md-table-wrap tbody tr:last-child td {
   border-bottom: 0;
 }
+.md-table-wrap tbody tr:hover td {
+  background: color-mix(in srgb, var(--color-surface-2) 45%, transparent);
+}
 
-/* Digits line up column-wise in price tables. */
-.md-table-wrap td {
+/* The first column names the row. */
+.md-table-wrap tbody td:first-child {
+  color: var(--color-fg);
+  font-weight: 600;
+}
+
+.md-table-wrap td[data-kind="num"],
+.md-table-wrap td[data-kind="price"] {
+  text-align: right;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+.md-table-wrap td[data-kind="price"] {
+  color: var(--color-fg);
+  font-weight: 600;
+}
+
+@media (max-width: 639px) {
+  .md-table-wrap {
+    overflow: visible;
+    border: 0;
+    background: none;
+  }
+  .md-table-wrap table,
+  .md-table-wrap tbody,
+  .md-table-wrap tr,
+  .md-table-wrap td {
+    display: block;
+    width: 100%;
+  }
+  .md-table-wrap thead {
+    display: none;
+  }
+  .md-table-wrap tbody tr {
+    margin-bottom: 0.6rem;
+    padding: 0.35rem 0;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    background: var(--color-surface);
+  }
+  .md-table-wrap tbody tr:hover td {
+    background: none;
+  }
+  .md-table-wrap tbody td {
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+    max-width: none;
+    min-width: 0;
+    padding: 0.45rem 0.9rem;
+    border-bottom: 0;
+    text-align: right;
+    white-space: normal;
+  }
+  .md-table-wrap td[data-kind] {
+    white-space: normal;
+  }
+  .md-table-wrap tbody td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    max-width: 45%;
+    color: var(--color-fg-muted);
+    font-weight: 500;
+    font-size: 0.8rem;
+    text-align: left;
+  }
+  /* The row's name is the card's title, unlabelled. */
+  .md-table-wrap tbody td:first-child {
+    padding-top: 0.6rem;
+    padding-bottom: 0.55rem;
+    margin-bottom: 0.2rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+    text-align: left;
+    font-size: 0.95rem;
+  }
+  .md-table-wrap tbody td:first-child::before {
+    content: none;
+  }
 }
 
 /* --- Result comparisons -------------------------------------------------

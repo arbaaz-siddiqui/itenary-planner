@@ -16,6 +16,6 @@ export function BrandLogo({ compact = false }: { compact?: boolean }) {
   // depends on their CDN. It reads on both themes as is.
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src="/brand/gujju-logo.svg" alt="GujjuTours" width={124} height={30} className="h-[30px] w-auto shrink-0 self-start select-none" draggable={false} />
+    <img src="/brand/gujju-logo.svg" alt="GujjuTours" width={124} height={30} className="h-[30px] w-auto shrink-0 select-none" draggable={false} />
   );
 }

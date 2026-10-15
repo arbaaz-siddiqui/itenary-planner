@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { Loader2 } from "lucide-react";
+import { TravelLoader } from "./TravelLoader";
 import { Markdown } from "./Markdown";
 import { toolLabel } from "@/lib/segments";
 import type { Segment } from "@/lib/types";
@@ -12,25 +12,17 @@ type ToolSegment = Extract<Segment, { type: "tool_call" }>;
 function ThinkingLine({ content }: { content?: string }) {
   return (
     <div className="status-in flex items-center gap-2.5 py-1 text-sm text-fg-muted" aria-live="polite">
-      <span className="inline-flex items-center gap-1" aria-hidden="true">
-        <span className="dot h-1.5 w-1.5 rounded-full bg-brand-blue" />
-        <span className="dot h-1.5 w-1.5 rounded-full bg-brand-blue" />
-        <span className="dot h-1.5 w-1.5 rounded-full bg-brand-red" />
-      </span>
+      <TravelLoader />
       <span>{content ?? "Thinking"}</span>
     </div>
   );
-}
-
-function Spinner() {
-  return <Loader2 size={14} className="shrink-0 animate-spin text-brand-blue" aria-hidden />;
 }
 
 /** The one status line: the step running now, with a spinner. */
 function StepLine({ step }: { step: ToolSegment }) {
   return (
     <div key={step.id} className="status-in flex items-center gap-2.5 py-1 text-sm" aria-live="polite">
-      <Spinner />
+      <TravelLoader />
       <span className="text-fg">{toolLabel(step.name, "running")}</span>
     </div>
   );
