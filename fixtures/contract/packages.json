@@ -1,0 +1,81 @@
+{
+  "ref": "ref_packages_dxb_1012",
+  "kind": "packages",
+  "summary_md": "Two Dubai packages for 12–16 October. These prices were fetched 4 minutes ago and can move; I will re-check before quoting a total.\n",
+  "rows": [
+    {
+      "id": "PKG-881",
+      "kind": "packages",
+      "title": "Dubai Highlights — 4 nights",
+      "subtitle": "Hotel, transfers and 3 tours",
+      "price_inr": 118500.0,
+      "price_basis": "total",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "Cheaper than booking separately",
+          "tone": "ok"
+        }
+      ],
+      "image": {
+        "src": "/api/img?src=supplier%2Fpackage-881.jpg&w=640",
+        "alt": "",
+        "ratio": 1.777
+      },
+      "detail_ref": "packages:PKG-881",
+      "facets": {
+        "Includes": "4 nights 4-star, airport transfers, 3 tours",
+        "Hotel": "Rove Downtown or similar",
+        "Cancellation": "Free until 5 October"
+      }
+    },
+    {
+      "id": "PKG-903",
+      "kind": "packages",
+      "title": "Dubai Luxury — 4 nights",
+      "subtitle": "5-star hotel, private transfers, 4 tours",
+      "price_inr": 241000.0,
+      "price_basis": "total",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "Private transfers",
+          "tone": "neutral"
+        }
+      ],
+      "image": {
+        "src": "/api/img?src=supplier%2Fpackage-903.jpg&w=640",
+        "alt": "",
+        "ratio": 1.777
+      },
+      "detail_ref": "packages:PKG-903",
+      "facets": {
+        "Includes": "4 nights 5-star, private transfers, 4 tours",
+        "Hotel": "Address Dubai Mall",
+        "Cancellation": "Free until 1 October"
+      }
+    }
+  ],
+  "facts": {
+    "priced_for_pax": 2,
+    "currency": "INR",
+    "as_of": "2026-09-29T09:15:00Z",
+    "nights": 4
+  },
+  "more": null,
+  "degraded": {
+    "reason": "cached",
+    "stale_seconds": 247,
+    "disclosure": "These package prices were fetched 4 minutes ago. I will pull fresh rates before quoting a final total.",
+    "missing": []
+  },
+  "suggest": [
+    {
+      "kind": "hotels",
+      "reason": "bundle",
+      "text": "The Highlights package works out ₹14,000 below the same pieces booked separately.",
+      "action": "get_detail(kind='packages', item_id='PKG-881')"
+    }
+  ],
+  "error": null
+}

@@ -1,0 +1,113 @@
+{
+  "ref": "ref_hotels_dxb_1012",
+  "kind": "hotels",
+  "summary_md": "Three 4-star options in Downtown for 12–16 October, 1 room, 2 adults.\n",
+  "rows": [
+    {
+      "id": "1350",
+      "kind": "hotels",
+      "title": "Rove Downtown",
+      "subtitle": "Downtown Dubai · 4 star",
+      "price_inr": 15500.0,
+      "price_basis": "per_room_night",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "Refundable",
+          "tone": "ok"
+        },
+        {
+          "label": "Breakfast included",
+          "tone": "neutral"
+        }
+      ],
+      "image": {
+        "src": "/api/img?src=supplier%2Fhotel-1350.jpg&w=640",
+        "alt": "",
+        "ratio": 1.5
+      },
+      "detail_ref": "hotels:1350",
+      "facets": {
+        "Board": "Bed and breakfast",
+        "Cancellation": "Free until 10 October",
+        "Rooms available": "6 of 9 rates are refundable",
+        "Total for 4 nights": "₹62,000"
+      }
+    },
+    {
+      "id": "1412",
+      "kind": "hotels",
+      "title": "Millennium Place Barsha Heights",
+      "subtitle": "Barsha Heights · 4 star",
+      "price_inr": 11200.0,
+      "price_basis": "per_room_night",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "Refundable",
+          "tone": "ok"
+        }
+      ],
+      "image": {
+        "src": "/api/img?src=supplier%2Fhotel-1412.jpg&w=640",
+        "alt": "",
+        "ratio": 1.5
+      },
+      "detail_ref": "hotels:1412",
+      "facets": {
+        "Board": "Room only",
+        "Cancellation": "Free until 9 October",
+        "Rooms available": "3 of 7 rates are refundable",
+        "Total for 4 nights": "₹44,800"
+      }
+    },
+    {
+      "id": "1508",
+      "kind": "hotels",
+      "title": "Address Dubai Mall",
+      "subtitle": "Downtown Dubai · 5 star",
+      "price_inr": 31900.0,
+      "price_basis": "per_room_night",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "Non-refundable",
+          "tone": "warn"
+        },
+        {
+          "label": "Burj view",
+          "tone": "neutral"
+        }
+      ],
+      "image": {
+        "src": "/api/img?src=supplier%2Fhotel-1508.jpg&w=640",
+        "alt": "",
+        "ratio": 1.5
+      },
+      "detail_ref": "hotels:1508",
+      "facets": {
+        "Board": "Bed and breakfast",
+        "Cancellation": "No refundable rate at this hotel for these dates",
+        "Total for 4 nights": "₹1,27,600"
+      }
+    }
+  ],
+  "facts": {
+    "priced_for_pax": 2,
+    "currency": "INR",
+    "as_of": "2026-09-29T09:15:00Z",
+    "check_in": "2026-10-12",
+    "check_out": "2026-10-16",
+    "nights": 4,
+    "rooms": 1,
+    "city_id": 115936
+  },
+  "more": {
+    "total_available": 41,
+    "showing": 3,
+    "next_offset": 3
+  },
+  "degraded": null,
+  "suggest": [],
+  "error": null
+}
