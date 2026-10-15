@@ -296,3 +296,123 @@ def test_prompt_carries_the_new_rules() -> None:
     for needle in ("refund_policy", "timeline.note", "search_hotels(area=", "flight_fare_ref",
                    "package_lines", "cancellation_breakdown_tool"):
         assert needle in p, needle
+
+
+# ============================================== found in the live retest
+class TestRetestFindings:
+    @pytest.mark.parametrize(("given", "code"), [
+        ("'Y'", "Y"), ('"C"', "C"), ("economy", "Y"), ("Economy class", "Y"),
+        ("business", "C"), ("premium economy", "S"), ("first", "F"), ("", "Y"), (None, "Y"),
+    ])
+    def test_cabin_is_normalised(self, given, code) -> None:
+        """The model sent cabin="'Y'" and the supplier silently returned no
+        fares: "couldn't pull live flight prices from Ahmedabad"."""
+        from mcp_tools.search_flights import normalize_cabin
+
+        assert normalize_cabin(given) == code
+
+    @pytest.mark.parametrize(("said", "exact"), [
+        ("I want a 4-star hotel in Deira", True),
+        ("a 4★ hotel please", True),
+        ("4 star or above", False),
+        ("at least 4 star", False),
+        ("4+ star", False),
+        ("a 5 star hotel", False),
+    ])
+    def test_a_four_star_ask_means_four_star(self, said, exact) -> None:
+        """Asked for "a 4-star hotel", the model searched 4-and-up and led with
+        5-star hotels."""
+        from rules import exact_star_request, set_conversation_text
+
+        set_conversation_text(said)
+        assert exact_star_request(4) is exact
+
+    def test_every_visa_processing_field_reads_like_the_website(self) -> None:
+        """The reply quoted the supplier's "3-4 Working Days" from
+        processing_time_text while the website says 2–4."""
+        from parsers import parse_visa_response
+
+        with patch("parsers.convert_supplier_price", side_effect=lambda a, **k: (round(a * 25.6, 2), "INR")):
+            o = parse_visa_response({"result": {"visas": [VISA_BLOCK]}})[0]
+        assert o.processing_time_text == "2–4 Working Days"
+        assert {f.process_type: f.processing_time_text for f in o.fares} == {
+            "Normal": "2–4 Working Days", "Express": "24–48 Hours"}
+
+    def test_plan_refuses_to_guess_the_party_size(self) -> None:
+        """Without `adults` the package was priced for one person."""
+        from agent_tools import plan_itinerary_tool
+
+        out = plan_itinerary_tool.invoke({"start_date": "2026-12-02", "nights": 6})
+        assert out["error_type"] == "MissingPartySize"
+
+    def test_no_transfer_is_added_unasked(self) -> None:
+        """A transfer nobody asked for was self-priced into the total."""
+        out = TestPlanMatchesThePackage()._plan(arrival_time="06:20", hotel_name="Crowne Plaza Dubai Deira")
+        assert out["cost_breakdown"]["transfers"] == 0
+
+
+class TestCancellationRefundFlag:
+    def test_refund_flag_beats_an_ambiguous_percent(self) -> None:
+        """The model sent refund_pct "1" meaning "refundable": refund 1%."""
+        from rules import cancellation_breakdown
+
+        out = cancellation_breakdown([
+            {"label": "Safari", "amount_inr": 5350.66, "refund": "full"},
+            {"label": "Hotel", "amount_inr": 50972.79, "refund": "none"},
+            {"label": "Old caller", "amount_inr": 100, "refund_pct": "1"},
+            {"label": "Half", "amount_inr": 1000, "refund": "partial", "refund_pct": 50},
+        ])
+        by = {line["label"]: line["refunded_inr"] for line in out["lines"]}
+        assert by == {"Safari": 5350.66, "Hotel": 0.0, "Old caller": 100.0, "Half": 500.0}
+        assert round(out["refunded_inr"] + out["lost_inr"], 2) == out["total_inr"]
+
+
+class TestOnlyQuotedFiguresEnterThePackage:
+    def test_a_tour_price_passed_as_a_transfer_is_dropped(self) -> None:
+        """The model passed the Desert Safari's Rs 5,350.66 as transfer_total_inr."""
+        from rules import set_current_thread
+
+        set_current_thread("pkg-test-1")
+        try:
+            out = TestPlanMatchesThePackage()._plan(
+                arrival_time="18:35", hotel_name="Avenue Hotel", transfer_total_inr=5350.66)
+        finally:
+            set_current_thread("")
+        assert out["cost_breakdown"]["transfers"] == 0
+        assert "ignored" in out["transfer_note"]
+
+    def test_a_quoted_airport_transfer_is_kept(self) -> None:
+        from mcp_tools.quote_registry import remember
+        from rules import set_current_thread
+
+        set_current_thread("pkg-test-2")
+        try:
+            remember("airport_transfer", [2536.72, 8200.76])
+            out = TestPlanMatchesThePackage()._plan(
+                arrival_time="18:35", hotel_name="Avenue Hotel", transfer_total_inr=2536.72)
+        finally:
+            set_current_thread("")
+        assert out["cost_breakdown"]["transfers"] == 2536.72
+
+    def test_quotes_never_cross_conversations(self) -> None:
+        from mcp_tools.quote_registry import remember, was_quoted
+        from rules import set_current_thread
+
+        set_current_thread("customer-a")
+        remember("airport_transfer", [1234.5])
+        set_current_thread("customer-b")
+        try:
+            assert not was_quoted("airport_transfer", 1234.5)
+        finally:
+            set_current_thread("")
+
+
+def test_check_in_is_never_before_landing() -> None:
+    """"Check in 14:00" was printed under an 18:35 landing."""
+    from scheduling import build_itinerary
+
+    out = build_itinerary(start_date="2026-12-02", nights=6, arrival_time="18:35",
+                          hotel_name="Avenue Hotel", hotel_checkin_time="14:00")
+    day1 = out["days"][0]["items"]
+    rest = next(i for i in day1 if i["title"] == "Check in and rest")
+    assert rest["start"] >= "18:35"

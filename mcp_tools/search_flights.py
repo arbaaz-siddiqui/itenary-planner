@@ -822,7 +822,7 @@ def _impl(
         children = max(0, children - len(infant_ages))
         infants += len(infant_ages)
     child_ages = ages or None
-    cabin = (cabin or "Y").strip().upper()
+    cabin = normalize_cabin(cabin)
 
     refusal = _validate_party(adults, children, infants)
     if refusal:
@@ -904,6 +904,28 @@ def _impl(
 
 
 _CABIN_NAMES = {"Y": "economy", "S": "premium economy", "C": "business", "F": "first"}
+
+
+def normalize_cabin(value: Any) -> str:
+    """Any way a cabin is written -> the supplier's one-letter code.
+
+    The supplier answers an unknown cabin with zero fares and no error, so a
+    model that passed "'Y'" (quotes included) or "economy" got "no flights
+    from Ahmedabad" for a route with five. Unknown input falls back to
+    economy rather than to an empty search.
+    """
+    text = str(value or "").strip().strip("'\"`").strip().lower()
+    if not text:
+        return "Y"
+    if text.upper() in _CABIN_NAMES:
+        return text.upper()
+    if "premium" in text:
+        return "S"
+    if "business" in text or text in {"j"}:
+        return "C"
+    if "first" in text:
+        return "F"
+    return "Y"
 
 
 def _priced_for(search_params: dict[str, Any]) -> str:

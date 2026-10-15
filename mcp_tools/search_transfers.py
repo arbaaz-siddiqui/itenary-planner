@@ -288,6 +288,11 @@ def _impl(
             if _o.get("per_person_inr") is not None:
                 _o["per_person_display"] = f"₹{_o['per_person_inr']:,.0f}"
 
+        # What this conversation was quoted, so a package can only include an
+        # airport transfer that was actually offered (see quote_registry).
+        from mcp_tools.quote_registry import remember
+
+        remember("airport_transfer", [o.get("price_inr") for o in options_out])
         return {
             "options": options_out,
             "table_markdown": _transfers_table(options_out),

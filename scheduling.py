@@ -373,8 +373,12 @@ def build_itinerary(
         )
         at_hotel = _to_time(hotel_checkin_time)
         hotel_carry = 0
-        if at_hotel is None:
-            at_hotel, hotel_carry = _add_minutes(landed, p.airport_to_hotel_min)
+        reach, reach_carry = _add_minutes(landed, p.airport_to_hotel_min)
+        # A check-in time earlier than landing plus the drive is the hotel's
+        # standard check-in, not when this customer gets there: "Check in 14:00"
+        # printed under an 18:35 landing. They arrive when the transfer does.
+        if at_hotel is None or reach_carry or at_hotel < reach:
+            at_hotel, hotel_carry = reach, reach_carry
         days[0].items.append(
             ScheduledItem(
                 start=_fmt(landed), end=_fmt(at_hotel),

@@ -1198,10 +1198,24 @@ def parse_visa_response(raw: dict[str, Any], *, max_results: int | None = None) 
             parent_name = v.get("name") or v.get("visaType") or "Tourist Visa"
             visa_type_id = v.get("visaTypeId")
             policy = parse_visa_policy(v)
+            tracks = policy.get("track_times") or {}
             for opt in sub_options:
                 row = _parse_visa_option(opt, parent_name, visa_type_id, rates)
-                if row is not None:
-                    options.append(row.model_copy(update=policy))
+                if row is None:
+                    continue
+                update = dict(policy)
+                # The supplier's per-rate text ("3-4 Working Days", "1 Working
+                # Day") disagrees with the website ("2–4 Working Days", "24–48
+                # Hours"). Every field the agent or the card can read carries
+                # the website's wording, so no reply can quote the other one.
+                if tracks.get("Normal"):
+                    update["processing_time_text"] = tracks["Normal"]
+                update["fares"] = [
+                    f.model_copy(update={"processing_time_text": tracks[f.process_type]})
+                    if tracks.get(f.process_type) else f
+                    for f in row.fares
+                ]
+                options.append(row.model_copy(update=update))
         else:
             # Legacy flat-option shape
             row = _parse_visa_flat(v, rates)

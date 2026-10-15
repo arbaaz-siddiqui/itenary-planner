@@ -371,13 +371,17 @@ def cancellation_breakdown_tool(lines: list[dict[str, Any]]) -> dict[str, Any]:
     """What the customer gets back, and loses, if they cancel the package.
 
     USE THIS whenever the customer asks what a cancellation refunds or costs.
-    One line per package component, with the amount you quoted and the refund
-    its OWN policy gives on that date: {"label": "Flights", "amount_inr":
-    99365.87, "refund_pct": 0}. Policies come from the results: the flight's
-    refundable label, the hotel's cancellation_display, the tour's
-    cancellation terms, the visa's refund_policy (visas are non-refundable once
-    submitted: 0). Quote refunded_inr and lost_inr exactly; never add them up
-    yourself. Final amounts are confirmed by the booking team.
+    One line per package component, with the amount you quoted and what its
+    OWN policy gives back on that date:
+        {"label": "Flights", "amount_inr": 99365.87, "refund": "none"}
+        {"label": "Desert Safari", "amount_inr": 5350.66, "refund": "full"}
+        {"label": "Hotel", "amount_inr": 50972.79, "refund": "partial", "refund_pct": 50}
+    refund is "full", "none" or "partial" (then refund_pct 0-100). Policies
+    come from the results: the flight's refundable label, the hotel's
+    cancellation_display for that date, the tour's cancellation terms, the
+    visa's refund_policy (non-refundable once submitted: "none"). Quote
+    refunded_display and lost_display exactly; never add them up yourself.
+    Final amounts are confirmed by the booking team.
     """
     result = cancellation_breakdown(lines)
     result["refunded_display"] = format_inr(result["refunded_inr"])
@@ -747,7 +751,10 @@ def plan_itinerary_tool(
             Rs 64,792.
         hotel_total_inr: total stay price of the hotel you showed, all rooms.
         visa_per_adult_inr: per-adult visa price you quoted (tool multiplies).
-        transfer_total_inr: total transfer price you showed, if any.
+        transfer_total_inr: the price of an AIRPORT transfer from
+            search_airport_transfer_dubai that the customer has seen. 0 when no
+            airport transfer was searched: never pass a tour's transfer price
+            here (that is already inside the tour's total).
         origin_city: departure city, only needed as a fallback if you cannot
             pass flight_total_inr.
         flight_fare_ref: the `fare_ref` of the flight you showed (from
@@ -769,6 +776,19 @@ def plan_itinerary_tool(
         the failure this field exists to prevent.
     """
     from scheduling import build_itinerary
+
+    # Every per-person line (tours, visa) is multiplied by this. Defaulting to 1
+    # priced a 2-adult package for one person (Safari Rs 2,675, not 5,350.66).
+    if int(adults or 0) < 1:
+        return {
+            "error": True,
+            "error_type": "MissingPartySize",
+            "message": (
+                "Pass `adults`: the number of travellers the package is priced for "
+                "(it is already in the conversation). Call again with it in the same "
+                "turn; do not ask the customer."
+            ),
+        }
 
     # The model routinely passes bare names — [{"name": "Dubai Frame"}] — with
     # no price and no duration. Resolve both from the catalogue first, otherwise
@@ -999,17 +1019,26 @@ def plan_itinerary_tool(
         except Exception as e:  # noqa: BLE001
             logger.debug("visa lookup for total failed: %s", e)
 
-    if not transfer_total_inr and hotel_name:
-        try:
-            from mcp_tools.search_transfers import _impl as _st
+    transfer_note = ""
+    # A transfer figure must be an airport transfer this conversation was
+    # quoted. The model passed the Desert Safari's Rs 5,350.66 here, and the
+    # package grew an airport transfer nobody had searched for.
+    if transfer_total_inr:
+        from mcp_tools.quote_registry import was_quoted
 
-            _t = _st(arrival_date=start_date, hotel_name=hotel_name, adults=pax)
-            _to = [o for o in (_t.get("options") or []) if o.get("price_inr")]
-            if _to:
-                transfer_total_inr = min(float(o["price_inr"]) for o in _to)
-                _lookup_notes.append("airport transfer")
-        except Exception as e:  # noqa: BLE001
-            logger.debug("transfer lookup for total failed: %s", e)
+        if not was_quoted("airport_transfer", float(transfer_total_inr)):
+            transfer_note = (
+                "transfer_total_inr was ignored: no airport transfer with that price "
+                "was quoted in this conversation (a tour's transfer is already in the "
+                "tour price). The plan marks the airport transfer as not included; "
+                "offer to search one if the customer wants it."
+            )
+            transfer_total_inr = 0.0
+
+    # Airport transfers are NOT self-priced: a transfer the customer never
+    # asked for was added to the package total. A transfer is in the package
+    # only when transfer_total_inr is passed (one was shown and chosen);
+    # otherwise the plan marks it "not included in the package price".
     scheduled: list[dict[str, Any]] = []
     seen: set[str] = set()
     for day in out.get("days") or []:
@@ -1097,6 +1126,8 @@ def plan_itinerary_tool(
     if components["transfers"]:
         lines.append({"item": "Airport transfers", "date": start_date, "amount_inr": components["transfers"]})
     out["package_lines"] = lines
+    if transfer_note:
+        out["transfer_note"] = transfer_note
     if flight_block:
         out["flight"] = flight_block
 

@@ -1277,6 +1277,15 @@ _PROMISE = re.compile(
     re.IGNORECASE,
 )
 
+# A lookup offered on the customer's answer is not a broken promise: "Just let
+# me know which one interests you, and I'll pull up the timings" waits for them
+# by design. Retrying it appended a second "which one?" answer to the first.
+_WAITS_FOR_CUSTOMER = re.compile(
+    r"\b(let me know|tell me|once you|if you|when you|which (one|flight|hotel|option)|"
+    r"you('d| would) like|your (pick|choice)|pick one|choose)\b",
+    re.IGNORECASE,
+)
+
 _ACT_NOW_MARKER = (
     "[system] Your last reply said you would look something up, but no search "
     "ran. If you have what you need, call the tools now and answer from their "
@@ -1303,7 +1312,7 @@ def _is_unfulfilled_promise(response: dict[str, Any]) -> bool:
     if not text:
         return False
     last = re.split(r"(?<=[.!?])\s+", text)[-1]
-    return bool(_PROMISE.search(last))
+    return bool(_PROMISE.search(last)) and not _WAITS_FOR_CUSTOMER.search(last)
 
 
 # What the customer sees when a nudged retry still produced nothing to stand on.

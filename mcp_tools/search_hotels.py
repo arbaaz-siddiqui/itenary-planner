@@ -631,7 +631,13 @@ def _impl(
       confirm the room split with the customer before searching — never guess
       how many rooms 4+ guests want.
     """
-    from rules import missing_search_fields, needs_input_error
+    from rules import exact_star_request, missing_search_fields, needs_input_error
+
+    # "A 4-star hotel" is a 4-star hotel. The model passes min_stars=4 and leaves
+    # max at 5, so 5-star hotels came back as the "4-star" picks. When the
+    # customer's own words name one star level, cap at it.
+    if min_stars and max_stars >= 5 and exact_star_request(int(min_stars)):
+        max_stars = min_stars
 
     # `adults` defaults to 2 in the signature, so a party size the customer
     # never gave looks identical to one they did. `rooms` carries its own count,
