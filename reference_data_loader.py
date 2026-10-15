@@ -53,6 +53,11 @@ def resolve_city(name: str) -> dict[str, Any] | None:
     return None
 
 
+def iter_cities() -> list[dict[str, Any]]:
+    """Every city record we know, each with its name, ids and lat/lng."""
+    return [rec for rec in (_load_cities().get("cities") or {}).values() if isinstance(rec, dict)]
+
+
 def resolve_iata(name: str) -> str | None:
     city = resolve_city(name)
     return city.get("iata") if city else None

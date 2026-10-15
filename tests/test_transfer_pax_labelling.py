@@ -23,6 +23,7 @@ from unittest.mock import patch
 import pytest
 
 from mcp_tools import search_tours
+from tests.factories import future_date
 
 
 class _Opt:
@@ -76,7 +77,7 @@ def test_every_transfer_price_is_labelled_with_its_party_size(pax):
                       search_tours._attach_transfer_prices):
         with patch("booking_api.endpoints.call_tour_options", _fake_options), \
              patch("booking_api.endpoints.call_tour_option_rate", _rate_for(645.0)):
-            search_tours._attach_transfer_prices(opts, "2026-09-15", pax)
+            search_tours._attach_transfer_prices(opts, future_date(14), pax)
 
     prices = opts[0].transfer_prices or []
     assert prices, "expected transfer prices to be attached"
@@ -90,13 +91,15 @@ def test_the_display_string_says_it_is_a_party_total():
     opts = [_Opt()]
     with patch("booking_api.endpoints.call_tour_options", _fake_options), \
          patch("booking_api.endpoints.call_tour_option_rate", _rate_for(645.0)):
-        search_tours._attach_transfer_prices(opts, "2026-09-15", 7)
+        search_tours._attach_transfer_prices(opts, future_date(14), 7)
     assert "total for 7 pax" in opts[0].transfer_price_display
 
 
-def test_a_solo_search_does_not_claim_a_party_total():
+def test_a_solo_search_names_its_party_of_one():
+    # Unlabelled, a 1-adult "Sharing Transfer: Rs 1,793" was read as a
+    # per-person rate (fixed in 787dc70), so a solo search says so too.
     opts = [_Opt()]
     with patch("booking_api.endpoints.call_tour_options", _fake_options), \
          patch("booking_api.endpoints.call_tour_option_rate", _rate_for(645.0)):
-        search_tours._attach_transfer_prices(opts, "2026-09-15", 1)
-    assert "total for" not in opts[0].transfer_price_display
+        search_tours._attach_transfer_prices(opts, future_date(14), 1)
+    assert opts[0].transfer_price_display.endswith("(total for 1 pax)")

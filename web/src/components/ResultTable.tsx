@@ -5,6 +5,7 @@ import { looksNumeric, splitParts, type ResultCell, type ResultRow, type ResultT
 import { SafeImage } from "./SafeImage";
 import { TourDetails } from "./TourDetails";
 import { Carousel } from "./Carousel";
+import { RestaurantCard } from "./OptionCards";
 import type { OptionItem } from "@/lib/types";
 
 /**
@@ -96,6 +97,17 @@ function Attribute({ cell }: { cell: ResultCell }) {
 
 function Card({ row, optionFor }: { row: ResultRow; optionFor?: OptionLookup }) {
   const option = optionFor?.(row.name) ?? null;
+  // A restaurant row is drawn from the supplier data, not from the table
+  // text: the agent's cells paraphrase ("Features: modern, vibrant ...") and
+  // carry no food photos, while the option row has the real tags, rating,
+  // starting price and the menu's dish photos.
+  if (option && option.restaurant_id != null) {
+    return (
+      <li className="h-full">
+        <RestaurantCard o={option} />
+      </li>
+    );
+  }
   const image = pickImage(option);
   // Only when the supplier ids came through: a details link that cannot fetch
   // is worse than no link.
@@ -155,7 +167,7 @@ function Cards({ table, optionFor }: { table: Parsed; optionFor?: OptionLookup }
       {table.rows.map((row, i) => (
         <ul
           key={i}
-          className="w-[85%] shrink-0 snap-start sm:w-[calc(50%-0.375rem)]"
+          className="ui-list w-[85%] shrink-0 snap-start sm:w-[calc(50%-0.375rem)]"
         >
           <Card row={row} optionFor={optionFor} />
         </ul>
@@ -241,8 +253,17 @@ export const ResultComparison = memo(function ResultComparison({
   table: Parsed;
   optionFor?: OptionLookup;
 }) {
+  // Restaurants are chosen by their photos — the place and its food — which a
+  // text table cannot carry. When the rows are restaurants we have data for,
+  // cards everywhere: on desktop the wide table showed the agent's text only,
+  // and the photo cards underneath were suppressed because the table named
+  // the same restaurants.
+  const photoLed = Boolean(
+    optionFor && table.rows.some((r) => optionFor(r.name)?.restaurant_id != null),
+  );
+
   // Too many columns to read across at any width — cards only, everywhere.
-  if (table.headers.length >= WIDE_TABLE_COLUMNS) {
+  if (photoLed || table.headers.length >= WIDE_TABLE_COLUMNS) {
     return (
       <div className="md-result mt-3.5">
         <Cards table={table} optionFor={optionFor} />

@@ -308,9 +308,54 @@ def build_react_agent(
         model=llm,
         tools=parallel_tools,
         prompt=load_system_prompt(surface=surface),
+        pre_model_hook=_supersede_earlier_searches,
         post_model_hook=_split_concatenated_args,
         checkpointer=checkpointer,
     )
+
+
+#: Searches whose earlier results the model must not reuse once the customer
+#: has spoken again. Restaurant answers depend on the arguments (area, budget,
+#: cuisine, dish) and the model re-filtered old rows instead of searching: asked
+#: for "dinner in Deira" after a Marina search, it re-listed the Marina rows as
+#: "nearby", and asked for a ₹500 budget it quoted starting prices as meals.
+_SUPERSEDED_EACH_TURN = frozenset({"search_restaurants"})
+
+
+def _supersede_earlier_searches(state: dict[str, Any]) -> dict[str, Any]:
+    """Show the model a stub, not the rows, of searches from earlier turns.
+
+    Only the model's INPUT changes (`llm_input_messages`); the stored thread
+    keeps every result, so cards, transcripts and logs are untouched. Results
+    from the current turn -- everything after the latest customer message --
+    stay whole, so the search the model makes now is read in full.
+    """
+    from langchain_core.messages import ToolMessage
+
+    msgs = list(state.get("messages") or [])
+    last_human = max(
+        (i for i, m in enumerate(msgs) if _message_role(m) in {"human", "user"}), default=-1
+    )
+    out: list[Any] = []
+    for i, m in enumerate(msgs):
+        name = str(_safe_attr(m, "name") or "")
+        if i < last_human and _message_role(m) == "tool" and name in _SUPERSEDED_EACH_TURN:
+            asked = (_coerce_to_dict(_message_content(m)) or {}).get("search_params") or {}
+            m = ToolMessage(
+                content=(
+                    f"[superseded] Earlier {name} result (asked: "
+                    f"{json.dumps(asked, ensure_ascii=False, default=str)}). Its rows "
+                    f"are not shown again: for the customer's current message call "
+                    f"{name} again with what they asked for now, and answer from that. "
+                    f"A question about ONE restaurant's cuisine, menu, prices, rating or "
+                    f"hours → get_restaurant_details(restaurant_id) — never answer it "
+                    f"from an earlier reply."
+                ),
+                tool_call_id=_safe_attr(m, "tool_call_id") or "",
+                name=name,
+            )
+        out.append(m)
+    return {"llm_input_messages": out}
 
 
 def _split_concatenated_args(state: dict[str, Any]) -> dict[str, Any] | None:

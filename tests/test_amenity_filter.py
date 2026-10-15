@@ -7,6 +7,7 @@ of filtering, so non-matching hotels were still listed.
 """
 
 from mcp_tools.search_hotels import _extract_amenities, _match_amenities
+from tests.factories import future_date
 
 
 class TestBarIsNotAMinibar:
@@ -61,8 +62,8 @@ class TestEveryRoomTypeIsShown:
     def _admiral(self):
         from mcp_tools.search_hotels import _impl
 
-        return _impl(destination_city="Dubai", check_in="2026-10-10",
-                     check_out="2026-10-15", hotel_name="Admiral Plaza",
+        return _impl(destination_city="Dubai", check_in=future_date(14),
+                     check_out=future_date(19), hotel_name="Admiral Plaza",
                      adults=2, force_refresh=True)
 
     def test_family_room_is_listed(self):

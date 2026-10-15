@@ -14,8 +14,9 @@ Two root causes, both ambiguity the customer had already resolved:
 
 from mcp_tools.lookup_entity import _impl as _lookup
 from mcp_tools.search_tours import _impl as _tours
+from tests.factories import future_date
 
-DATE = "2026-09-20"
+DATE = future_date(14)
 
 
 class TestSearchRowsAdvertiseTheirAddons:

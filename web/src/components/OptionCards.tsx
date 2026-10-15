@@ -201,6 +201,88 @@ function TourCard({ o }: { o: OptionItem }) {
   );
 }
 
+/** A dish the card can show: name, price and the supplier's own photo. */
+interface DishPhoto {
+  name: string;
+  price: string | null;
+  image: string | null;
+}
+
+function dishPhotos(o: OptionItem): DishPhoto[] {
+  const raw = o.dish_photos;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((d) => d as OptionItem)
+    .map((d) => ({ name: str(d, "name") ?? "", price: str(d, "price_display"), image: str(d, "image_url") }))
+    .filter((d) => d.name && d.image);
+}
+
+/** The menu's food photos, scrollable sideways under the restaurant. */
+function DishStrip({ dishes }: { dishes: DishPhoto[] }) {
+  if (!dishes.length) return null;
+  return (
+    <div className="mt-2">
+      <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-fg-muted">On the menu</p>
+      <ul className="ui-list flex snap-x gap-2 overflow-x-auto pb-1">
+        {dishes.map((d, i) => (
+          <li key={`${d.name}-${i}`} className="w-24 shrink-0 snap-start">
+            <SafeImage src={d.image} alt={d.name} ratio="aspect-square" />
+            <p className="mt-1 line-clamp-2 text-[11px] leading-tight">{d.name}</p>
+            {d.price && <p className="text-[11px] font-medium tabular-nums">{d.price}</p>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function RestaurantCard({ o }: { o: OptionItem }) {
+  const name = str(o, "name") ?? "Restaurant";
+  const km = num(o, "distance_km");
+  const from = str(o, "distance_from");
+  const tags = Array.isArray(o.tags) ? (o.tags as unknown[]).filter((t): t is string => typeof t === "string") : [];
+  const day = o.hours_on_date as OptionItem | undefined;
+  const dayHours =
+    day && typeof day === "object"
+      ? day.closed === true
+        ? `${str(day, "weekday") ?? ""}: closed`
+        : str(day, "opening_hours") && `${str(day, "weekday") ?? ""}: ${str(day, "opening_hours")}`
+      : null;
+
+  return (
+    <article className="overflow-hidden rounded-xl border border-border bg-bg">
+      <SafeImage src={firstImage(o)} alt={name} ratio="aspect-[16/9]" className="rounded-none" />
+      <div className="p-3">
+        <div className="flex gap-3">
+          <div className="min-w-0 flex-1">
+            <h4 className="text-sm font-medium">{name}</h4>
+            <Meta
+              items={[
+                str(o, "rating_display") ? `★ ${str(o, "rating_display")}` : null,
+                str(o, "area"),
+                // Straight-line distance, said as such: there is no route data.
+                km != null ? `${km} km${from ? ` from ${from}` : ""}` : null,
+              ]}
+            />
+          </div>
+          {/* The supplier's starting price is its cheapest menu item. */}
+          <Price value={str(o, "price_from_display")} note={str(o, "menu_price_range_display")} />
+        </div>
+        {tags.length > 0 && (
+          <ul className="ui-list mt-2 flex flex-wrap gap-1">
+            {tags.slice(0, 4).map((t) => (
+              <li key={t} className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-fg-muted">{t}</li>
+            ))}
+            {tags.length > 4 && <li className="px-1 py-0.5 text-[10px] text-fg-muted">+{tags.length - 4}</li>}
+          </ul>
+        )}
+        {dayHours && <p className="mt-1.5 text-[11px] text-fg-muted">Published hours · {dayHours}</p>}
+        <DishStrip dishes={dishPhotos(o)} />
+      </div>
+    </article>
+  );
+}
+
 function FlightCard({ o }: { o: OptionItem }) {
   const stops = num(o, "stops");
   const mins = num(o, "duration_min");
@@ -229,14 +311,23 @@ const LABELS: Record<string, string> = {
   hotels: "Hotels",
   tours: "Tours",
   flights: "Flights",
+  restaurants: "Restaurants",
 };
+
+const CARDS: Record<string, ({ o }: { o: OptionItem }) => React.JSX.Element> = {
+  hotels: HotelCard,
+  flights: FlightCard,
+  restaurants: RestaurantCard,
+};
+
+/** Photo-led cards scroll sideways instead of stacking into a wall. */
+const CAROUSEL_KINDS = new Set(["tours", "restaurants"]);
 
 export function OptionCards({ group }: { group: OptionGroup }) {
   if (!group.items?.length) return null;
 
-  const Card =
-    group.kind === "hotels" ? HotelCard : group.kind === "flights" ? FlightCard : TourCard;
-  const isTours = group.kind === "tours";
+  const Card = CARDS[group.kind] ?? TourCard;
+  const isTours = CAROUSEL_KINDS.has(group.kind);
 
   return (
     <section className="mt-3">

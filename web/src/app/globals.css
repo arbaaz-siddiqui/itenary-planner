@@ -93,6 +93,15 @@ body {
 .md li > ul,
 .md li > ol { margin-top: 0.25rem; }
 
+/* Lists that are UI (card carousels, tag chips, a dish strip), not prose.
+   Without this the prose rules above put bullets and indents into cards. */
+.md ul.ui-list,
+ul.ui-list {
+  list-style: none;
+  padding-left: 0;
+}
+.md ul.ui-list > li + li { margin-top: 0; }
+
 .md a {
   color: var(--color-accent);
   text-decoration: underline;

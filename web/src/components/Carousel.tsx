@@ -43,11 +43,13 @@ export function Carousel({ children, count }: { children: React.ReactNode; count
         {children}
       </div>
 
+      {/* Arrows sit over the photo band at the top of the cards: centred on
+          the row they covered the card's name and rating. */}
       <button
         type="button"
         onClick={() => nudge(-1)}
         aria-label="Previous"
-        className="absolute top-1/2 left-1 hidden -translate-y-1/2 rounded-full border
+        className="absolute top-24 left-1 hidden -translate-y-1/2 rounded-full border
                    border-border bg-bg/90 p-1.5 shadow-sm hover:bg-surface-2 sm:block"
       >
         ‹
@@ -56,7 +58,7 @@ export function Carousel({ children, count }: { children: React.ReactNode; count
         type="button"
         onClick={() => nudge(1)}
         aria-label="Next"
-        className="absolute top-1/2 right-1 hidden -translate-y-1/2 rounded-full border
+        className="absolute top-24 right-1 hidden -translate-y-1/2 rounded-full border
                    border-border bg-bg/90 p-1.5 shadow-sm hover:bg-surface-2 sm:block"
       >
         ›
