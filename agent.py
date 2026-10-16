@@ -1635,6 +1635,8 @@ INTERNAL_MARKER_PREFIX = "[system]"
 
 # Graph steps per tool round: pre_model_hook, model, post_model_hook, tools.
 _STEPS_PER_TOOL_ROUND = 4
+# Tool rounds a chat turn may take before the backstop ends it.
+PLAN_TOOL_ROUNDS = 8
 
 
 def _customer_part(text: str) -> str:
@@ -1810,8 +1812,10 @@ def stream_and_log(
         # is FOUR of them since the pre/post model hooks were added (hook,
         # model, hook, tools): the old 12 allowed only three rounds, so
         # lookup -> options -> details hit the cap and the customer saw a raw
-        # "Recursion limit of 12 reached". Six rounds, plus the final answer.
-        config["recursion_limit"] = _STEPS_PER_TOOL_ROUND * 6 + 1
+        # "Recursion limit of 12 reached". Eight rounds, plus the final answer:
+        # a built package (hotel, tours, transfers, airport legs, the plan)
+        # used six and was cut off before its reply.
+        config["recursion_limit"] = _STEPS_PER_TOOL_ROUND * PLAN_TOOL_ROUNDS + 1
     start = time.perf_counter()
 
     def _process_chunk(mode: str, chunk: Any) -> list[str]:

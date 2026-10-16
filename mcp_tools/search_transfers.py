@@ -272,8 +272,17 @@ def _impl(
                     "transfer for this route right now."
                 ),
                 "agent_instructions": (
-                    "Say we have no transfer available for these dates and offer to "
-                    "try different dates. DO NOT invent Careem/Uber/private car "
+                    # The website's own packages price their airport legs as
+                    # tours sold per vehicle ("Dubai Airport Pickup by
+                    # Gujjutours", "... Dropoff ..."), which the transfer
+                    # inventory does not list.
+                    "GujjuTours also sells airport pickup and drop-off as tours, "
+                    "priced per vehicle: call search_tours ONCE with "
+                    "query='Airport' (it returns both 'Dubai Airport Pickup by "
+                    "Gujjutours' and '... Dropoff ...') and offer those two, quoting "
+                    "their prices. Only if those "
+                    "return nothing, say we have no transfer for these dates and "
+                    "offer to try different dates. DO NOT invent Careem/Uber/private car "
                     "services or any provider we didn't search — we only sell what "
                     "this tool returns. DO NOT ask the customer more questions about "
                     "pax or vehicle type; the search already ran and found nothing."

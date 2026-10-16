@@ -16,15 +16,17 @@ from fx import convert_supplier_price
 
 
 def half_up(value: float, places: int = 2) -> float:
-    """Round as the website does: Rs 1,180.25 for 2 is Rs 590.13 each.
+    """Round as the website does (JavaScript toFixed): half up on the float's
+    exact value. Rs 1,180.25 for 2 is Rs 590.13 each (590.125 is exact), and
+    Rs 31,455.11 for 2 is Rs 15,727.55 each (the float is 15727.55499...).
 
-    Python's round() gives 590.12 (binary floats and banker's rounding), one
-    paisa under the price the customer sees on gujjutours.com.
+    Python's round() gives 590.12 (banker's rounding), one paisa under the
+    price the customer sees on gujjutours.com.
     """
     from decimal import ROUND_HALF_UP, Decimal
 
     q = Decimal(1).scaleb(-places)
-    return float(Decimal(repr(value)).quantize(q, rounding=ROUND_HALF_UP))
+    return float(Decimal(value).quantize(q, rounding=ROUND_HALF_UP))
 
 # The supplier's transferTypeId. Names come from its own rows; these are only
 # the fallback when a row carries none.
@@ -160,10 +162,41 @@ def party_prices(
 
     kinds = offered_transfers(option)
     if not kinds:
-        return []
+        return _unit_price(tour_id, option, travel_date)
     with cf.ThreadPoolExecutor(max_workers=len(kinds)) as ex:
         priced = [p for p in ex.map(one, kinds) if p]
     return sorted(priced, key=lambda p: p["total_inr"])
+
+
+def _unit_price(tour_id: int, option: dict[str, Any], travel_date: str) -> list[dict[str, Any]]:
+    """One vehicle's price for an option sold per vehicle with no transfer types.
+
+    The airport pickup and drop-off tours list no transfer types, so nothing was
+    priced and every option read "On request". The website prices them as one
+    unit on transfer type 4 ("Unit"): Rs 2,508.04 for the 4-seater.
+    """
+    try:
+        row = call_tour_option_rate(
+            tour_id=tour_id, option_id=option["optionId"],
+            supplier_id=int(option.get("supplierId") or 0), travel_date=travel_date,
+            adults=0, units=1, transfer_id=4,
+        )["result"][0]
+    except Exception:
+        return []
+    inr, _ = convert_supplier_price(row.get("rate"), fare_currency=row.get("currencyCode") or "AED", places=2)
+    if not inr:
+        return []
+    return [{
+        "transfer_type": "Per vehicle",
+        "transfer_type_id": 4,
+        "total_inr": inr,
+        "total_display": _paise(inr),
+        "per_person_display": format_inr(inr),
+        "priced_for_pax": 1,
+        "priced_per": "unit",
+        "price_inr": inr,
+        "price_display": format_inr(inr),
+    }]
 
 
 def _paise(amount: float) -> str:

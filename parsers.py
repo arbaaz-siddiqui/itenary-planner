@@ -17,6 +17,7 @@ Sections (search by `# ===`):
 from __future__ import annotations
 
 import html
+import json
 import re
 from datetime import datetime
 from typing import Any
@@ -702,6 +703,10 @@ def parse_tour_response(
     return options[:max_results] if max_results else options
 
 
+# toursearchlistrate `tourRateTypeId`: "1" per adult, "11" per unit (vehicle).
+UNIT_RATE_TYPE = "11"
+
+
 def _parse_tour(
     t: Any,
     rate_map: dict[int, dict[str, Any]],
@@ -731,6 +736,7 @@ def _parse_tour(
         price_original=float(final_rate or 0),
         currency_original=str(currency),
         final_rate_original=float(final_rate or 0),
+        sold_per_vehicle=str(rate_entry.get("tourRateTypeId") or "") == UNIT_RATE_TYPE,
         discount_type=str(rate_entry.get("discountType") or ""),
         discount_value=float(rate_entry.get("discountValue") or 0),
         duration=str(t.get("duration") or ""),
@@ -842,6 +848,106 @@ def parse_tour_medias(raw: Any) -> list[str]:
         if url and url not in urls:
             urls.append(url)
     return urls
+
+
+# The website streams its page data as `self.__next_f.push([1,"<json text>"])`
+# script chunks; the package's parts sit in one object `{"package":[...],
+# "itineraryServices":[...],"packageHotels":[...]}` inside that text.
+_NEXT_PUSH = re.compile(r'self\.__next_f\.push\(\[1,"((?:[^"\\]|\\.)*)"\]\)')
+
+
+def parse_package_page(page_html: str) -> dict[str, Any] | None:
+    """A package's parts from its gujjutours.com page, or None if absent.
+
+    Returns {"services": [...], "hotels": [...], "check_in": "yyyy-mm-dd"}:
+    services in day order (tour id, option id, transfer type, day), hotels in
+    the website's priority order (the first available one is the default).
+    """
+    try:
+        text = "".join(json.loads('"' + m.group(1) + '"') for m in _NEXT_PUSH.finditer(page_html or ""))
+    except ValueError:
+        return None
+    found = re.search(r'\{"package"\s*:\s*\[', text)
+    if not found:
+        return None
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text[found.start():])
+    except ValueError:
+        return None
+    services = []
+    for s in obj.get("itineraryServices") or []:
+        if not isinstance(s, dict) or not s.get("servicesId") or not s.get("optionId"):
+            continue
+        services.append({
+            "day": int(s.get("dayNo") or 0),
+            "tour_id": int(s["servicesId"]),
+            "option_id": int(s["optionId"]),
+            "name": str(s.get("serviceName") or "").strip(),
+            "option_name": str(s.get("optionName") or "").strip(),
+            "transfer_type_id": int(s.get("transferTypeId") or 0),
+            "transfer_type": str(s.get("transferType") or "").strip(),
+            "service_type": str(s.get("serviceType") or ""),
+            "supplier_id": int(s.get("transportProvider") or 1),
+            "optional": bool(s.get("isOptional")),
+            "image_url": _resolve_image_url(s.get("imagePath"), DEFAULT_IMAGE_BASE_URL),
+        })
+    services.sort(key=lambda x: (x["day"], 0))
+    hotels = []
+    for h in obj.get("packageHotels") or []:
+        if not isinstance(h, dict) or not h.get("hotelId"):
+            continue
+        hotels.append({
+            "hotel_id": int(h["hotelId"]),
+            "name": str(h.get("hotelName") or "").strip(),
+            "stars": int(h.get("rating") or 0),
+            "address": str(h.get("address") or "").strip(),
+            "nights": int(h.get("noofnight") or 0),
+            "priority": int(h.get("hotelPriority") or 0),
+            "image_url": _resolve_image_url(h.get("hotelFrontImage"), DEFAULT_IMAGE_BASE_URL),
+        })
+    hotels.sort(key=lambda x: x["priority"] or 999)
+    pkg = (obj.get("package") or [{}])[0] or {}
+    return {
+        "services": services,
+        "hotels": hotels,
+        "check_in": str(pkg.get("checkInDate") or "")[:10],
+        "nights": int(pkg.get("noOfNights") or 0),
+    }
+
+
+def parse_package_hotel_rates(raw: Any) -> dict[int, dict[str, Any]]:
+    """Cheapest room per hotel from packagehotelv1: {hotel_id: {...}}.
+
+    `price` is the supplier's total for the whole stay, in `currency` (AED).
+    """
+    out: dict[int, dict[str, Any]] = {}
+    for chunk in (raw or {}).get("data") or [] if isinstance(raw, dict) else []:
+        rs = (chunk or {}).get("AvailabilityRS") or {}
+        currency = str(rs.get("Currency") or "AED")
+        for h in rs.get("HotelResult") or []:
+            hid = _safe_int(h.get("HotelId"))
+            if hid is None:
+                continue
+            best = None
+            for opt in h.get("HotelOption") or []:
+                for combo in opt.get("HotelRooms") or []:
+                    rooms = [r for r in combo or [] if isinstance(r, dict)]
+                    if not rooms:
+                        continue
+                    price = sum(float(r.get("Price") or 0) for r in rooms)
+                    if price > 0 and (best is None or price < best["price"]):
+                        first = rooms[0]
+                        best = {
+                            "price": price,
+                            "currency": currency,
+                            "room": str(first.get("RoomTypeName") or "").strip(),
+                            "meal": str(first.get("MealName") or "").strip(),
+                            "refundable": "non refundable" not in str(first.get("RoomTypeName") or "").lower()
+                            and "non-refundable" not in str(first.get("RoomTypeName") or "").lower(),
+                        }
+            if best:
+                out[hid] = best
+    return out
 
 
 def _resolve_image_url(image_path: Any, base_url: str) -> str:

@@ -124,7 +124,7 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
 | Transfers | `search_airport_transfer_dubai` (module `search_transfers.py`), `get_transfer_details` | hotel name alone resolves coordinates |
 | Restaurants | `search_restaurants`, `get_restaurant_details` | only ~9 Dubai restaurants, all veg; `restaurant_catalog.py` |
 | Visa | `get_visa_info`, `list_visa_countries` | Indian nationality uses supplier id 245. Returns `refund_policy`, `track_times` (website wording), `party_totals`, and a `timeline` (working days to travel, which track fits) |
-| Packages | `list_packages`, `get_package_details` | `totalPrice=0` means price on request |
+| Packages | `list_packages`, `get_package_details` | live price built like the website (`package_pricing.py`, see §8); `list_packages` prices the first 8 matching the nights asked |
 | Lookup / FX | `lookup_entity` (public autocomplete), `get_exchange_rate` | |
 | Package maths | `plan_itinerary_tool` (needs `adults`; tours carry `date`; `flight_fare_ref`; `fill_days` opt-in; returns `package_lines`), `cancellation_breakdown_tool` (refund full/none/partial) | |
 | Helpers | `result_cache.py`, `ui_payload.py`, `tour_pricing.py`, `quote_registry.py` (prices quoted per conversation; a transfer total must have been quoted) | |
@@ -145,7 +145,7 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
   - `pre_model_hook=_supersede_earlier_searches` (stubs old restaurant results),
   - `post_model_hook=_split_concatenated_args` → `repair_inline_tool_call` (tool calls written as text), `{..}{..}` arg splitting, `_drop_repeated_failures`,
   - checkpointer: memory by default, `build_postgres_checkpoint` (chat API) or `build_sqlite_checkpoint` (WhatsApp).
-- **Recursion limit:** 25 (`_STEPS_PER_TOOL_ROUND * 6 + 1`).
+- **Recursion limit:** 33 for chat (`_STEPS_PER_TOOL_ROUND * PLAN_TOOL_ROUNDS + 1`, 8 tool rounds; a built package needs 6+), 25 for voice.
 - **Streaming:** `stream_and_log` returns a `StreamResult` (`text`, `messages`, `tool_event_log`, `latency_seconds`, `on_update` callback fired after every update chunk, `.response`). Stream modes `messages` + `updates`. `on_update` is how the chat API emits live tool steps.
 - **Guards** (both paths): injection guard, malformed-args repair, empty-turn and unfulfilled-promise nudges (a lookup offered on the customer's answer is not a broken promise), `_apply_reply_guards` (invented results, fake PDF links, claiming an unbuilt PDF, visa guarantees removed and the tight-timeline note added, a missing visa party total added).
 - **`_customer_part`** strips stacked leading `[system]` blocks the API prepends (mode, regenerate, memory) so rules see only the customer's words.
@@ -233,7 +233,10 @@ The browser keeps no account data. `localStorage` holds only the theme as a firs
   - Transfers: `price_inr` (vehicle total), `per_person_inr` for shared.
   - Visa: `price_per_person_inr`, `child_price_inr`.
   - Restaurants: `price_per_adult_inr`; dishes `adult_price_inr`, `child_price_inr`.
-  - Packages: `price_inr`, `pricing_available` (0 = on request).
+  - Packages: `price_inr` (party total), `price_per_person_inr`, `pricing_available`, `package_lines` (hotel + each tour/transfer with `price_inr`), `unpriced_parts`.
+- **Package price = the website's:** the supplier's packagerate answers empty lists and packagestaticdata has only day titles, so `mcp_tools/package_pricing.py` reads the parts from the package's gujjutours.com page (`itineraryServices`, `packageHotels`; URL `/en/holidays/{country}-{id}/{city}-{id}/{name}-{id}`) and prices them as the website's browser does: first available hotel in priority order via B2C `packagehotelv1` (whole stay, AED) + each service's optionRate `rate` asked for ONE adult (or one unit for transfer type 4; adult + unit when the option's `restrictedRateType` lists "Unit"; private with a vehicle id when the band has one; supplier id from the option list), optional parts included, an unpriceable part left out and named; total converted once (AED → INR × sellingROE), per person from the unrounded total. Verified to the paisa on 10 Dubai packages on 2026-10-16. The website prices tours for one adult even for a bigger party; that is reproduced and reported to the client.
+- **optionRate needs `isCache: false`:** without it the supplier answers from a rate cache (Desert Safari 30647 private: AED 474.10 vs the live 914.10 the website shows).
+- **Per-vehicle tours:** a list row with `tourRateTypeId` "11" is sold per vehicle (airport pickup / drop-off): `sold_per_vehicle`, party total is one vehicle, options with no transfer types price one unit on type 4.
 - **Display rule:** cards show the per-person (or per-night / per-vehicle) price; the reply text states the total for the customer's party, quoted from the result.
 - **Data-quality filters live in parsers:** ~25% of flights are wrong-destination and Air India INR fares below 12,000 are test data (both dropped); hotels have no `StarRating` (defaults to 0); 26 of 197 tours have no matching rate (dropped); packages with `totalPrice=0` are on request and sort after priced ones.
 - Prices are live: re-running a search minutes later can move a fare or change the vehicle list. Compare like for like when verifying.
@@ -392,6 +395,8 @@ Rules for agents:
 - `/chat/stream` detached turns live in one process; scaling the API to several replicas needs a shared store first.
 - Restaurant data has no availability; only ~9 Dubai restaurants, all vegetarian.
 - Flight results can contain the same flight from two suppliers; the UI shows one card per airline + flight numbers + times + fare.
+- Tour photos: `GET /tours/{id}/images` → B2C `/api/tours/medias` (search gives one photo). Global Village came back from autocomplete as an unsellable Klook listing; `get_tour_options` swaps an all-unpriced tour for the website's priced listing of the same name.
+- "Build a package" form (`web/src/components/PackageBuilder.tsx`, logic in `lib/packageBuilder.ts`) on the Packages home screen sends one plain request in Plan mode; Plan mode plans only the parts listed.
 - Cabin is normalised (`normalize_cabin`): the supplier returns zero fares, silently, for any cabin that is not a bare code.
 - City names tolerate typos ("Ahemdabad"): `resolve_city` falls back to a close match for names of 6+ letters, and `rules.customer_said` accepts the corrected spelling. Without both, a misspelt origin could never be searched.
 - A reply with no tool call this turn may only quote ₹ amounts that some tool (or the customer) produced in the thread; a repeated request answered from memory ("I have already pulled those") is re-searched (`agent._research_unsourced`).

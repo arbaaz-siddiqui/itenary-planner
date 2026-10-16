@@ -103,6 +103,10 @@ def _party_total(o: Any, adults: int, child_ages: list[int] | None) -> str:
     from mcp_tools.tour_pricing import party_label
 
     party = party_label(adults, child_ages or [])
+    if getattr(o, "sold_per_vehicle", False):
+        # One price per vehicle (airport pickup): multiplying it by the
+        # party quoted two adults Rs 5,016.08 for one Rs 2,508.04 car.
+        return f"{format_inr(o.price_per_adult_inr)} per vehicle"
     totals = [
         float(p.get("total_inr") or p.get("price_inr") or 0)
         for p in (getattr(o, "transfer_prices", None) or [])

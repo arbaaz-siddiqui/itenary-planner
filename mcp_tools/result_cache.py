@@ -52,7 +52,7 @@ _TOOL_TTL = {
     "get_transfer_details": _STATIC_TTL,
     "get_flight_details": _VOLATILE_TTL,
     "get_restaurant_details": _STATIC_TTL,
-    "get_package_details": _STATIC_TTL,
+    "get_package_details": _VOLATILE_TTL,  # carries the live price with dates + party
     "get_visa_info": _STATIC_TTL,
     "list_visa_countries": _STATIC_TTL,
     "list_city_hotels": _STATIC_TTL,
