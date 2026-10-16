@@ -504,6 +504,37 @@ async def chat_stream(
     )
 
 
+def _seed_plan_from_history(thread_id: str, messages: list[dict[str, Any]]) -> None:
+    """Restore the chat's latest plan from its saved itinerary card."""
+    from agent_tools import seed_plan
+
+    for m in reversed(messages or []):
+        groups = m.get("options") if m.get("role") == "assistant" else None
+        if isinstance(groups, str):
+            try:
+                groups = json.loads(groups)
+            except ValueError:
+                groups = None
+        for g in groups or []:
+            if not isinstance(g, dict) or g.get("kind") != "itinerary" or not g.get("items"):
+                continue
+            card = g["items"][0]
+            days = card.get("days") or []
+            lines = card.get("package_lines") or []
+            hotel = next((str(l.get("item"))[7:-1] for l in lines
+                          if str(l.get("item") or "").startswith("Hotel (")), "")
+            seed_plan(thread_id, {
+                "days": days,
+                "start_date": card.get("start_date") or (days[0].get("date") if days else ""),
+                "nights": max(0, len(days) - 1),
+                "adults": card.get("adults"),
+                "hotel_name": hotel,
+                "total_inr": card.get("total_inr"),
+                "package_lines": lines,
+            })
+            return
+
+
 # Plan mode turns a question into a trip. Sent as context ahead of the
 # customer's words (like the remembered facts), never stored as their message.
 # Ask mode needs no instruction: answering the question in hand is the
@@ -514,18 +545,22 @@ _MODE_CONTEXT = {
         "single answer. If the customer lists what to include (\"Include ...\", "
         "\"Do not add ...\"), plan exactly those parts and nothing else: no "
         "flights, visa or meals they did not ask for, and no departure city "
-        "unless flights are included. Otherwise plan flights, a hotel and "
-        "tours. If the destination, travel dates, party (adults, children and "
+        "unless flights are included. Otherwise plan the whole trip: flights, a "
+        "hotel, and tours for every day (call plan_itinerary_tool with "
+        "fill_days=true); the tool adds and prices the airport pickup and "
+        "drop-off, the visa and the meals itself. If the destination, travel dates, party (adults, children and "
         "their ages) or, for flights, the departure city is missing, ask for "
         "all the missing ones in ONE short question. Never assume a return "
         "date or the number of nights: \"the dates I shared\" with only an "
         "outbound date, or two different sets of dates in the chat, is a "
         "question, not 4 nights you chose. A full trip has return flights "
-        "unless the customer said one-way. Your reply is the plan "
-        "plan_itinerary_tool built (day by day, then its cost lines and "
-        "total), never the search results' tables. Once known, search each "
-        "part live, build the day-by-day plan with plan_itinerary_tool, give "
-        "the trip total from the tools, and offer to change any part.\n\n"
+        "unless the customer said one-way. Once known, search each part live "
+        "and build the plan with plan_itinerary_tool. The chat shows that plan "
+        "as an itinerary card (every day, time by time, with every price), so "
+        "your reply is short: one line naming the hotel and dates, three to "
+        "five highlights, the TOTAL for the party from total_inr, and an offer "
+        "to change any part or make the PDF. Never paste the search results' "
+        "tables or the day-by-day.\n\n"
     ),
 }
 
@@ -648,6 +683,14 @@ async def _turn_events(
     except Exception as e:  # noqa: BLE001 — memory is an aid, never the reply
         log.warning("memory_read_failed: %s", e)
 
+    # The plan the PDF is built from lives in this process's memory; after a
+    # restart or a deploy it is gone. The itinerary card saved with the reply
+    # is the same plan, so it is put back before the turn runs.
+    try:
+        _seed_plan_from_history(thread_id, existing)
+    except Exception as e:  # noqa: BLE001 - the turn still runs without it
+        log.warning("plan_seed_failed: %s", e)
+
     holder = StreamResult()
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[tuple[str, Any] | None] = asyncio.Queue()
@@ -704,6 +747,11 @@ async def _turn_events(
 
         # Steps reach the browser as they happen, not when text next arrives.
         holder.on_update = _drain_tool_events
+        # This UI draws a built plan as an itinerary card (set in the worker
+        # thread the agent runs in).
+        from rules import set_itinerary_card
+
+        set_itinerary_card(True)
         try:
             for token in stream_and_log(
                 agent=agent,
@@ -791,6 +839,39 @@ async def _turn_events(
             )
     except Exception as e:  # noqa: BLE001 — cards are a bonus, never the reply
         log.warning("option_extraction_failed: %s", e)
+
+    # The plan itself, as the itinerary card: every day time by time with
+    # every priced line and the total. Shown first; the search results it
+    # was built from become "other options" under it.
+    try:
+        from agent import _coerce_to_dict as _as_dict
+
+        plan_out = None
+        for call in tool_calls:
+            if "plan_itinerary" in str(call.get("tool_name") or ""):
+                out = _as_dict(call.get("output"))
+                if out and out.get("days") and not out.get("error"):
+                    plan_out = out
+        if plan_out:
+            option_groups.insert(0, {"kind": "itinerary", "items": [{
+                "start_date": plan_out.get("start_date") or (plan_out["days"][0].get("date")),
+                "days": plan_out.get("days"),
+                "package_lines": plan_out.get("package_lines") or [],
+                "total_inr": plan_out.get("total_inr"),
+                "adults": plan_out.get("adults"),
+                "auto_filled_tours": plan_out.get("auto_filled_tours") or [],
+                "excluded": plan_out.get("excluded") or [],
+                "flight": plan_out.get("flight") or None,
+                # A tour the plan could not fit is said on the card, never
+                # dropped silently (the reply claimed a swap the plan lacked).
+                "notes": [n for n in (plan_out.get("visa_note"),) if n] + [
+                    f"{e.get('title')} is not in the plan: {e.get('reason')}."
+                    for e in (plan_out.get("excluded") or [])
+                    if isinstance(e, dict) and e.get("title")
+                ],
+            }]})
+    except Exception as e:  # noqa: BLE001 -- the reply still stands without the card
+        log.warning("itinerary_card_failed: %s", e)
 
     # The generated PDF rides the same persisted `options` channel as the
     # cards, so it survives a reload and needs no schema change. Without this

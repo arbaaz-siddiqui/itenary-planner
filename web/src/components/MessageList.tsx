@@ -1,9 +1,11 @@
 "use client";
 
 import { memo, useMemo, useState } from "react";
-import { Check, Copy, CornerDownRight, Pencil, RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Check, ChevronDown, Copy, CornerDownRight, Pencil, RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { ItineraryPdf } from "./ItineraryPdf";
+import { ItineraryView } from "./ItineraryView";
+import { toItinerary } from "@/lib/itinerary";
 import { SegmentList } from "./SegmentList";
 import { CardCarousel } from "./cards/CardCarousel";
 import type { Message, OptionItem, Segment } from "@/lib/types";
@@ -15,7 +17,7 @@ import { normaliseName, refersTo, sameName, shortenedFrom, tableRowNames } from 
 const SEPARATOR_ROW = /^[ \t]*\|?[ \t:|-]*-{3,}[ \t:|-]*\|/m;
 
 /** Groups that ride the options channel but are not cards. */
-const NOT_CARDS = new Set(["itinerary_pdf", "suggestions"]);
+const NOT_CARDS = new Set(["itinerary_pdf", "suggestions", "itinerary"]);
 
 const actionBtn =
   "press grid h-8 w-8 place-items-center rounded-lg text-fg-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-brand-blue";
@@ -217,6 +219,19 @@ const Bubble = memo(function Bubble({
   };
 
   const live = Boolean(segments) && m.pending;
+  const plan = toItinerary((m.options ?? []).find((g) => g.kind === "itinerary")?.items?.[0]);
+  const visibleGroups = (m.options ?? [])
+    .filter((g) => !NOT_CARDS.has(g.kind))
+    .map((g) => ({ g, items: (g.items ?? []).filter((it) => !hasResultTable || notInTable(it)) }))
+    .filter(({ items }) => items.length);
+  const planCards = plan ? visibleGroups.flatMap(({ g, items }) => toCardRefs(items, g.kind)) : [];
+  const cardGroups = visibleGroups.map(({ g, items }, i) => {
+    const cards = toCardRefs(items, g.kind);
+    const kind = cards[0].kind;
+    return (
+      <CardCarousel key={i} cards={cards} title={KIND_LABEL[kind]} layout={kind === "flight" ? "list" : "carousel"} />
+    );
+  });
   const shown: Segment[] = segments && segments.length === 0 ? [{ type: "thinking" }] : (segments ?? []);
 
   const suggestions = (m.options ?? [])
@@ -243,24 +258,21 @@ const Bubble = memo(function Bubble({
           .slice(0, 1)
           .map((item, i) => <ItineraryPdf key={i} item={item} />)}
 
+        {/* A planned trip is the main thing on screen: the itinerary first,
+            the search results it was built from folded away under it. */}
+        {!live && plan && <ItineraryView plan={plan} cards={planCards} />}
+
         {/* Cards arrive complete, after the text: never half-rendered. */}
-        {!live &&
-          m.options
-            ?.filter((g) => !NOT_CARDS.has(g.kind))
-            .map((g) => ({ g, items: (g.items ?? []).filter((it) => !hasResultTable || notInTable(it)) }))
-            .filter(({ items }) => items.length)
-            .map(({ g, items }, i) => {
-              const cards = toCardRefs(items, g.kind);
-              const kind = cards[0].kind;
-              return (
-                <CardCarousel
-                  key={i}
-                  cards={cards}
-                  title={KIND_LABEL[kind]}
-                  layout={kind === "flight" ? "list" : "carousel"}
-                />
-              );
-            })}
+        {!live && plan && cardGroups.length > 0 && (
+          <details className="group mt-3 rounded-2xl border border-border bg-surface/60 [&_summary::-webkit-details-marker]:hidden">
+            <summary className="press flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-fg">
+              Other options you can swap in
+              <ChevronDown size={16} aria-hidden className="text-fg-muted transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="px-2 pb-3">{cardGroups}</div>
+          </details>
+        )}
+        {!live && !plan && cardGroups}
 
         {m.error && (
           <div role="alert" className="mt-3 flex items-center gap-3 rounded-xl border border-brand-red/30 bg-brand-red/10 px-3.5 py-2.5 text-sm text-fg">

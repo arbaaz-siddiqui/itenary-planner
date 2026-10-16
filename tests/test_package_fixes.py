@@ -192,6 +192,9 @@ class TestPlanMatchesThePackage:
                 "flight_total_inr": 99365.87, "hotel_total_inr": 31285.96,
                 "visa_per_adult_inr": 7755.30}
         args.update(kw)
+        from mcp_tools.quote_registry import remember
+
+        remember("visa", [args["visa_per_adult_inr"]])  # quoted earlier in the chat
         with patch("agent_tools._tour_facts_lookup", return_value={}), \
              patch("agent_tools._tour_price_lookup", return_value=0.0):
             return plan_itinerary_tool.invoke(args)

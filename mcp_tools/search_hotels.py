@@ -9,6 +9,8 @@ from langchain_core.tools import tool
 
 from booking_api import (
     call_hotel_availability,
+    call_hotel_availability_many,
+    city_hotel_catalogue,
     call_hotel_property_info,
     call_hotel_static_data,
     discover_city_hotel_ids,
@@ -33,37 +35,116 @@ logger = logging.getLogger(__name__)
 _CONTENT_MAX_WORKERS = 12
 _CONTENT_DEADLINE_S = 6.0
 
-# How many live discovery hotel IDs to price per search. The supplier exposes
-# thousands; the availability call can't price them all, so we send a batch
-# (curated hotels first, then top star-matching discovery IDs).
-_DISCOVERY_BATCH = 40
+# The website's PROPERTY CATEGORY buttons, mapped to the supplier's own
+# category names (GetStaticDataByCity `Category`).
+PROPERTY_TYPES: dict[str, tuple[str, ...]] = {
+    "hotel": ("hotel", "resort"),
+    "aparthotel": ("aparthotel",),
+    "apartment": ("apartment", "private vacation home"),
+    "hostel": ("hostel/backpacker accommodation", "hostel"),
+    "villa": ("villa",),
+    "resort": ("resort",),
+}
+
+
+def _property_key(raw: str | None) -> str:
+    """'apartments', 'Serviced apartment' -> 'apartment'; '' when unknown."""
+    t = (raw or "").strip().lower()
+    if not t:
+        return ""
+    if "aparthotel" in t or "apart hotel" in t or "hotel apartment" in t:
+        return "aparthotel"
+    for key in ("apartment", "hostel", "villa", "resort", "hotel"):
+        if key in t:
+            return key
+    return t if t in PROPERTY_TYPES else ""
+
+
+def _asked_for_transfer() -> bool:
+    """The customer's words mention an airport pickup, drop or transfer."""
+    from rules import _CONVERSATION_TEXT
+
+    said = _CONVERSATION_TEXT.get()
+    return any(w in said for w in ("transfer", "pickup", "pick up", "pick-up", "drop", "cab", "taxi"))
+
+
+def _cheapest_rate_is_free(hotel: dict[str, Any]) -> bool:
+    """Whether a hotel's cheapest rate (raw availability record) has a period
+    with a zero cancellation charge, the website's test for "Refundable"."""
+    best: tuple[float, bool] | None = None
+    for opt in hotel.get("HotelOption") or []:
+        for combo in (opt or {}).get("HotelRooms") or []:
+            for room in combo if isinstance(combo, list) else [combo]:
+                if not isinstance(room, dict):
+                    continue
+                try:
+                    price = float(room.get("Price") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if price <= 0:
+                    continue
+                free = any(
+                    isinstance(t, dict) and float(t.get("CancellationPrice") or 0) == 0
+                    for t in room.get("CancellationPolicy") or []
+                )
+                if best is None or price < best[0]:
+                    best = (price, free)
+    return bool(best and best[1])
+
+
+def _cheapest_raw(raw: dict[str, Any], keep: int, refundable_only: bool) -> dict[str, Any]:
+    """The `keep` cheapest hotels of a merged availability response.
+
+    A whole city prices ~1,200 hotels; names, stars, addresses and photos are
+    then fetched for the ones that can be shown, not for all of them.
+    """
+    rs = (raw or {}).get("AvailabilityRS") or {}
+    hotels = [h for h in rs.get("HotelResult") or [] if isinstance(h, dict)]
+    if refundable_only:
+        hotels = [h for h in hotels if _cheapest_rate_is_free(h)]
+
+    def _price(h: dict[str, Any]) -> float:
+        try:
+            return float(h.get("StartPrice") or 0) or float("inf")
+        except (TypeError, ValueError):
+            return float("inf")
+
+    hotels.sort(key=_price)
+    return {**raw, "AvailabilityRS": {**rs, "HotelResult": hotels[:keep]}}
 
 
 def _hotel_ids_to_search(
-    city_id: int, city_key: str, min_stars: float, max_stars: float
-) -> list[int]:
-    """Curated IDs first (named/known), then a star-filtered batch of live
-    discovery IDs — so the customer sees the real Dubai inventory, not just the
-    two hardcoded hotels. Falls back to curated-only if discovery is unavailable."""
-    curated = list(get_hotel_ids_for_city(city_key))
-    discovered = discover_city_hotel_ids(city_id)  # ((id, stars), ...) star-desc
-    if not discovered:
-        return curated
+    city_id: int, city_key: str, min_stars: float, max_stars: float,
+    property_type: str = "",
+) -> tuple[list[int], dict[str, str]]:
+    """Every property in the city that matches the stars and property type
+    asked for, and each one's category.
 
+    The search used to price 40 IDs (curated, then a star-sorted batch), so
+    "show me cheaper hotels" called Novotel at Rs 44,066 the lowest while the
+    website listed 713 hotels from Rs 18,181; and "4-5 star apartments" came
+    back as regular hotels. A star request is strict here: the supplier's own
+    static rating, unrated properties left out, as on the website. Falls back
+    to the curated list when the catalogue is unavailable.
+    """
+    curated = list(get_hotel_ids_for_city(city_key))
+    catalogue = city_hotel_catalogue(city_id)
+    if not catalogue:
+        return curated, {}
     lo = min_stars if min_stars and min_stars > 0 else 0
     hi = max_stars if max_stars and max_stars > 0 else 5
-    # Prefer hotels whose rating is in-band; rating 0 = unrated (keep as filler).
-    in_band = [hid for hid, st in discovered if st <= 0 or lo <= st <= hi]
-
-    seen: set[int] = set()
+    wanted = PROPERTY_TYPES.get(property_type, ())
+    categories: dict[str, str] = {}
     out: list[int] = []
-    for hid in [*curated, *in_band]:
-        if hid not in seen:
-            seen.add(hid)
-            out.append(hid)
-        if len(out) >= _DISCOVERY_BATCH:
-            break
-    return out
+    for hid, stars, category in catalogue:
+        cat = category.strip().lower()
+        if lo > 0 and not (lo <= stars <= hi):
+            continue
+        if wanted and cat not in wanted:
+            continue
+        categories[str(hid)] = category
+        out.append(hid)
+    return out, categories
 
 
 # Keywords worth pulling out of the supplier's long description, grouped so we
@@ -593,6 +674,8 @@ def _impl(
     force_refresh: bool = False,
     assume_missing: bool = False,
     area: str | None = None,
+    property_type: str = "",
+    refundable_only: bool = False,
 ) -> dict[str, Any]:
     """Search hotels in the destination city. Returns options + per-night pricing.
 
@@ -619,6 +702,19 @@ def _impl(
     and coordinates. Quote those, never your own idea of where a hotel is. If
     none is in the area, `area_note` says so and the hotels shown are elsewhere.
     Stars come from the hotel's own record (`stars`; 0 = not published).
+
+    The search covers EVERY property we sell in the city (4,500+ in Dubai,
+    priced live), cheapest first, so the first result is the cheapest there is.
+
+    `property_type`: "hotel", "apartment", "aparthotel", "hostel", "villa" or
+    "resort", the website's property categories. We DO sell apartments and
+    villas: pass this whenever the customer asks for one. Each result carries
+    `property_type` from the supplier's record; quote it, never call a hotel an
+    apartment.
+
+    `refundable_only`: the customer wants refundable stays. Only hotels whose
+    shown (cheapest) rate has free cancellation come back, as on the website's
+    Refundable filter, so every hotel listed is refundable at the price shown.
 
     Occupancy — two ways to specify:
     - For a single room, pass flat `adults` / `children` / `child_ages`.
@@ -682,9 +778,9 @@ def _impl(
                     "hotel_name_searched": hotel_name,
                 }
         else:
-            # Curated hotels + a batch of LIVE discovery IDs (real Dubai inventory),
-            # not just the two hardcoded reference hotels.
-            hotel_ids = _hotel_ids_to_search(city_id, city_key, min_stars, max_stars)
+            # Every matching property in the city, priced live.
+            hotel_ids, categories = _hotel_ids_to_search(
+                city_id, city_key, min_stars, max_stars, _property_key(property_type))
         if not hotel_ids:
             return {
                 "error": True,
@@ -694,9 +790,13 @@ def _impl(
                 ),
                 "error_type": "MissingReferenceData",
             }
+        if specific_hotel_id:
+            categories = {
+                str(h): c for h, _s, c in city_hotel_catalogue(city_id) if h == specific_hotel_id
+            }
         nights = nights_between(check_in, check_out)
         room_count = len(rooms) if rooms else 1
-        raw = call_hotel_availability(
+        raw = call_hotel_availability_many(
             hotel_ids=hotel_ids,
             city_id=city_id,
             check_in=check_in,
@@ -716,7 +816,24 @@ def _impl(
         # gujjutours.com shows. The curated file has no ratings today; letting
         # its 0s win (as before) wiped real ratings, and the model filled the
         # gap ("Admiral Plaza is 4-star"; the site says 3).
-        static_map = _fetch_hotel_static(hotel_ids)
+        refundable_note = None
+        if refundable_only and not specific_hotel_id:
+            if not any(_cheapest_rate_is_free(h) for h in
+                       ((raw or {}).get("AvailabilityRS") or {}).get("HotelResult") or []
+                       if isinstance(h, dict)):
+                refundable_note = (
+                    "No hotel matching this search has a refundable rate at its "
+                    "shown price. Say so; do not call any of these refundable."
+                )
+                refundable_only = False
+        priced_count = len(((raw or {}).get("AvailabilityRS") or {}).get("HotelResult") or [])
+        if not specific_hotel_id:
+            raw = _cheapest_raw(raw, max(40, max_results * (16 if area else 4)), refundable_only)
+        priced_ids = [
+            int(h["HotelId"]) for h in raw["AvailabilityRS"]["HotelResult"]
+            if str(h.get("HotelId", "")).isdigit()
+        ] if isinstance(raw, dict) and raw.get("AvailabilityRS") else hotel_ids
+        static_map = _fetch_hotel_static(priced_ids)
         star_map: dict[str, float] = {
             hid: st for hid, st in get_hotel_stars(city_key).items() if st > 0
         }
@@ -742,11 +859,21 @@ def _impl(
             hotel_names=name_map,
             hotel_areas=get_hotel_areas(city_key),
             hotel_stars=star_map,
-            # An area or star request filters after parsing, so it needs the
-            # wider pool: from the 10 cheapest alone, "4-star in Deira" missed
-            # every 4-star Deira hotel the website lists.
-            max_results=max_results * (8 if (area or min_stars > 0) else 2),
+            # An area or refundable request filters after parsing, so it needs
+            # the wider pool: from the 10 cheapest alone, "4-star in Deira"
+            # missed every 4-star Deira hotel the website lists.
+            max_results=max_results * (8 if area else 2),
         )
+        options = [
+            o.model_copy(update={"property_type": categories.get(str(o.hotel_id), "")})
+            for o in options
+        ]
+        if refundable_only:
+            # The website's Refundable filter judges the rate it shows, the
+            # cheapest: Pullman Dubai Creek has free-cancellation rooms, but its
+            # shown rate is non-refundable, so the website lists it under 0
+            # refundable 5-star results, and we called it refundable.
+            options = [o for o in options if o.has_free_cancellation] or options
 
         # Specific hotel searched but not available — say so clearly
         if specific_hotel_id and not options:
@@ -940,6 +1067,10 @@ def _impl(
             "total_results": len(options),
             **({"note": note} if note else {}),
             **({"area_note": area_note} if area_note else {}),
+            **({"refundable_note": refundable_note} if refundable_note else {}),
+            "hotels_searched": len(hotel_ids),
+            "hotels_available": priced_count,
+            "sorted_by": "price, cheapest first",
             **({"amenity_note": amenity_note} if amenity_note else {}),
             "pricing_note": (
                 f"price_inr is the TOTAL for all {room_count} room(s) across the "
@@ -994,7 +1125,9 @@ def _impl(
                         "hotel_lng": option_dicts[0].get("longitude"),
                     }
                 }
-                if option_dicts
+                # Only when they did ask: "show me cheaper hotels" also priced
+                # eleven airport transfers to a capsule hotel nobody chose.
+                if option_dicts and _asked_for_transfer()
                 else {}
             ),
             "search_params": {

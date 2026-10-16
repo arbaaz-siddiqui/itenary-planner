@@ -45,3 +45,33 @@ def was_quoted(kind: str, amount: float, *, tolerance: float = 1.0) -> bool:
     with _LOCK:
         seen = list((_QUOTES.get(current_thread()) or {}).get(kind) or [])
     return any(abs(a - float(amount)) <= tolerance for a in seen)
+
+
+# What each quoted amount was, so a line can name it ("30 Days Multiple Entry
+# Tourist Visa"); the plan labelled every visa "30 days single entry".
+_LABELS: OrderedDict[str, dict[str, dict[float, str]]] = OrderedDict()
+
+
+def remember_label(kind: str, amount: float, label: str) -> None:
+    from rules import current_thread
+
+    if not label or not isinstance(amount, (int, float)) or amount <= 0:
+        return
+    key = current_thread()
+    with _LOCK:
+        _LABELS.setdefault(key, {}).setdefault(kind, {})[round(float(amount), 2)] = label
+        _LABELS.move_to_end(key)
+        while len(_LABELS) > _MAX_THREADS:
+            _LABELS.popitem(last=False)
+
+
+def label_for(kind: str, amount: float, *, tolerance: float = 1.0) -> str:
+    """The label a `kind` amount was quoted under in this conversation, or ''."""
+    from rules import current_thread
+
+    with _LOCK:
+        seen = dict((_LABELS.get(current_thread()) or {}).get(kind) or {})
+    for a, label in seen.items():
+        if abs(a - float(amount)) <= tolerance:
+            return label
+    return ""

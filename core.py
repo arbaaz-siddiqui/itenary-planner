@@ -522,6 +522,8 @@ class HotelOption(BaseModel):
     cheapest_board: str = ""
     cheapest_room_supplier: str = ""
     has_free_cancellation: bool = False
+    # The supplier's property category: Hotel, Apartment, Aparthotel, Villa...
+    property_type: str = ""
 
     @property
     def price_display(self) -> str:

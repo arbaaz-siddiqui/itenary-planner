@@ -24,16 +24,16 @@ Real-data constraints this module is built around (all verified live):
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import replace, dataclass, field
 from datetime import datetime, time, timedelta
 from typing import Any
 
 # =============================================================================
 # Policy
 # =============================================================================
-# Rest after landing before the first activity. Product decision: 3 hours, and
-# NO inter-activity gap — activities may run back-to-back once rested.
-DEFAULT_REST_AFTER_LANDING_MIN = 180
+# Rest after landing before the first activity. Product decision (2026-10-16):
+# 1-2 hours, then the day continues; NO inter-activity gap beyond transit.
+DEFAULT_REST_AFTER_LANDING_MIN = 120
 # Airport -> hotel allowance when the caller doesn't give a hotel arrival time.
 DEFAULT_AIRPORT_TO_HOTEL_MIN = 60
 # Flat allowance for getting to a tour's start point.
@@ -62,12 +62,27 @@ class SchedulePolicy:
     # Target activity MINUTES per day, not a tour count. Counting tours meant a
     # 1-hour kayak "used up" a day exactly like an 8-hour Abu Dhabi trip, so a
     # 5-night trip got five short tours and five near-empty days. Roughly 7
-    # hours of sightseeing is a full but humane day.
-    target_activity_min_per_day: int = 420
+    # hours used to be the target; the customer came for the trip and wants
+    # the whole day used (product decision 2026-10-16), so it is 9 hours of
+    # activity around breakfast, lunch and dinner.
+    target_activity_min_per_day: int = 540
     # Even short activities need travel, queuing and a meal between them. Four
     # in a day is busy; more reads as a conveyor belt. Guarding only on minutes
     # let six 30-minute tickets stack onto one day.
     max_activities_per_day: int = 4
+    # Meals are part of the day plan: breakfast at the hotel, lunch near the
+    # midday activity, dinner after the evening one (or inside a tour that
+    # includes it). Off for callers that only want tour placement.
+    plan_meals: bool = True
+    meal_min: int = 60
+    breakfast_at: time = time(8, 0)
+    lunch_earliest: time = time(12, 30)
+    lunch_latest_start: time = time(15, 0)
+    dinner_earliest: time = time(19, 30)
+    dinner_latest_start: time = time(22, 0)
+    # At the airport this long before an international flight.
+    airport_before_departure_min: int = 180
+    checkout_time: time = time(12, 0)
 
 
 # =============================================================================
@@ -107,7 +122,10 @@ def usable_slots(slots: list[dict[str, Any]] | None) -> list[tuple[time, dict[st
     for s in slots or []:
         if not isinstance(s, dict):
             continue
-        t = parse_slot_time(s.get("timeSlot") or s.get("time_slot"))
+        # Search results carry the start as "time" (the supplier's raw rows use
+        # "timeSlot"); reading only the latter dropped every published slot, so
+        # Burj Khalifa was scheduled by duration at 20:00 and then excluded.
+        t = parse_slot_time(s.get("timeSlot") or s.get("time_slot") or s.get("time"))
         if t is None:
             continue
         avail = s.get("available")
@@ -198,11 +216,20 @@ class ScheduledItem:
     detail: str = ""
     slot_id: str = ""
 
+    # For a meal: the activity it follows, so a venue near it can be chosen.
+    near: str = ""
+    # For a meal inside a tour (dinner cruise, safari BBQ): included, no venue.
+    included: bool = False
+
     def as_dict(self) -> dict[str, Any]:
         d = {"start": self.start, "end": self.end, "title": self.title,
              "kind": self.kind, "detail": self.detail}
         if self.slot_id:
             d["slot_id"] = self.slot_id
+        if self.near:
+            d["near"] = self.near
+        if self.included:
+            d["included"] = True
         return d
 
 
@@ -335,6 +362,11 @@ def _place_on_day(
     floor = time_of_day_floor(tour)
     if floor and ready < floor:
         ready = floor
+    # A daytime activity finishes by the evening, so the day ends with dinner:
+    # Museum of the Future had been booked 21:00-23:00 with no dinner at all.
+    if floor is None and policy.plan_meals:
+        policy = replace(policy, latest_activity_end=min(policy.latest_activity_end,
+                                                         DAYTIME_LATEST_END, key=_minutes))
     if ready > policy.latest_activity_start:
         return None, f"too late to start ({_fmt(ready)})"
     end, carry = _add_minutes(ready, dur)
@@ -353,6 +385,126 @@ def _place_on_day(
                       detail=str(tour.get("detail") or "")),
         "",
     )
+
+
+# A tour that serves the meal itself: the dinner cruise, the safari BBQ.
+_MEAL_IN_TOUR = ("dinner", "bbq", "barbecue", "buffet")
+# Latest finish for a daytime activity when meals are planned.
+DAYTIME_LATEST_END = time(20, 0)
+# An activity starting from 18:30 is the day's evening activity.
+EVENING_FROM_MIN = 18 * 60 + 30
+
+
+def serves_dinner(tour: dict[str, Any]) -> bool:
+    """A tour that is the evening meal: by name, or as its inclusions say."""
+    name = str(tour.get("name") or tour.get("title") or "").lower()
+    return bool(tour.get("includes_dinner")) or any(w in name for w in _MEAL_IN_TOUR)
+
+
+def _minutes(t: time) -> int:
+    return t.hour * 60 + t.minute
+
+
+def _at(minutes: int) -> time:
+    minutes = max(0, min(minutes, 24 * 60 - 1))
+    return time(minutes // 60, minutes % 60)
+
+
+def _gap_for(day: DayPlan, start: time, latest: time, length: int) -> time | None:
+    """The first time from `start` (no later than `latest`) with `length`
+    free minutes before the next timed item."""
+    timed = []
+    for i in day.items:
+        s = _to_time(i.start)
+        if s is None:
+            continue
+        e = _to_time(i.end) or s
+        timed.append((_minutes(s), max(_minutes(e), _minutes(s))))
+    timed.sort()
+    cand = _minutes(start)
+    for s, e in timed:
+        if e <= cand:
+            continue
+        if s - cand >= length:
+            break
+        cand = max(cand, e)
+    if cand > _minutes(latest) or cand + length >= 24 * 60:
+        return None
+    return _at(cand)
+
+
+def _add_meals(days: list[DayPlan], *, policy: SchedulePolicy, hotel_name: str,
+               lunch_on: set[int], blocked_days: set[int], has_departure: bool,
+               landed: time | None, serves_dinner: set[str] | None = None) -> None:
+    """Breakfast, lunch and dinner on every day the customer is in Dubai.
+
+    Breakfast is at the hotel; lunch and dinner name the activity they follow
+    (`near`) so the caller can pick a venue close to it, and a tour that
+    serves the meal (a dinner cruise) is that meal.
+    """
+    p = policy
+    last = len(days) - 1
+    for idx, day in enumerate(days):
+        tours = [i for i in day.items if i.kind == "tour"]
+        # Breakfast at the hotel, from the first morning there.
+        in_dubai = idx > 0 or (landed is not None and _minutes(landed) < _minutes(p.breakfast_at))
+        if hotel_name and in_dubai:
+            starts = [_to_time(i.start) for i in day.items if _to_time(i.start) and i.kind != "hotel"]
+            first_out = min(starts, key=_minutes) if starts else None
+            if first_out is None or _minutes(first_out) >= _minutes(p.breakfast_at) + p.meal_min:
+                day.items.append(ScheduledItem(
+                    start=_fmt(p.breakfast_at), end=_fmt(_at(_minutes(p.breakfast_at) + p.meal_min)),
+                    title=f"Breakfast at {hotel_name}", kind="meal"))
+        if idx in blocked_days:
+            continue
+        # Lunch in a free hour around midday, if the day did not get one.
+        if idx not in lunch_on and (tours or idx == 0):
+            # A full hour, or a quick 45 minutes between two activities.
+            length = p.meal_min
+            at = _gap_for(day, p.lunch_earliest, p.lunch_latest_start, length)
+            if at is None:
+                length = 45
+                at = _gap_for(day, p.lunch_earliest, p.lunch_latest_start, length)
+            if at is not None:
+                before = [i for i in tours if _to_time(i.end) and _minutes(_to_time(i.end)) <= _minutes(at)]
+                day.items.append(ScheduledItem(start=_fmt(at), end=_fmt(_at(_minutes(at) + length)),
+                                               title="Lunch", kind="meal",
+                                               near=before[-1].title if before else ""))
+        if has_departure and idx == last:
+            continue
+        # Dinner: inside a tour that serves it, else after the day's last activity.
+        serving = next((i for i in tours if i.title in (serves_dinner or set())
+                        or any(w in i.title.lower() for w in _MEAL_IN_TOUR)), None)
+        if serving is not None:
+            s_start, s_end = _to_time(serving.start), _to_time(serving.end)
+            at_t = s_start
+            if s_start and _minutes(s_start) < _minutes(p.dinner_earliest):
+                at_t = p.dinner_earliest
+                if s_end and _minutes(s_end) < _minutes(at_t):
+                    at_t = _at(max(_minutes(s_start), _minutes(s_end) - p.meal_min))
+            day.items.append(ScheduledItem(start=_fmt(at_t) if at_t else serving.start, end="",
+                                           title=f"Dinner (included in {serving.title})",
+                                           kind="meal", included=True))
+            continue
+        ends = [_to_time(i.end) for i in day.items if _to_time(i.end) and i.kind != "meal"]
+        after = max([p.dinner_earliest, *[e for e in ends if e]], key=_minutes)
+        at = _gap_for(day, after, p.dinner_latest_start, p.meal_min)
+        if at is not None:
+            done = [i for i in tours if _to_time(i.end) and _minutes(_to_time(i.end)) <= _minutes(at)]
+            day.items.append(ScheduledItem(start=_fmt(at), end=_fmt(_at(_minutes(at) + p.meal_min)),
+                                           title="Dinner", kind="meal",
+                                           near=done[-1].title if done else ""))
+            continue
+        # An evening visit that runs through dinner time (Global Village until
+        # 23:00): dinner is eaten there, so it is placed during the visit.
+        evening = next((i for i in tours if _to_time(i.start) and _to_time(i.end)
+                        and _minutes(_to_time(i.start)) <= _minutes(p.dinner_latest_start)
+                        and _minutes(_to_time(i.end)) >= _minutes(p.dinner_earliest) + p.meal_min), None)
+        if evening is not None:
+            start_e = max(_minutes(_to_time(evening.start)), _minutes(p.dinner_earliest) + 30)
+            day.items.append(ScheduledItem(start=_fmt(_at(start_e)), end=_fmt(_at(start_e + p.meal_min)),
+                                           title="Dinner", kind="meal", near=evening.title,
+                                           detail=f"During the visit to {evening.title}"))
 
 
 def build_itinerary(
@@ -401,7 +553,12 @@ def build_itinerary(
         # A check-in time earlier than landing plus the drive is the hotel's
         # standard check-in, not when this customer gets there: "Check in 14:00"
         # printed under an 18:35 landing. They arrive when the transfer does.
-        if at_hotel is None or reach_carry or at_hotel < reach:
+        # A later one is the hotel's standard check-in too: the customer still
+        # reaches the hotel when the transfer does and rests from then. Read as
+        # the arrival, a 14:00 check-in after a 10:20 landing pushed the rest to
+        # 16:00 and the 15:00 desert safari fell out of the plan.
+        standard_checkin = at_hotel if (at_hotel is not None and not reach_carry and at_hotel > reach) else None
+        if at_hotel is None or reach_carry or at_hotel != reach:
             at_hotel, hotel_carry = reach, reach_carry
         days[0].items.append(
             ScheduledItem(
@@ -430,7 +587,9 @@ def build_itinerary(
                 ScheduledItem(
                     start=_fmt(at_hotel), end=_fmt(free), title="Check in and rest",
                     kind="free",
-                    detail=f"{p.rest_after_landing_min // 60}h to settle in before any activity",
+                    detail=f"{p.rest_after_landing_min // 60}h to settle in before any activity"
+                    + (f"; standard check-in from {_fmt(standard_checkin)}, early check-in on request"
+                       if standard_checkin else ""),
                 )
             )
 
@@ -443,10 +602,36 @@ def build_itinerary(
             ScheduledItem(start="", end="", title=f"Check in at {hotel_name}", kind="hotel")
         )
 
-    # --- Departure day: keep it clear ---
+    # --- Departure day: check out, airport drop-off, flight ---
     dep = _to_time(departure_time)
+    # When the departure day still has room for an activity: until the
+    # customer must head back to the hotel for the airport drop-off.
+    dep_free_until: time | None = None
     if dep is not None and total_days > 1:
         days[-1].label = "Departure"
+        at_airport = _minutes(dep) - p.airport_before_departure_min
+        leave_hotel = at_airport - p.airport_to_hotel_min
+        if leave_hotel >= 0:
+            lt = time(leave_hotel // 60, leave_hotel % 60)
+            at = time(at_airport // 60, at_airport % 60)
+            checkout = min(lt, p.checkout_time, key=_minutes)
+            if hotel_name:
+                days[-1].items.append(
+                    ScheduledItem(start=_fmt(checkout), end="", title=f"Check out of {hotel_name}",
+                                  kind="hotel")
+                )
+            days[-1].items.append(
+                ScheduledItem(start=_fmt(lt), end=_fmt(at),
+                              title=f"Airport drop-off from {hotel_name}" if hotel_name else "Airport drop-off",
+                              kind="transfer",
+                              detail=f"At the airport {p.airport_before_departure_min // 60}h before the flight")
+            )
+            # Back at the hotel 30 minutes before the drop-off leaves.
+            # And by check-out: Miracle Garden had run 09:45-13:45 across a
+            # 12:00 check-out.
+            back = min(leave_hotel - 30, _minutes(p.checkout_time))
+            if back >= _minutes(p.day_start) + 90:
+                dep_free_until = time(back // 60, back % 60)
         days[-1].items.append(
             ScheduledItem(start=_fmt(dep), end="", title="Departure flight", kind="flight")
         )
@@ -466,9 +651,14 @@ def build_itinerary(
     # Sorting by duration keeps the caller's order as the tie-break, so
     # recommended-first still decides between tours of similar length.
     ordered = [t for t in (tours or []) if isinstance(t, dict)]
-    # Evening activities go last so a day's daytime tour is placed first;
-    # placed first, a dinner cruise would end the day before the morning tour.
-    ordered.sort(key=lambda t: (time_of_day_floor(t) is not None, -_activity_minutes(t, p)))
+    # Afternoon and evening activities (a safari, a dinner cruise) are placed
+    # first and reserve their part of the day; daytime tours then fill the
+    # morning and afternoon before it. Placed last, the safari found every day
+    # already full and was dropped from a 4-night plan.
+    # The customer's own choices are placed before tours the plan added to
+    # fill the days: Burj Khalifa, asked for, had lost its slot to fillers.
+    ordered.sort(key=lambda t: (bool(t.get("auto_filled")), time_of_day_floor(t) is None,
+                                -_activity_minutes(t, p)))
     # A tour priced for a particular date goes on THAT day, placed before the
     # free-floating ones so they cannot take its slot. The Desert Safari was
     # priced for 3 October and scheduled on 5 October; the customer would have
@@ -495,6 +685,17 @@ def build_itinerary(
                 total += max(0, (e.hour * 60 + e.minute) - (s.hour * 60 + s.minute))
         return total
 
+    lunch_on: set[int] = set()
+    # Day index -> when that day's reserved afternoon/evening activity starts.
+    evening_from: dict[int, time] = {}
+    dinner_tours = {
+        str(t.get("name") or t.get("title") or "").strip() for t in ordered if serves_dinner(t)
+    }
+
+    def _last_activity(day: DayPlan) -> str:
+        tours_so_far = [i for i in day.items if i.kind == "tour" and i.end]
+        return tours_so_far[-1].title if tours_so_far else ""
+
     for tour in ordered:
         placed = False
         reasons: list[str] = []
@@ -503,35 +704,97 @@ def build_itinerary(
         # tour. Days already at/over budget are tried last, so we spread only
         # once the earlier days are genuinely full — the customer came to DO
         # things, not to wait for tomorrow.
-        order = sorted(
-            range(len(days)),
-            key=lambda i: (_booked_min(i) >= p.target_activity_min_per_day, i),
-        )
+        # The arrival day is a half day: half the activity budget.
+        def _budget(i: int) -> int:
+            return p.target_activity_min_per_day // 2 if i == 0 and landed is not None else p.target_activity_min_per_day
+
+        order = sorted(range(len(days)), key=lambda i: (_booked_min(i) >= _budget(i), i))
         pin = _pinned(tour)
         if pin is not None:
-            order = [pin]
-        for idx in order:
-            day = days[idx]
-            # Don't stack activities onto the departure day.
-            if dep is not None and idx == len(days) - 1 and total_days > 1:
-                continue
-            if idx in blocked_days:
-                continue
-            # A day is full once it hits the activity count cap, even if minutes
-            # remain — six short tickets in one day is not a holiday.
-            if sum(1 for it in day.items if it.kind == "tour") >= p.max_activities_per_day:
-                continue
-            not_before = cursor.get(idx) or free_from.get(idx) or p.day_start
-            item, why = _place_on_day(tour, not_before=not_before, policy=p)
-            if item is None:
-                if why:
-                    reasons.append(f"day {day.day_number}: {why}")
-                continue
-            day.items.append(item)
-            end_t = _to_time(item.end) or not_before
-            cursor[idx] = end_t
-            placed = True
-            break
+            # Its own date first; when that day cannot take it, another day
+            # rather than nowhere. Swapping AYA Universe for Dubai Frame on a
+            # day that was already full dropped Dubai Frame from the plan, and
+            # the customer's own pick vanished. The plan prices every tour on
+            # the day it is scheduled, so a moved tour is priced for that day.
+            order = [pin] + [i for i in order if i != pin]
+        def _attempt(allow_skip_lunch: bool) -> bool:
+            for idx in order:
+                day = days[idx]
+                day_policy = p
+                # The departure day takes an activity only when it finishes
+                # before the customer must be back for the airport drop-off.
+                if dep is not None and idx == len(days) - 1 and total_days > 1:
+                    if dep_free_until is None:
+                        continue
+                    day_policy = replace(p, latest_activity_end=min(p.latest_activity_end, dep_free_until,
+                                                                    key=_minutes))
+                if idx in blocked_days:
+                    continue
+                # One dinner per evening: the safari BBQ and a dinner cruise
+                # had both landed on the same night.
+                if serves_dinner(tour) and any(i.title in dinner_tours for i in day.items):
+                    continue
+                # A day is full once it hits the activity count cap, even if
+                # minutes remain: six short tickets in one day is not a holiday.
+                cap = (2 if idx == 0 and landed is not None
+                       # The departure day: one activity, then lunch and packing.
+                       else 1 if dep is not None and idx == len(days) - 1 and total_days > 1
+                       else p.max_activities_per_day)
+                if sum(1 for it in day.items if it.kind == "tour") >= cap:
+                    continue
+                if idx == 0 and landed is not None and _booked_min(idx) >= _budget(idx):
+                    continue
+                not_before = cursor.get(idx) or free_from.get(idx) or p.day_start
+                floor_t = time_of_day_floor(tour)
+                if floor_t is not None and idx in evening_from:
+                    continue  # one reserved afternoon/evening activity per day
+                if floor_t is None and idx in evening_from:
+                    cap_t = _at(_minutes(evening_from[idx]) - p.transit_to_activity_min)
+                    day_policy = replace(day_policy, latest_activity_end=min(
+                        day_policy.latest_activity_end, cap_t, key=_minutes))
+                # Lunch where the day reaches midday between activities, but
+                # only when the next activity still fits after it.
+                lunch: ScheduledItem | None = None
+                item, why = None, ""
+                at_midday = (p.plan_meals and idx not in lunch_on and floor_t is None
+                             and p.lunch_earliest <= not_before <= p.lunch_latest_start)
+                if at_midday:
+                    end_l, carry_l = _add_minutes(not_before, p.meal_min)
+                    if not carry_l:
+                        item, why = _place_on_day(tour, not_before=end_l, policy=day_policy)
+                        if item is not None:
+                            lunch = ScheduledItem(start=_fmt(not_before), end=_fmt(end_l), title="Lunch",
+                                                  kind="meal", near=_last_activity(day))
+                if item is None:
+                    if at_midday and not allow_skip_lunch:
+                        # It fits only by skipping lunch: try the other days first.
+                        reasons.append(f"day {day.day_number}: would leave no time for lunch")
+                        continue
+                    item, why = _place_on_day(tour, not_before=not_before, policy=day_policy)
+                if item is None:
+                    if why:
+                        reasons.append(f"day {day.day_number}: {why}")
+                    continue
+                # One evening activity per day: a slot from 18:30 is the
+                # evening (the Dolphinarium show at 19:15 and the fountain show
+                # at 22:15 had both landed on one night, over dinner).
+                starts_evening = _to_time(item.start) and _minutes(_to_time(item.start)) >= EVENING_FROM_MIN
+                if starts_evening and idx in evening_from:
+                    reasons.append(f"day {day.day_number}: that evening is already planned")
+                    continue
+                if lunch is not None:
+                    day.items.append(lunch)
+                    lunch_on.add(idx)
+                day.items.append(item)
+                if (floor_t is not None or starts_evening) and _to_time(item.start):
+                    # Reserves the evening; daytime tours still fill the day.
+                    evening_from[idx] = _to_time(item.start)
+                else:
+                    cursor[idx] = _to_time(item.end) or not_before
+                return True
+            return False
+
+        placed = _attempt(False) or _attempt(True)
         if not placed:
             title = str(tour.get("name") or tour.get("title") or "Tour").strip()
             if pin is not None and not reasons:
@@ -544,6 +807,13 @@ def build_itinerary(
                     detail="; ".join(reasons[:3]),
                 )
             )
+
+    if p.plan_meals:
+        # Tours that serve dinner although their name does not say so (the
+        # desert safari's BBQ), as the caller read from their inclusions.
+        _add_meals(days, policy=p, hotel_name=hotel_name, lunch_on=lunch_on,
+                   blocked_days=blocked_days, has_departure=dep is not None and total_days > 1,
+                   landed=landed, serves_dinner=dinner_tours)
 
     # Sort by start time, but keep the arrival-day narrative in order: a
     # post-midnight hotel check-in (00:30 after a 23:30 landing) would otherwise

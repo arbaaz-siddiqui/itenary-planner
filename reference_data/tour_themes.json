@@ -1,0 +1,27 @@
+{
+  "_comment": "Tour themes a customer asks for, mapped to the supplier's own tour categories (search_tours `category`, lower-cased). Used by search_tours(theme=...). A tour belongs to a theme only through its category, so AYA Universe (Attractions / Theme Parks / museums & galleries) is never an adventure pick.",
+  "adventure": [
+    "adventure tours", "atv & all wheel drive tour", "atv & all wheel drive",
+    "desert safari tours", "desert safari", "water activities", "other water sports",
+    "diving & snorkeling", "hot air balloon", "skydiving", "gliding", "helicopter tours",
+    "kayaking", "paddleboading", "motorcycle & scooter & segway tour", "water parks"
+  ],
+  "romantic": [
+    "cruise and boat tours", "dhow cruise", "cruise tour", "sightseeing cruise",
+    "boats & yachts & catamarans", "yacht charter", "boat tours", "dining experiences",
+    "hot air balloon", "premium tours", "helicopter tours"
+  ],
+  "family": [
+    "theme parks", "theme park", "water parks", "playgrounds", "aquariums", "indoor games",
+    "fun and games", "nature and wildlife", "gardens & parks", "attractions", "atlantis hotel tours"
+  ],
+  "culture": [
+    "culture and attractions", "museums & galleries", "walking tour", "city tours",
+    "sightseeing tours", "bus tour", "hop on hop off bus", "hop on hop off bus dubai", "car tour"
+  ],
+  "water": [
+    "water activities", "other water sports", "diving & snorkeling", "kayaking", "paddleboading",
+    "water parks", "beach/resort pass", "boats & yachts & catamarans", "boat tours"
+  ],
+  "food": ["dining experiences", "food and beverages", "beverage tastings", "cooking classes", "jain friendly activities"]
+}

@@ -75,9 +75,17 @@ const INR = new Intl.NumberFormat("en-IN", {
 });
 
 /** ₹2,541.95 / ₹13,290.34 / ₹340 — en-IN grouping, paise only when present. */
+// Paisa, when there are any, always as two digits: "Rs 5,606.2" read as a typo.
+const INR_PAISA = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
 export function formatInr(n: number | null | undefined): string | null {
   if (n == null || !Number.isFinite(n)) return null;
-  return INR.format(n);
+  return Math.abs(n - Math.round(n)) < 0.005 ? INR.format(Math.round(n)) : INR_PAISA.format(n);
 }
 
 /** All the photos an item carries, primary first, without repeats. */
