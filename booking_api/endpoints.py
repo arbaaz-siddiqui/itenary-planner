@@ -1396,27 +1396,20 @@ def call_tour_option_rate(
         ) from e
 
 
-# The tour's photo gallery. No supplier API we hold returns it: Tourdetails
-# (B2B) and /api/tours/details (B2C) both carry a single imagePath. The
-# client's own website renders `tourImages` (every photo, in display order)
-# into its tour page, which resolves by tour id whatever the slug. Verified
-# 2026-10-16: Desert Safari 53632 has 6 photos, tour 28488 has 15.
-TOUR_PAGE_PATH = "/en/tours/dubai/tour/tour-{tour_id}"
+TOUR_MEDIAS_PATH = "/api/tours/medias"
 
 
-def call_tour_page(*, tour_id: int) -> str:
-    """The public tour page's HTML, for its embedded photo list."""
-    import requests
+def call_tour_medias(*, tour_id: int, lang: str = "en") -> dict[str, Any]:
+    """Every photo of a tour (B2C host), as the website's gallery loads them.
 
-    from settings import get_booking_api_settings, get_http_settings
-
-    url = get_booking_api_settings().b2c_base_url.rstrip("/") + TOUR_PAGE_PATH.format(
-        tour_id=int(tour_id)
-    )
+    `result[*]` carries `imagePath` and `displayOrder`. Tour search and both
+    details endpoints return a single imagePath; this is the full list.
+    Verified 2026-10-16: Global Village 46045 has 8, Desert Safari 53632 has 6.
+    """
     try:
-        resp = requests.get(url, timeout=get_http_settings().timeout_secs,
-                            headers={"Accept": "text/html"})
-        resp.raise_for_status()
-        return resp.text
+        return get_b2c_client().get(
+            TOUR_MEDIAS_PATH, params={"tourId": int(tour_id), "lang": lang},
+            headers=base_headers(),
+        )
     except Exception as e:
-        raise BookingApiError(f"Tour page fetch failed: {e}", endpoint=TOUR_PAGE_PATH) from e
+        raise BookingApiError(f"Tour medias call failed: {e}", endpoint=TOUR_MEDIAS_PATH) from e

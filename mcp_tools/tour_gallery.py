@@ -1,9 +1,9 @@
 """A tour's full photo gallery, fetched when a customer opens its card.
 
 Tour search returns one photo per tour, so the card and its detail panel had
-one picture although the website shows 6 to 15. The gallery comes from the
-website's own tour page (see booking_api.endpoints.call_tour_page) and is
-fetched on demand, never during a search: one page per tour, and nobody opens
+one picture although the website shows 6 to 15. The gallery comes from
+/api/tours/medias (booking_api.endpoints.call_tour_medias), the call the
+website's own gallery makes, and is fetched on demand, never during a search: one page per tour, and nobody opens
 most of the cards. Photos are not per-customer data, so a process-wide cache
 keyed by tour id is safe.
 """
@@ -32,11 +32,11 @@ def tour_image_urls(tour_id: int) -> list[str]:
         if hit and now - hit[0] < GALLERY_TTL_SECS:
             return list(hit[1])
 
-    from booking_api.endpoints import call_tour_page
-    from parsers import parse_tour_gallery
+    from booking_api.endpoints import call_tour_medias
+    from parsers import parse_tour_medias
 
     try:
-        urls = parse_tour_gallery(call_tour_page(tour_id=tour_id))
+        urls = parse_tour_medias(call_tour_medias(tour_id=tour_id))
     except Exception as e:  # noqa: BLE001 -- photos are a bonus, never an error
         log.warning("tour_gallery_failed tour=%s: %s", tour_id, e)
         return []

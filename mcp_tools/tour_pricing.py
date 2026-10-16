@@ -14,6 +14,18 @@ from booking_api.endpoints import (
 from core import format_inr
 from fx import convert_supplier_price
 
+
+def half_up(value: float, places: int = 2) -> float:
+    """Round as the website does: Rs 1,180.25 for 2 is Rs 590.13 each.
+
+    Python's round() gives 590.12 (binary floats and banker's rounding), one
+    paisa under the price the customer sees on gujjutours.com.
+    """
+    from decimal import ROUND_HALF_UP, Decimal
+
+    q = Decimal(1).scaleb(-places)
+    return float(Decimal(repr(value)).quantize(q, rounding=ROUND_HALF_UP))
+
 # The supplier's transferTypeId. Names come from its own rows; these are only
 # the fallback when a row carries none.
 _TRANSFER_NAMES = {1: "Sharing Transfer", 2: "Private Transfer", 3: "Without Transfer"}
@@ -138,7 +150,7 @@ def party_prices(
             "transfer_type_id": tid,
             "total_inr": inr,
             "total_display": _paise(inr),
-            "per_person_display": format_inr(round(inr / max(1, pax), 2)),
+            "per_person_display": format_inr(half_up(inr / max(1, pax))),
             "priced_for_pax": pax,
             "priced_per": "unit" if per_unit else "party",
             # Back-compat keys: earlier rows called the figure price_inr.
@@ -407,7 +419,7 @@ def tour_options(
             return row
         row["prices_display"] = prices_display(prices, party)
         row["price_total_inr"] = cheapest
-        row["price_per_adult_inr"] = round(cheapest / max(1, pax), 2)
+        row["price_per_adult_inr"] = half_up(cheapest / max(1, pax))
         row["price_total_display"] = f"{format_inr(cheapest)} total for {party}"
 
         # "Private Majlis - Per Group up to 6 Guests" is one majlis for the

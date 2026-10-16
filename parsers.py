@@ -719,7 +719,8 @@ def _parse_tour(
     # Supplier's own currency rule (client-confirmed) rather than the generic
     # sellingROE map, which overquotes by ~2%. Falls back to the old path if no
     # live rate is available.
-    converted, _cur = convert_supplier_price(final_rate, fare_currency=currency)
+    # To the paisa, as the website lists it (Global Village: Rs 590.13, not 590).
+    converted, _cur = convert_supplier_price(final_rate, fare_currency=currency, places=2)
     price_inr = converted or _safe_to_inr(final_rate, currency, rates) or 0.0
     image_url = _resolve_image_url(t.get("imagePath"), image_base_url)
     return TourOption(
@@ -830,28 +831,14 @@ def hotel_image_urls(hotel_id: Any, count: int = HOTEL_PHOTOS_SHOWN) -> list[str
     return [f"{MEDIA_CDN_BASE}/hotel-images/{hid}/{n}.webp" for n in range(1, count + 1)]
 
 
-_TOUR_IMAGES_BLOCK = re.compile(r'"tourImages"\s*:\s*\[(.*?)\]', re.DOTALL)
-_TOUR_IMAGE_ITEM = re.compile(r'\{[^{}]*?"imagePath"\s*:\s*"([^"]+)"[^{}]*?\}')
-_DISPLAY_ORDER = re.compile(r'"displayOrder"\s*:\s*(-?\d+)')
-
-
-def parse_tour_gallery(html: str) -> list[str]:
-    """Every photo of a tour, in the website's display order, as CDN URLs.
-
-    Reads the `tourImages` list the website embeds in its tour page (escaped
-    JSON inside a script). Empty when the page carries none.
-    """
-    text = (html or "").replace('\\"', '"').replace("\\/", "/")
-    block = _TOUR_IMAGES_BLOCK.search(text)
-    if not block:
-        return []
-    items: list[tuple[int, int, str]] = []
-    for i, m in enumerate(_TOUR_IMAGE_ITEM.finditer(block.group(1))):
-        order = _DISPLAY_ORDER.search(m.group(0))
-        items.append((int(order.group(1)) if order else i, i, m.group(1)))
+def parse_tour_medias(raw: Any) -> list[str]:
+    """A tour's photos from /api/tours/medias, in display order, as CDN URLs."""
+    items = (raw or {}).get("result") if isinstance(raw, dict) else None
+    rows = [m for m in items or [] if isinstance(m, dict) and m.get("imagePath")]
+    rows.sort(key=lambda m: (m.get("displayOrder") is None, m.get("displayOrder") or 0))
     urls: list[str] = []
-    for _, _, path in sorted(items):
-        url = _resolve_image_url(path, DEFAULT_IMAGE_BASE_URL)
+    for m in rows:
+        url = _resolve_image_url(m.get("imagePath"), DEFAULT_IMAGE_BASE_URL)
         if url and url not in urls:
             urls.append(url)
     return urls
