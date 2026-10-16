@@ -173,3 +173,17 @@ export function withRowTotal(item: OptionItem, rowPrice: string | null | undefin
   const shown = String(rowPrice).match(/₹\s?[\d,]+(?:\.\d+)?/)?.[0] ?? `₹${amount}`;
   return { ...item, [PARTY_TOTAL_TAG]: shown };
 }
+
+/** What a package card's price line says. Per person on the card, the party
+ *  total underneath (the reply quotes the total). A package the list did not
+ *  price says where its price is, never "Rs 0". */
+export function packagePrice(o: OptionItem): { value: string; label: string | null; note: string | null } {
+  const perPerson = num(o, "price_per_person_inr");
+  const total = num(o, "price_inr");
+  if (perPerson && total) {
+    return { value: formatInr(perPerson) ?? "", label: "Per person", note: `${formatInr(total)} total` };
+  }
+  if (total) return { value: formatInr(total) ?? "", label: "Total", note: null };
+  if (o.pricing_available === false) return { value: "Price on request", label: null, note: null };
+  return { value: "See price", label: null, note: "Open the package for its live price" };
+}

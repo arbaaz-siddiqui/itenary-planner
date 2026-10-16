@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import type { CardRef } from "@/lib/cardActions";
-import { partyTotalNote, formatInr, imagesOf, num, obj, objList, str, strList, titleOf } from "@/lib/cards";
+import { partyTotalNote, formatInr, imagesOf, num, obj, objList, packagePrice, str, strList, titleOf } from "@/lib/cards";
 import type { OptionItem } from "@/lib/types";
 import { SafeImage } from "../SafeImage";
 import { BookButton, CardShell, HeartButton, MetaLine, PriceTag, RatingPill, TagChips } from "./parts";
@@ -114,7 +114,9 @@ export function TourCard({ card, eager }: CardProps) {
     str(o, "price_display");
   const cheapest = prices.find((p) => (num(p, "total_inr") ?? num(p, "price_inr")) === Math.min(...totals));
   const withTransfer = perPerson != null && !/without/i.test(str(cheapest, "transfer_type") ?? "");
-  const priceLabel = withTransfer ? "From, per person with transfer" : "From, per person";
+  // Airport pickup and drop-off are sold per vehicle, not per person.
+  const perVehicle = o.sold_per_vehicle === true || prices.some((p) => str(p, "priced_per") === "unit");
+  const priceLabel = perVehicle ? "Per vehicle" : withTransfer ? "From, per person with transfer" : "From, per person";
   const cancel = str(o, "cancellation") ?? str(o, "cancellation_display");
   const free = cancel ? /free/i.test(cancel) : false;
   return (
@@ -199,11 +201,7 @@ export function PackageCard({ card, eager }: CardProps) {
         <TagChips tags={includes.length ? includes : strList(o, "tags")} max={3} />
         {o.is_free_cancellation === true && <p className="text-xs font-medium text-success">Free cancellation</p>}
         <div className="mt-auto flex items-end justify-between gap-3 pt-1">
-          <PriceTag
-            value={formatInr(num(o, "price_inr") ?? num(o, "price_from_inr")) ?? "Price on request"}
-            label={num(o, "price_inr") ?? num(o, "price_from_inr") ? "From" : null}
-            align="left"
-          />
+          <PriceTag {...packagePrice(o)} align="left" />
           <BookButton card={card} label="View package" />
         </div>
       </div>

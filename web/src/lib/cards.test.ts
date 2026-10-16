@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatInr, idOf, imagesOf, kindOf, mergeImages, partyTotalNote, titleOf, withRowTotal } from "./cards";
+import { formatInr, idOf, imagesOf, kindOf, mergeImages, packagePrice, partyTotalNote, titleOf, withRowTotal } from "./cards";
 
 describe("kindOf", () => {
   it("trusts the group kind first", () => {
@@ -57,5 +57,19 @@ describe("mergeImages", () => {
   });
   it("keeps the card's photo until the gallery arrives", () => {
     expect(mergeImages(["a.webp"], [])).toEqual(["a.webp"]);
+  });
+});
+
+describe("packagePrice", () => {
+  it("shows per person with the party total under it", () => {
+    expect(packagePrice({ price_inr: 31455.11, price_per_person_inr: 15727.55 })).toEqual({
+      value: "₹15,727.55",
+      label: "Per person",
+      note: "₹31,455.11 total",
+    });
+  });
+  it("never shows a zero price for an unpriced package", () => {
+    expect(packagePrice({}).value).toBe("See price");
+    expect(packagePrice({ pricing_available: false }).value).toBe("Price on request");
   });
 });
