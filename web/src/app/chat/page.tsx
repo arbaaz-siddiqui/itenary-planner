@@ -1,15 +1,32 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Menu, SquarePen } from "lucide-react";
 import { api, isUnauthorized, MOCK_MODE } from "@/lib/api";
-import type { ChatSession, Message, OptionGroup, ToolCall, User } from "@/lib/types";
+import type { ChatSession, Message, OptionGroup, OptionItem, UiSettings, User } from "@/lib/types";
 import { useStreamSegments } from "@/lib/useStreamSegments";
+import { takeLocalAccountData } from "@/lib/usePersisted";
+import { useTheme, type ThemePref } from "@/lib/theme";
+import { displayFirstName, serviceById, type ServiceId } from "@/lib/services";
 import { Sidebar } from "@/components/Sidebar";
+import { BrandLogo } from "@/components/BrandLogo";
+import { TravelLoader } from "@/components/TravelLoader";
 import { MessageList } from "@/components/MessageList";
-import { Composer } from "@/components/Composer";
+import { Composer, type ComposerHandle, type ComposerMode } from "@/components/Composer";
+import { HomeHero } from "@/components/HomeHero";
+import { SearchDialog } from "@/components/SearchDialog";
+import { SettingsDialog } from "@/components/SettingsDialog";
+import { PackageBuilder } from "@/components/PackageBuilder";
+import { NameDialog } from "@/components/NameDialog";
+import { DetailPanel } from "@/components/detail/DetailPanel";
+import { CardActionsProvider, type CardActions, type CardRef } from "@/lib/cardActions";
+import { formatInr, num, titleOf } from "@/lib/cards";
+import { toCardRefs } from "@/lib/cardRefs";
 
 const ACTIVE_KEY = "active-session-id";
+const WAITING_ID = "local-waiting";
+const WAITING_SEGMENTS = [{ type: "thinking" as const, content: "Still working on your answer" }];
 
 export default function ChatPage() {
   const router = useRouter();
@@ -27,11 +44,41 @@ export default function ChatPage() {
   /** Which bubble the live segments belong to. */
   const [liveId, setLiveId] = useState<string | null>(null);
 
+  // Shell state. Pinned chats, saved cards and screen settings belong to the
+  // account and live in the database, so they follow the customer to any
+  // device and never show to another account on the same browser.
+  const [collapsed, setCollapsedState] = useState(false);
+  const pinned = useMemo(() => new Set(sessions.filter((s) => s.pinned).map((s) => s.id)), [sessions]);
+  const [service, setService] = useState<ServiceId | null>(null);
+  const [mode, setMode] = useState<ComposerMode>("ask");
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const theme = useTheme();
+  const composerRef = useRef<ComposerHandle>(null);
+
+  // Cards: saved with the heart (stored per account), and the one open in detail.
+  const [saved, setSaved] = useState<CardRef[]>([]);
+  const [detail, setDetail] = useState<CardRef | null>(null);
+  const detailPushed = useRef(false);
+  const [nameLater, setNameLater] = useState(false);
+  /** True for the moment the home screen hands over to the chat. */
+  const [entering, setEntering] = useState(false);
+  /** A chat whose reply is still being worked on, by a turn this tab left. */
+  const [waitingFor, setWaitingFor] = useState<string | null>(null);
+
   // Live segments + the idle "Thinking…" timer. Segments are a streaming-only
   // view; the settled message still persists as content + tool_calls.
   const stream = useStreamSegments();
 
   const abortRef = useRef<AbortController | null>(null);
+  /**
+   * A chat created by its own first message. Its history is the message being
+   * streamed right now, so loading it from the server would replace the live
+   * reply with an empty list -- which is how the first message of a new chat
+   * appeared to get no answer at all.
+   */
+  const createdHereRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
 
@@ -49,8 +96,33 @@ export default function ChatPage() {
         setUser(user);
         setBooting(false);
 
-        const list = await api.listSessions();
+        // Account data from the server. Anything this browser still holds from
+        // before it moved there (this account's own copy) is uploaded once and
+        // removed; other accounts' copies are only removed.
+        const local = takeLocalAccountData(user.id);
+        const [savedRes, settingsRes, firstList] = await Promise.all([
+          api.listSavedCards().catch(() => ({ cards: [] })),
+          api.getSettings().catch(() => ({ settings: {} as UiSettings })),
+          api.listSessions(),
+        ]);
         if (!live) return;
+        let list = firstList;
+        const known = new Set(savedRes.cards.map((c) => c.id));
+        const toUpload = local.saved.filter((c) => !known.has(c.id));
+        await Promise.allSettled(toUpload.map((c) => api.saveCard(c.id, c.kind, c.item)));
+        const toPin = local.pinned.filter((id) => list.some((s) => s.id === id && !s.pinned));
+        if (toPin.length) {
+          await Promise.allSettled(toPin.map((id) => api.setSessionPinned(id, true)));
+          list = list.map((s) => (toPin.includes(s.id) ? { ...s, pinned: true } : s));
+        }
+        if (!live) return;
+        setSaved([
+          ...savedRes.cards.map((c) => ({ id: c.id, kind: c.kind as CardRef["kind"], item: c.item as OptionItem })),
+          ...toUpload,
+        ]);
+        const st = settingsRes.settings;
+        if (typeof st.sidebar_collapsed === "boolean") setCollapsedState(st.sidebar_collapsed);
+        if (st.theme) theme.setPref(st.theme);
         setSessions(list);
         setSessionsLoading(false);
 
@@ -80,15 +152,22 @@ export default function ChatPage() {
       return;
     }
     if (typeof window !== "undefined") window.localStorage.setItem(ACTIVE_KEY, activeId);
+    if (createdHereRef.current === activeId) {
+      createdHereRef.current = null;
+      return;
+    }
 
     let live = true;
     setMessagesLoading(true);
     api
       .listMessages(activeId)
-      .then((ms) => {
+      .then(async (ms) => {
         if (!live) return;
         setMessages(ms);
         pinnedRef.current = true;
+        // A reply that kept running while the customer was in another chat.
+        const { busy } = await api.sessionStatus(activeId).catch(() => ({ busy: false }));
+        if (live && busy) setWaitingFor(activeId);
       })
       .catch((e) => {
         if (!live) return;
@@ -110,28 +189,240 @@ export default function ChatPage() {
     pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
   }, []);
 
+  // Content that fits the view has nothing to scroll: a short chat, or a
+  // switch from a long one, follows the reply again.
   useEffect(() => {
-    if (!pinnedRef.current) return;
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el || el.scrollHeight - el.clientHeight >= 120) return;
+    pinnedRef.current = true;
+  }, [activeId, messages, stream.segments]);
+
+  useEffect(() => {
+    // The home screen is not a conversation: keep its heading in view on a
+    // short phone instead of scrolling to the suggestions.
+    if (!pinnedRef.current || messages.length === 0) return;
+    const el = scrollRef.current;
+    // Smooth, so new text glides into view instead of jumping.
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     // Segments grow without `messages` changing identity while streaming, so
     // they have to be a dependency or the view stops following the reply.
   }, [messages, stream.segments]);
 
+  // Poll a chat whose reply is still running, and load it when it lands.
+  useEffect(() => {
+    if (!waitingFor) return;
+    if (waitingFor !== activeId) {
+      setWaitingFor(null);
+      return;
+    }
+    let live = true;
+    const timer = window.setInterval(async () => {
+      const { busy } = await api.sessionStatus(waitingFor).catch(() => ({ busy: true }));
+      if (!live || busy) return;
+      const ms = await api.listMessages(waitingFor).catch(() => null);
+      if (!live) return;
+      if (ms) setMessages(ms);
+      setWaitingFor(null);
+    }, 2500);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, [waitingFor, activeId]);
+
   // Cancel any in-flight stream on unmount.
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // Ctrl/Cmd+K opens chat search from anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // --- cards: detail view (URL-synced), saving, booking ---
+
+  const openCard = useCallback((card: CardRef) => {
+    setDetail(card);
+    // ?view=kind&id=... so the view can be shared and Back closes it.
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", card.kind);
+    url.searchParams.set("id", card.id);
+    if (detailPushed.current) window.history.replaceState({ detail: true }, "", url);
+    else window.history.pushState({ detail: true }, "", url);
+    detailPushed.current = true;
+  }, []);
+
+  const closeCard = useCallback(() => {
+    setDetail(null);
+    if (detailPushed.current) {
+      detailPushed.current = false;
+      window.history.back();
+    } else {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("view");
+      url.searchParams.delete("id");
+      window.history.replaceState(null, "", url);
+    }
+  }, []);
+
+  // Browser Back closes the panel instead of leaving the page.
+  useEffect(() => {
+    const onPop = () => {
+      detailPushed.current = false;
+      setDetail(null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // A shared link (?view=&id=) reopens its card once the chat or the saved
+  // list has it.
+  useEffect(() => {
+    if (detail) return;
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("id");
+    if (!params.get("view") || !id) return;
+    const fromChat = messages.flatMap((m) =>
+      (m.options ?? [])
+        .filter((g) => g.kind !== "suggestions" && g.kind !== "itinerary_pdf")
+        .flatMap((g) => toCardRefs(g.items ?? [], g.kind)),
+    );
+    const found = [...fromChat, ...saved].find((c) => c.id === id);
+    if (found) setDetail(found);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, saved]);
+
+  function bookCard(card: CardRef) {
+    // The selection goes to the agent as the customer's next message, so the
+    // conversation continues from exactly what they picked.
+    if (detail) closeCard();
+    const price = formatInr(
+      num(card.item, "price_inr") ?? num(card.item, "price_per_adult_inr") ?? num(card.item, "price_per_person_inr"),
+    );
+    const what = titleOf(card.item, card.kind) + (price ? " (" + price + ")" : "");
+    void send("I would like to book " + what + ". What do you need from me to confirm it?");
+  }
+
+  const cardActions: CardActions = {
+    open: openCard,
+    isSaved: (id) => saved.some((c) => c.id === id),
+    toggleSave: (card) => void toggleSave(card),
+    book: bookCard,
+  };
+
+  function askAbout(card: CardRef) {
+    closeCard();
+    // Names the kind and the exact title, so the agent ties the question to
+    // the option it returned under that name.
+    composerRef.current?.prefill("About the " + card.kind + " " + titleOf(card.item, card.kind) + ": ");
+  }
+
+  /** Send the last question again, replacing the reply it got. */
+  function regenerate() {
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    if (!lastUser || streaming) return;
+    // Keep the question, drop the reply it got; the server does the same.
+    setMessages((prev) => {
+      const i = prev.findIndex((m) => m.id === lastUser.id);
+      return i >= 0 ? prev.slice(0, i + 1) : prev;
+    });
+    void send(lastUser.content, { regenerate: true });
+  }
+
+  /** Download the open chat as plain text. */
+  function exportChat() {
+    if (!messages.length) return;
+    const title = sessions.find((x) => x.id === activeId)?.title ?? "GujjuTours chat";
+    const body = messages
+      .map((m) => (m.role === "user" ? "You" : "GujjuTours AI") + ":\n" + m.content.trim())
+      .join("\n\n");
+    const blob = new Blob([title + "\n\n" + body + "\n"], { type: "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 60) + ".txt";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  /** Delete every chat. Throws if any delete failed, so Settings can say so. */
+  async function clearAllChats() {
+    if (streaming) stop();
+    const results = await Promise.allSettled(sessions.map((x) => api.deleteSession(x.id)));
+    const failed = sessions.filter((_, i) => results[i].status === "rejected");
+    setSessions(failed);
+    setActiveId(null);
+    setMessages([]);
+    if (failed.length) throw new Error(failed.length + " chats were not deleted");
+  }
+
   // --- session CRUD ---
 
-  async function newChat() {
+  /**
+   * Back to the home screen. The session itself is created by the first
+   * message, so opening "New chat" and walking away leaves no empty chat.
+   */
+  function newChat(withService: ServiceId | null = null) {
+    if (streaming) detach();
     setDrawerOpen(false);
-    try {
-      const s = await api.createSession();
-      setSessions((prev) => [s, ...prev]);
-      setActiveId(s.id);
-    } catch (e) {
-      setBanner(e instanceof Error ? e.message : "Could not create chat");
+    setActiveId(null);
+    setMessages([]);
+    setService(withService);
+  }
+
+  function selectChat(id: string) {
+    if (id === activeId) {
+      setDrawerOpen(false);
+      setSearchOpen(false);
+      return;
     }
+    if (streaming) detach();
+    setDrawerOpen(false);
+    setSearchOpen(false);
+    setService(null);
+    setActiveId(id);
+  }
+
+  async function togglePin(id: string) {
+    const next = !sessions.find((s) => s.id === id)?.pinned;
+    setSessions((list) => list.map((s) => (s.id === id ? { ...s, pinned: next } : s)));
+    try {
+      await api.setSessionPinned(id, next);
+    } catch (e) {
+      setSessions((list) => list.map((s) => (s.id === id ? { ...s, pinned: !next } : s)));
+      setBanner(e instanceof Error ? e.message : "Could not pin the chat");
+    }
+  }
+
+  /** Heart a card or take it back; saved on the account, rolled back on failure. */
+  async function toggleSave(card: CardRef) {
+    const was = saved.some((c) => c.id === card.id);
+    setSaved((list) => (was ? list.filter((c) => c.id !== card.id) : [card, ...list].slice(0, 50)));
+    try {
+      if (was) await api.unsaveCard(card.id);
+      else await api.saveCard(card.id, card.kind, card.item);
+    } catch (e) {
+      setSaved((list) => (was ? [card, ...list] : list.filter((c) => c.id !== card.id)));
+      setBanner(e instanceof Error ? e.message : "Could not save the card");
+    }
+  }
+
+  function setCollapsed(update: (prev: boolean) => boolean) {
+    setCollapsedState((prev) => {
+      const next = update(prev);
+      void api.setSettings({ sidebar_collapsed: next }).catch(() => {});
+      return next;
+    });
+  }
+
+  function setThemeChoice(next: ThemePref) {
+    theme.setPref(next);
+    void api.setSettings({ theme: next }).catch(() => {});
   }
 
   async function renameChat(id: string, title: string) {
@@ -169,14 +460,26 @@ export default function ChatPage() {
 
   // --- the streaming turn ---
 
-  async function send(text: string) {
+  async function send(typed: string, opts: { regenerate?: boolean; mode?: ComposerMode } = {}) {
+    // A service picked in the sidebar names the intent for the agent, once.
+    const svc = opts.regenerate ? null : serviceById(service);
+    const text =
+      svc && !typed.toLowerCase().includes(svc.label.toLowerCase()) ? `${svc.label}: ${typed}` : typed;
+    // Leaving the home screen: the gradient fades into the chat instead of
+    // cutting to it.
+    if (messages.length === 0) {
+      setEntering(true);
+      window.setTimeout(() => setEntering(false), 700);
+    }
+    setService(null);
     let sessionId = activeId;
 
     // First message with no session yet: create one on the fly.
     if (!sessionId) {
       try {
-        const s = await api.createSession(text.slice(0, 48));
+        const s = await api.createSession(typed.slice(0, 48));
         setSessions((prev) => [s, ...prev]);
+        createdHereRef.current = s.id;
         setActiveId(s.id);
         sessionId = s.id;
       } catch (e) {
@@ -204,7 +507,8 @@ export default function ChatPage() {
     };
 
     pinnedRef.current = true;
-    setMessages((prev) => [...prev, userMsg, draft]);
+    // A regenerated answer reuses the question already on screen.
+    setMessages((prev) => (opts.regenerate ? [...prev, draft] : [...prev, userMsg, draft]));
     setLiveId(draftId);
     stream.begin();
     setStreaming(true);
@@ -239,7 +543,7 @@ export default function ChatPage() {
     };
 
     try {
-      for await (const ev of api.stream(sessionId, text, ctrl.signal)) {
+      for await (const ev of api.stream(sessionId, text, ctrl.signal, opts.mode ?? mode, Boolean(opts.regenerate))) {
         // Every event feeds the reducer and re-arms the idle timer, including
         // the ones that produce no segment.
         stream.push(ev);
@@ -259,7 +563,12 @@ export default function ChatPage() {
           case "done":
             // Adopt the server id so a later refetch dedupes cleanly. The id
             // change also ends the live view, since liveId no longer matches.
-            persist({ id: ev.message_id || draftId });
+            // The server's stored reply wins over the streamed text: it is the
+            // corrected version when a guard rewrote the answer.
+            persist({
+              id: ev.message_id || draftId,
+              ...(ev.content ? { content: ev.content } : {}),
+            });
             break;
 
           // `start`, `token` and `tool` are fully handled by the reducer.
@@ -289,7 +598,21 @@ export default function ChatPage() {
     }
   }
 
+  /**
+   * Leave a reply running on the server while the customer looks elsewhere.
+   * Only this tab stops listening; the turn finishes and is saved, and the
+   * chat shows it when they come back.
+   */
+  function detach() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    stream.settle();
+    setStreaming(false);
+    setLiveId(null);
+  }
+
   function stop() {
+    if (activeId) void api.cancelTurn(activeId).catch(() => {});
     abortRef.current?.abort();
     abortRef.current = null;
     setStreaming(false);
@@ -315,116 +638,195 @@ export default function ChatPage() {
 
   if (booting) {
     return (
-      <main className="grid min-h-dvh place-items-center bg-bg">
-        <p className="text-sm text-fg-muted">Loading…</p>
+      <main className="grid min-h-dvh place-items-center bg-bg" aria-busy>
+        <TravelLoader size="lg" label="Loading" />
       </main>
     );
   }
 
-  const activeTitle = sessions.find((s) => s.id === activeId)?.title ?? "New chat";
+  const name = displayFirstName(user);
+  const home = !messagesLoading && messages.length === 0;
+
+  const sidebarProps = {
+    sessions,
+    activeId,
+    user,
+    loading: sessionsLoading,
+    pinned,
+    activeService: service,
+    onSelect: selectChat,
+    onNew: () => newChat(),
+    onService: (id: ServiceId) => newChat(id),
+    onSearch: () => {
+      setDrawerOpen(false);
+      setSearchOpen(true);
+    },
+    onRename: renameChat,
+    onDelete: deleteChat,
+    onTogglePin: togglePin,
+    onSettings: () => {
+      setDrawerOpen(false);
+      setSettingsOpen(true);
+    },
+    onLogout: logout,
+    saved,
+    onOpenSaved: (c: CardRef) => {
+      setDrawerOpen(false);
+      openCard(c);
+    },
+  };
+
+  const composer = (variant: "hero" | "dock") => (
+    <Composer
+      ref={composerRef}
+      variant={variant}
+      onSend={send}
+      onStop={stop}
+      streaming={streaming}
+      service={service}
+      onClearService={() => setService(null)}
+      mode={mode}
+      onModeChange={setMode}
+    />
+  );
 
   return (
+    <CardActionsProvider value={cardActions}>
     <div className="flex h-dvh overflow-hidden bg-bg">
-      {/* Sidebar: static column on desktop, slide-over drawer on mobile. */}
-      <aside className="hidden w-64 shrink-0 border-r border-border md:block">
-        <Sidebar
-          sessions={sessions}
-          activeId={activeId}
-          user={user}
-          loading={sessionsLoading}
-          onSelect={setActiveId}
-          onNew={newChat}
-          onRename={renameChat}
-          onDelete={deleteChat}
-          onLogout={logout}
-        />
+      {/* Desktop: a 280px column that collapses to a 64px icon rail. */}
+      <aside
+        className={`hidden shrink-0 border-r border-sidebar-border transition-[width] duration-200 ease-out lg:block ${
+          collapsed ? "w-16" : "w-[280px]"
+        }`}
+      >
+        <Sidebar {...sidebarProps} collapsed={collapsed} onToggleCollapse={() => setCollapsed((c) => !c)} />
       </aside>
 
+      {/* Below 1024px: an off-canvas drawer. */}
       {drawerOpen && (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setDrawerOpen(false)}
-            aria-hidden="true"
-          />
-          <div className="absolute inset-y-0 left-0 w-72 max-w-[85vw] border-r border-border shadow-xl">
-            <Sidebar
-              sessions={sessions}
-              activeId={activeId}
-              user={user}
-              loading={sessionsLoading}
-              onSelect={(id) => {
-                setActiveId(id);
-                setDrawerOpen(false);
-              }}
-              onNew={newChat}
-              onRename={renameChat}
-              onDelete={deleteChat}
-              onLogout={logout}
-            />
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
+          <div className="absolute inset-y-0 left-0 w-[280px] max-w-[85vw] shadow-2xl">
+            <Sidebar {...sidebarProps} onClose={() => setDrawerOpen(false)} />
           </div>
         </div>
       )}
 
       {/* min-w-0 here is load-bearing: without it a wide table in a message
           expands this flex child and pushes the whole layout sideways. */}
-      <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
+      <main className="relative flex min-w-0 flex-1 flex-col p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        {/* No top bar on desktop, as in the reference layout. Below 1024px the
+            sidebar is a drawer, so a slim bar holds its button, the logo and
+            new chat, in the flow so it never covers a message or a card. */}
+        <div className="flex shrink-0 items-center justify-between gap-2 px-1 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 lg:hidden">
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
-            aria-label="Open chats"
-            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-surface-2 md:hidden"
+            aria-label="Open menu"
+            className="press grid h-10 w-10 place-items-center rounded-xl text-fg hover:bg-surface-2"
           >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-              <path d="M3 6h18M3 12h18M3 18h18" />
-            </svg>
+            <Menu size={20} aria-hidden />
           </button>
-          <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{activeTitle}</h1>
-          {MOCK_MODE && (
-            <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
-              MOCK
-            </span>
-          )}
-        </header>
+          <BrandLogo />
+          <button
+            type="button"
+            onClick={() => newChat()}
+            aria-label="New chat"
+            className="press grid h-10 w-10 place-items-center rounded-xl text-fg hover:bg-surface-2"
+          >
+            <SquarePen size={19} aria-hidden />
+          </button>
+        </div>
+        {MOCK_MODE && (
+          <span className="absolute right-3 top-3 z-30 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+            MOCK
+          </span>
+        )}
 
         {banner && (
-          <div role="alert" className="shrink-0 bg-red-500/10 px-4 py-2 text-center text-xs text-red-500">
+          <div role="alert" className="shrink-0 bg-brand-red/10 px-4 py-2 text-center text-xs text-brand-red">
             {banner}
-            <button
-              type="button"
-              onClick={() => setBanner(null)}
-              className="ml-2 underline"
-              aria-label="Dismiss"
-            >
+            <button type="button" onClick={() => setBanner(null)} className="ml-2 underline" aria-label="Dismiss">
               dismiss
             </button>
           </div>
         )}
 
-        <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
-          {messagesLoading && messages.length === 0 ? (
-            <p className="py-10 text-center text-sm text-fg-muted">Loading messages…</p>
-          ) : messages.length === 0 ? (
-            <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center gap-2 px-6 text-center">
-              <h2 className="text-lg font-semibold">Plan a Dubai trip</h2>
-              <p className="text-sm text-fg-muted">
-                Ask for hotels, tours, transfers or flights. Prices come back in ₹ with a
-                comparison table.
-              </p>
-            </div>
-          ) : (
-            <MessageList
-              messages={messages}
-              liveId={liveId}
-              segments={stream.segments}
-              streaming={streaming}
-            />
-          )}
-        </div>
+        {/* One rounded panel for both states: the gradient on the home
+            screen, a dark (or light) canvas with a low brand glow in chat. */}
+        <div
+          className={`relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[22px] ${home ? "" : "chat-canvas border border-border"}`}
+        >
+          {/* The home gradient fading out over the chat as it arrives. */}
+          {entering && !home && <div className="hero-glow glow-out pointer-events-none absolute inset-0 z-10" aria-hidden />}
+          <div
+            ref={scrollRef}
+            onScroll={onScroll}
+            className={`no-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${entering && !home ? "chat-enter" : ""}`}
+          >
+            {messagesLoading && messages.length === 0 ? (
+              <div className="mx-auto w-full max-w-[820px] space-y-4 px-4 py-10" role="status" aria-label="Loading messages">
+                <div className="skeleton ml-auto h-10 w-1/3 rounded-2xl" />
+                <div className="skeleton h-4 w-3/4 rounded" />
+                <div className="skeleton h-4 w-2/3 rounded" />
+              </div>
+            ) : home ? (
+              <HomeHero name={name} service={service} onPick={(p) => send(p)} onBuildPackage={() => setBuilderOpen(true)}>
+                {composer("hero")}
+              </HomeHero>
+            ) : (
+              <MessageList
+                messages={
+                  waitingFor === activeId
+                    ? [...messages, { id: WAITING_ID, role: "assistant", content: "", created_at: "", pending: true }]
+                    : messages
+                }
+                liveId={waitingFor === activeId ? WAITING_ID : liveId}
+                segments={waitingFor === activeId ? WAITING_SEGMENTS : stream.segments}
+                streaming={streaming || waitingFor === activeId}
+                onSuggest={(t) => send(t)}
+                onRegenerate={regenerate}
+                onEdit={(t) => composerRef.current?.prefill(t)}
+                onRate={(id, v) => api.rateMessage(id, v)}
+              />
+            )}
+          </div>
 
-        <Composer onSend={send} onStop={stop} streaming={streaming} />
+          {!home && <div className={entering ? "dock-enter" : ""}>{composer("dock")}</div>}
+        </div>
       </main>
+
+      <SearchDialog open={searchOpen} sessions={sessions} onPick={selectChat} onClose={() => setSearchOpen(false)} />
+      <DetailPanel card={detail} onClose={closeCard} onBook={bookCard} onAsk={askAbout} />
+      <NameDialog
+        open={Boolean(user && !user.first_name && !nameLater && !MOCK_MODE)}
+        onSaved={setUser}
+        onLater={() => setNameLater(true)}
+        onSignedOut={signOutAndRedirect}
+      />
+      <PackageBuilder
+        open={builderOpen}
+        onClose={() => setBuilderOpen(false)}
+        onSubmit={(request) => {
+          setBuilderOpen(false);
+          // A built package is a full priced trip: Plan mode, as the
+          // composer's Plan option would send it.
+          setMode("plan");
+          void send(request, { mode: "plan" });
+        }}
+      />
+      <SettingsDialog
+        open={settingsOpen}
+        user={user}
+        onUser={setUser}
+        theme={theme.pref}
+        onTheme={setThemeChoice}
+        onExport={exportChat}
+        onClearAll={clearAllChats}
+        canExport={messages.length > 0}
+        onClose={() => setSettingsOpen(false)}
+      />
     </div>
+    </CardActionsProvider>
   );
 }

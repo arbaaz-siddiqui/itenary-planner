@@ -273,6 +273,17 @@ const TOOL_LABELS: Record<string, string> = {
   get_visa_info: "Checking visa rules",
   search_restaurants: "Searching restaurants",
   get_roe: "Converting currency",
+  lookup_entity: "Looking it up",
+  get_tour_details: "Reading the tour details",
+  get_tour_timeslots: "Checking start times",
+  get_restaurant_details: "Opening the menu",
+  get_hotel_info: "Checking the hotel",
+  list_packages: "Finding holiday packages",
+  get_package_details: "Opening the package",
+  get_transfer_details: "Checking the transfer",
+  plan_itinerary_tool: "Planning your days",
+  build_trip_schedule_tool: "Laying out the schedule",
+  generate_itinerary_pdf_tool: "Making your PDF",
 };
 
 const DONE_LABELS: Record<string, string> = {
@@ -285,11 +296,26 @@ const DONE_LABELS: Record<string, string> = {
   get_visa_info: "Checked visa rules",
   search_restaurants: "Searched restaurants",
   get_roe: "Converted currency",
+  lookup_entity: "Looked it up",
+  get_tour_details: "Read the tour details",
+  get_tour_timeslots: "Checked start times",
+  get_restaurant_details: "Opened the menu",
+  get_hotel_info: "Checked the hotel",
+  list_packages: "Found holiday packages",
+  get_package_details: "Opened the package",
+  get_transfer_details: "Checked the transfer",
+  plan_itinerary_tool: "Planned your days",
+  build_trip_schedule_tool: "Laid out the schedule",
+  generate_itinerary_pdf_tool: "Made your PDF",
 };
 
 /** Friendly label for a tool name, for the given status. */
 export function toolLabel(name: string, status: "running" | "done" | "error"): string {
   const map = status === "running" ? TOOL_LABELS : DONE_LABELS;
+  // A model sometimes writes the arguments into the name
+  // ("get_tour_details(tour id:53632)<tool call|>"); the server repairs the
+  // call, and the label uses only the tool name.
+  name = (name.match(/^[A-Za-z_][A-Za-z0-9_]*/) ?? [name])[0];
   const hit = map[name];
   if (hit) return hit;
   // Unknown tool: "get_tour_addons" -> "Get tour addons".

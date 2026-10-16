@@ -3,7 +3,16 @@
 
 import { mockApi } from "./mock";
 import { parseSSE } from "./sse";
-import type { ChatSession, Message, StreamEvent, TourDetailSection, User } from "./types";
+import type {
+  ChatSession,
+  Message,
+  Preferences,
+  SavedCardOut,
+  StreamEvent,
+  TourDetailSection,
+  UiSettings,
+  User,
+} from "./types";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 export const MOCK_MODE = process.env.NEXT_PUBLIC_MOCK_MODE === "true";
@@ -80,10 +89,18 @@ export const api = {
   mockMode: MOCK_MODE,
 
   // --- auth ---
-  register: (email: string, password: string): Promise<{ user: User }> =>
+  register: (
+    email: string,
+    password: string,
+    firstName = "",
+    lastName = "",
+  ): Promise<{ user: User }> =>
     MOCK_MODE
       ? mockApi.login(email, password)
-      : request("/auth/register", { method: "POST", body: JSON.stringify({ email, password }) }),
+      : request("/auth/register", {
+          method: "POST",
+          body: JSON.stringify({ email, password, first_name: firstName, last_name: lastName }),
+        }),
 
   login: (email: string, password: string): Promise<{ user: User }> =>
     MOCK_MODE
@@ -94,6 +111,22 @@ export const api = {
     MOCK_MODE ? mockApi.logout() : request("/auth/logout", { method: "POST" }),
 
   me: (): Promise<{ user: User }> => (MOCK_MODE ? mockApi.me() : request("/auth/me")),
+
+  getPreferences: (): Promise<{ preferences: Preferences }> =>
+    MOCK_MODE ? Promise.resolve({ preferences: {} }) : request("/me/preferences"),
+
+  setPreferences: (prefs: Preferences): Promise<{ preferences: Preferences }> =>
+    MOCK_MODE
+      ? Promise.resolve({ preferences: prefs })
+      : request("/me/preferences", { method: "PATCH", body: JSON.stringify(prefs) }),
+
+  updateProfile: (firstName: string, lastName: string): Promise<{ user: User }> =>
+    MOCK_MODE
+      ? mockApi.me().then(({ user }) => ({ user: { ...user, first_name: firstName, last_name: lastName } }))
+      : request("/auth/me", {
+          method: "PATCH",
+          body: JSON.stringify({ first_name: firstName, last_name: lastName }),
+        }),
 
   // --- sessions ---
   listSessions: (): Promise<ChatSession[]> =>
@@ -115,10 +148,61 @@ export const api = {
           body: JSON.stringify({ title }),
         }),
 
+  setSessionPinned: (id: string, pinned: boolean): Promise<ChatSession> =>
+    MOCK_MODE
+      ? mockApi.updateSession(id, { pinned })
+      : request(`/chat/sessions/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ pinned }),
+        }),
+
+  // --- account data: saved cards, screen settings (stored per account) ---
+  listSavedCards: (): Promise<{ cards: SavedCardOut[] }> =>
+    MOCK_MODE ? mockApi.listSavedCards() : request("/me/saved-cards"),
+
+  saveCard: (id: string, kind: string, item: Record<string, unknown>): Promise<void> =>
+    MOCK_MODE
+      ? mockApi.saveCard(id, kind, item)
+      : request(`/me/saved-cards/${encodeURIComponent(id)}`, {
+          method: "PUT",
+          body: JSON.stringify({ kind, item }),
+        }),
+
+  unsaveCard: (id: string): Promise<void> =>
+    MOCK_MODE
+      ? mockApi.unsaveCard(id)
+      : request(`/me/saved-cards/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  getSettings: (): Promise<{ settings: UiSettings }> =>
+    MOCK_MODE ? mockApi.getSettings() : request("/me/settings"),
+
+  setSettings: (settings: UiSettings): Promise<{ settings: UiSettings }> =>
+    MOCK_MODE
+      ? mockApi.setSettings(settings)
+      : request("/me/settings", { method: "PATCH", body: JSON.stringify(settings) }),
+
   deleteSession: (id: string): Promise<void> =>
     MOCK_MODE
       ? mockApi.deleteSession(id)
       : request(`/chat/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  /** Whether a reply is still being worked on in this chat. */
+  sessionStatus: (id: string): Promise<{ busy: boolean }> =>
+    MOCK_MODE ? Promise.resolve({ busy: false }) : request(`/chat/sessions/${encodeURIComponent(id)}/status`),
+
+  /** Stop button: the server drops the reply in progress. */
+  cancelTurn: (id: string): Promise<void> =>
+    MOCK_MODE
+      ? Promise.resolve()
+      : request(`/chat/sessions/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
+
+  rateMessage: (id: string, value: "up" | "down" | null): Promise<void> =>
+    MOCK_MODE
+      ? Promise.resolve()
+      : request(`/chat/messages/${encodeURIComponent(id)}/feedback`, {
+          method: "POST",
+          body: JSON.stringify({ value }),
+        }),
 
   listMessages: (id: string): Promise<Message[]> =>
     MOCK_MODE
@@ -142,6 +226,10 @@ export const api = {
         `/details?supplier_id=${supplierId}`,
     ),
 
+  /** Every photo of a tour, loaded when its card opens (search carries one). */
+  tourImages: (tourId: number): Promise<{ images: string[] }> =>
+    MOCK_MODE ? Promise.resolve({ images: [] }) : request(`/tours/${tourId}/images`),
+
   /**
    * Stream one assistant turn. Yields StreamEvents in arrival order; the
    * caller decides how to fold them into a message.
@@ -150,6 +238,8 @@ export const api = {
     sessionId: string,
     message: string,
     signal?: AbortSignal,
+    mode: "ask" | "plan" = "ask",
+    regenerate = false,
   ): AsyncGenerator<StreamEvent> {
     if (MOCK_MODE) {
       yield* mockApi.stream(sessionId, message, signal);
@@ -162,7 +252,7 @@ export const api = {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({ session_id: sessionId, message }),
+        body: JSON.stringify({ session_id: sessionId, message, mode, regenerate }),
         signal,
       });
     } catch (e) {

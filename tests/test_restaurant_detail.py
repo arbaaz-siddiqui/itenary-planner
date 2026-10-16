@@ -8,8 +8,15 @@ The supplier returns both, and the client named the exact fields:
 appears only in the details response, not the list.
 """
 
+from datetime import date, timedelta
+
 import pytest
 from parsers import parse_restaurant_response
+
+# Live calls need a date the supplier accepts: it rejects any date before
+# today ("must be today's date or a future date"). A fixed date in this file
+# went stale and failed as if the code were broken.
+FUTURE = (date.today() + timedelta(days=14)).isoformat()
 
 
 def _raw(**over):
@@ -95,7 +102,7 @@ class TestToolsExposeTheDisplayStrings:
         # model_dump() drops @property values, so they must be added explicitly.
         from mcp_tools.search_restaurants import _impl
 
-        out = _impl(destination_city="Dubai", search_date="2026-09-25", adults=2)
+        out = _impl(destination_city="Dubai", search_date=FUTURE, adults=2)
         assert out["options"], "expected restaurants"
         first = out["options"][0]
         for key in ("price_display", "rating_display", "meal_timings_display"):
@@ -105,7 +112,7 @@ class TestToolsExposeTheDisplayStrings:
         from mcp_tools.get_restaurant_details import _impl
 
         out = _impl(restaurant_id=3, destination_city="Dubai",
-                    search_date="2026-09-25", adults=2)
+                    search_date=FUTURE, adults=2)
         r = out.get("restaurant") or {}
         for key in ("price_display", "rating_display", "meal_timings_display"):
             assert key in r, key
@@ -115,14 +122,14 @@ class TestToolsExposeTheDisplayStrings:
         from mcp_tools.get_restaurant_details import _impl
 
         out = _impl(restaurant_id=3, destination_city="Dubai",
-                    search_date="2026-09-25", adults=2)
+                    search_date=FUTURE, adults=2)
         shown = (out.get("restaurant") or {}).get("meal_timings_display") or ""
         assert "Breakfast" in shown and "Lunch" in shown and "Dinner" in shown
 
     def test_instructions_tell_the_agent_to_use_both(self):
         from mcp_tools.search_restaurants import _impl
 
-        note = _impl(destination_city="Dubai", search_date="2026-09-25",
+        note = _impl(destination_city="Dubai", search_date=FUTURE,
                      adults=2)["agent_instructions"]
         assert "rating_display" in note and "meal_timings_display" in note
         assert "Never invent" in note
@@ -166,7 +173,7 @@ class TestReviewRatingWinsOverTopLevel:
         from mcp_tools.get_restaurant_details import _impl
 
         out = _impl(restaurant_id=3, destination_city="Dubai",
-                    search_date="2026-10-01", adults=1)
+                    search_date=FUTURE, adults=1)
         r = out.get("restaurant") or {}
         raw = out.get("raw_review_rating") or r.get("rating")
         assert r.get("rating"), "no rating relayed"
@@ -180,7 +187,7 @@ class TestFactsAreNotAnsweredFromMemory:
     def test_search_tells_the_agent_to_refetch_for_ratings(self):
         from mcp_tools.search_restaurants import _impl
 
-        note = _impl(destination_city="Dubai", search_date="2026-10-01",
+        note = _impl(destination_city="Dubai", search_date=FUTURE,
                      adults=1)["agent_instructions"]
         assert "restaurant_id" in note
         assert "get_restaurant_details" in note

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 from typing import Any
 
@@ -10,6 +11,7 @@ from langchain_core.tools import tool
 from booking_api import call_tour_rates, call_tour_search
 from core import TripPlannerError
 from mcp_tools.server import mcp
+from mcp_tools.tour_pricing import party_label
 from parsers import parse_tour_response
 from reference_data_loader import resolve_city
 
@@ -36,7 +38,9 @@ def _tours_table(options: list) -> str:
     # Extras is only worth a column when some row has one, otherwise every
     # tour carries a dash. Customers were never told add-ons existed at all.
     show_extras = any(getattr(o, "addon_names", None) for o in options)
-    cols = ["Tour", "Price/adult", "Type", "Duration", "Transfer", "Cancellation"]
+    # "Total for party" holds the supplier's grand total per transfer type;
+    # a bare "Transfer" header read as a surcharge to add to Price/adult.
+    cols = ["Tour", "Price/adult", "Type", "Duration", "Total for party", "Cancellation"]
     if show_extras:
         cols.append("Extras")
     cols.append("Start times")
@@ -74,22 +78,72 @@ def _recommended_first(options: list) -> list:
     return sorted(options, key=lambda o: (not o.is_recommended, o.price_per_adult_inr))
 
 
-def _attach_transfer_prices(options: list, travel_date: str, adults: int) -> None:
-    """Fetch real Sharing/Private transfer prices per tour (B2C option APIs).
+def _party_totals_line(rows: list[dict[str, Any]], party: str, top: int = 3) -> str:
+    """'**Total for 2 adults:** A from ₹9,780.77, B ₹3,660, C ₹3,800.'"""
+    parts = [
+        f"{r.get('name')} {r['party_total_display'].split(' total for ')[0]}"
+        for r in rows[:top]
+        if r.get("name") and r.get("party_total_display") and " total for " in r["party_total_display"]
+    ]
+    if not parts:
+        return ""
+    return f"**Total for {party}:** " + ", ".join(parts) + "."
 
-    toursearchlistrate has one flat rate; the split lives in /api/tours/options
-    + /api/tours/optionRate -> initialTransferRates. Concurrent, best-effort:
-    a failed lookup keeps the flat display; empty list = no pickup, not an error.
+
+def _party_total(o: Any, adults: int, child_ages: list[int] | None) -> str:
+    """What the customer's whole party pays for this row, ready to quote.
+
+    The cards show a price per person; the reply should say what the party
+    pays. Built here so the model never multiplies: from the supplier's own
+    party totals when the row has them (cheapest transfer type), else the
+    per-adult ticket times the adults. A ticket-only row with children has no
+    honest total without the child rate, so it says so instead.
+    """
+    from core import format_inr
+    from mcp_tools.tour_pricing import party_label
+
+    party = party_label(adults, child_ages or [])
+    if getattr(o, "sold_per_vehicle", False):
+        # One price per vehicle (airport pickup): multiplying it by the
+        # party quoted two adults Rs 5,016.08 for one Rs 2,508.04 car.
+        return f"{format_inr(o.price_per_adult_inr)} per vehicle"
+    totals = [
+        float(p.get("total_inr") or p.get("price_inr") or 0)
+        for p in (getattr(o, "transfer_prices", None) or [])
+        if isinstance(p, dict)
+    ]
+    totals = [t for t in totals if t > 0]
+    if totals:
+        return f"from {format_inr(min(totals))} total for {party}"
+    if child_ages:
+        return f"{format_inr(o.price_per_adult_inr)} per adult; child price on request"
+    return f"{format_inr(round(o.price_per_adult_inr * adults, 2))} total for {party}"
+
+
+def _attach_transfer_prices(
+    options: list, travel_date: str, adults: int, child_ages: list[int] | None = None
+) -> None:
+    """Attach the party's FINAL total per transfer type to each tour row.
+
+    toursearchlistrate has one flat per-adult rate; the transfer split lives
+    in /api/tours/options + /api/tours/optionRate. Each total is the
+    supplier's own grand total for the whole party (children included) on
+    that transfer type -- the figure gujjutours.com charges -- so the agent
+    quotes it and never adds a transfer to a ticket price. Concurrent,
+    best-effort: a failed lookup keeps the flat display.
     """
     import concurrent.futures as _cf
 
-    from booking_api.endpoints import call_tour_option_rate, call_tour_options
-    from fx import convert_supplier_price
+    from booking_api.endpoints import call_tour_options
+    from mcp_tools.tour_pricing import (
+        party_label,
+        party_prices,
+        prices_display,
+        sold_per_unit,
+    )
 
-    # Every figure below is a TOTAL for this many people, so it travels with
-    # the price. Without it the same 1,793 reads as "per head" and gets
-    # multiplied by the party size downstream.
-    pax = int(adults)
+    ages = [int(a) for a in child_ages or []]
+    party = party_label(int(adults), ages)
 
     def _one(o: Any) -> None:
         try:
@@ -98,47 +152,33 @@ def _attach_transfer_prices(options: list, travel_date: str, adults: int) -> Non
             if not opts:
                 return
             # This response already lists every bookable variant, add-ons
-            # included, and we were discarding it. Recording it here costs no
-            # extra call and is what lets a row advertise its own add-ons:
-            # asked "what add ons are available" a turn after the search, the
-            # model had nothing on the row to go on, so it asked the customer
-            # "which tour?" instead of calling get_tour_options.
+            # included. Recording it here costs no extra call and is what lets
+            # a row advertise its own add-ons and variants.
             o.variant_count = len(opts)
             o.addon_names = [
                 str(v.get("optionName") or "").strip()
                 for v in opts
                 if "add-on" in str(v.get("optionName") or "").lower()
             ]
-            first = opts[0]
-            # transferId=3 returns every tier in `initialTransferRates`.
-            try:
-                rate_raw = call_tour_option_rate(
-                    tour_id=int(o.tour_id),
-                    option_id=first.get("optionId"),
-                    supplier_id=int(first.get("supplierId") or o.supplier_id or 0),
-                    travel_date=travel_date,
-                    adults=pax,
-                    transfer_id=3,
-                )
-            except Exception as e:  # noqa: BLE001 — a 500 is per-tour
-                logger.debug("optionRate failed for %s: %s", o.tour_id, e)
+            # The row stands for the tour's main product: the first option
+            # that is neither an add-on nor sold per unit.
+            main = next(
+                (
+                    v for v in opts
+                    if "add-on" not in str(v.get("optionName") or "").lower()
+                    and not sold_per_unit(v)
+                ),
+                None,
+            )
+            if main is None:
+                return
+            priced = party_prices(int(o.tour_id), main, travel_date, int(adults), ages)
+            if not priced:
                 o.transfer_lookup_failed = True
                 return
-            rows = (rate_raw or {}).get("result") or []
-            if not rows:
-                return
-
-            from mcp_tools.tour_pricing import transfer_prices
-
-            priced = transfer_prices(rows[0], pax)
-
-            if not priced:
-                return
             o.transfer_prices = priced
-            suffix = f" (total for {pax} pax)" if pax > 1 else ""
-            o.transfer_price_display = " · ".join(
-                f"{p['transfer_type']}: {p['price_display']}" for p in priced
-            ) + suffix
+            o.priced_option_name = str(main.get("optionName") or "").strip()
+            o.transfer_price_display = prices_display(priced, party)
         except Exception as e:  # noqa: BLE001 — best-effort enrichment
             logger.debug("transfer price lookup failed for %s: %s", o.tour_id, e)
         finally:
@@ -241,6 +281,9 @@ def _impl(
     offset: int = 0,
     transfer_type: str = "",
     assume_missing: bool = False,
+    child_ages: list[int] | None = None,
+    enrich: bool = True,
+    theme: str = "",
 ) -> dict[str, Any]:
     """Search tours/activities. Calls both /toursearchlist and /toursearchlistrate.
 
@@ -259,8 +302,10 @@ def _impl(
                 4th ask  offset=70  max_results=80   (doubling)
             `next_offset` in the response is the value to pass next time, so you
             never have to compute it.
-        adults: how many adults are travelling. Transfer prices are TOTALS
-            for this many people.
+        adults: how many adults are travelling.
+        child_ages: one age per child, e.g. [5, 8]. Every total on a row is
+            for adults AND children, so pass them whenever the customer
+            mentions children.
         query: when the customer names a SPECIFIC tour ("desert safari", "dhow
             cruise", "burj khalifa"), pass it here. Results are filtered to names
             matching that keyword BEFORE the page cut — otherwise a specific tour
@@ -274,6 +319,11 @@ def _impl(
             customer asks for "shared and private tours" — WITHOUT it they only
             see whatever happens to be on page one, which made the agent report
             "only 3 tours have transfers" when there are 86.
+        theme: the KIND of tour the customer wants: "adventure", "romantic",
+            "family", "culture", "water" or "food". Only tours whose supplier
+            category belongs to that theme come back, so a sensory show (AYA
+            Universe) is never offered as an adventure. Pass it whenever the
+            customer names a kind of tour instead of a tour.
     """
     _ = force_refresh  # consumed by the cache layer; ignored here
 
@@ -373,6 +423,15 @@ def _impl(
         elif tf in {"ticket_only", "ticket", "without_transfer", "no_transfer"}:
             pool = [o for o in pool if not _has_transfer(o) and not _is_private_product(o)]
 
+        # A theme is matched on the supplier's category, never on how a name
+        # sounds: asked for adventure, the agent listed AYA Universe (a light
+        # and sound show) and only admitted it after the customer pushed back.
+        theme_key = (theme or "").strip().lower()
+        themes = tour_themes()
+        if theme_key and theme_key in themes:
+            wanted = set(themes[theme_key])
+            pool = [o for o in pool if (getattr(o, "category", "") or "").strip().lower() in wanted]
+
         # A private-first ordering is deliberate and must not be re-sorted away.
         ranked = pool if tf in {"private", "private_only"} else _recommended_first(pool)
 
@@ -388,9 +447,21 @@ def _impl(
         shown_end = start + len(options)
         remaining = max(0, len(ranked) - shown_end)
 
-        # Real start times for this page (parallel, best-effort).
-        _attach_timeslots(options, travel_date, adults)
-        _attach_transfer_prices(options, travel_date, adults)
+        # Real start times and party totals for this page. Independent
+        # fan-outs, so they run side by side: one after the other they cost
+        # the sum of both deadlines (~19s on a desert-safari page).
+        import concurrent.futures as _cf
+
+        # `enrich=False` is for code that needs the catalogue itself (a plan's
+        # tour index): enriching 400 rows sent ~500 rate calls per plan.
+        if enrich:
+            with _cf.ThreadPoolExecutor(max_workers=2) as ex:
+                slots = ex.submit(_attach_timeslots, options, travel_date, adults)
+                prices = ex.submit(
+                    _attach_transfer_prices, options, travel_date, adults, child_ages
+                )
+                slots.result()
+                prices.result()
 
         # Presentation-ready fields so the agent RELAYS these rather than
         # deriving (or omitting) them. The client requires sharing/private and
@@ -404,11 +475,17 @@ def _impl(
         option_dicts = []
         for o in options:
             d = o.model_dump()
-            d["sharing_display"] = o.sharing_display
+            # An airport pickup is the transfer itself: "Ticket only, no
+            # transfer included" read as if the car were missing.
+            d["sharing_display"] = (
+                ("Priced per vehicle" if _is_transfer_tour(o) else "Priced per unit (one booking)")
+                if getattr(o, "sold_per_vehicle", False) else o.sharing_display
+            )
             # Real per-transfer-type prices when the supplier has them.
             if getattr(o, "transfer_prices", None):
                 d["transfer_prices"] = o.transfer_prices
                 d["transfer_price_display"] = o.transfer_price_display
+                d["party_total_option"] = getattr(o, "priced_option_name", "")
             # Named so a follow-up ("does it have add ons?") can be answered
             # from the row the customer is already looking at.
             addons = getattr(o, "addon_names", []) or []
@@ -429,13 +506,14 @@ def _impl(
             )
             d["cancellation_display"] = o.cancellation_display
             d["price_display"] = o.price_display
+            d["party_total_display"] = _party_total(o, int(adults), child_ages)
             d["timeslots"] = getattr(o, "timeslots", [])
             d["is_slot_based"] = bool(getattr(o, "timeslots", []))
             d["slots_display"] = (
                 f"{len(o.timeslots)} start times: "
                 + ", ".join(x["time"] for x in o.timeslots[:6])
                 + (" …" if len(o.timeslots) > 6 else "")
-                if getattr(o, "timeslots", []) else "Flexible — no fixed start time"
+                if getattr(o, "timeslots", []) else "Flexible, no fixed start time"
             )
             option_dicts.append(d)
 
@@ -449,7 +527,8 @@ def _impl(
             # reusing a 1-adult result and multiplying it by the real party
             # size, which is how a 10-person quote came out at 10 x 11,569
             # when the supplier charges 23,138.
-            "priced_for_pax": adults,
+            "priced_for_pax": adults + len(child_ages or []),
+            "party": party_label(int(adults), [int(a) for a in child_ages or []]),
             "total_available": len(ranked),
             "remaining": remaining,
             "offset": start,
@@ -472,10 +551,18 @@ def _impl(
             # Pre-built table. The model rendered 5 of 13 rows even when told
             # the exact count, so the row count is no longer its decision.
             "table_markdown": _tours_table(options),
+            # The cards show a price per person; this line tells the customer
+            # what their whole party pays, quoted as built here.
+            "party_totals_markdown": _party_totals_line(
+                option_dicts, party_label(int(adults), [int(a) for a in child_ages or []])
+            ),
             "agent_instructions": (
                 (
                     f"`table_markdown` is the finished table for all "
-                    f"{len(options)} options — PASTE IT VERBATIM into your reply. "
+                    f"{len(options)} options — PASTE IT VERBATIM into your reply, "
+                    f"and right after it paste `party_totals_markdown` verbatim "
+                    f"(the cards show per-person prices; that line gives the "
+                    f"party total). "
                     f"Do not rebuild it, shorten it, or drop rows from it. "
                     f"BUILD A TABLE WITH EXACTLY {len(options)} ROWS — one per "
                     f"entry in `options`, in order, none skipped. Count them "
@@ -483,20 +570,14 @@ def _impl(
                     f"{len(options)} rows out. Trimming to a 'nice' few makes us "
                     f"look like we hold less inventory than we do (the customer "
                     f"saw 13 desert safaris on the website and 5 in chat). "
-                    "TOUR transfer prices come ONLY from `transfer_prices` on the "
-                    "row ('Included (₹0)' means it costs nothing extra). When "
-                    "asked about a tour's transfers, list EVERY entry in "
-                    "`transfer_prices` — all tiers including the ₹0 ones, and "
-                    "name the exact tour the row belongs to. EACH PRICE IS "
-                    "ALREADY THE TOTAL FOR `priced_for_pax` PEOPLE — never "
-                    "multiply it by the party size, and never call it "
-                    "'per person'. The supplier has done the multiplying: on "
-                    "Dubai Desert Safari the private tier is ₹11,569 for up to "
-                    "6 travellers and ₹23,138 from 7 (a second vehicle), while "
-                    "sharing stays ₹1,793 at every size. If the customer's "
-                    "party size differs from `priced_for_pax`, DO NOT compute "
-                    "it yourself — call search_tours again with adults set to "
-                    "the real party size and quote the figures it returns. "
+                    "Each entry in a row's `transfer_prices` is the FINAL total "
+                    "for `party` on that transfer type — ticket, transfer and "
+                    "vehicles included, exactly what gujjutours.com charges for "
+                    "`party_total_option`. Quote it as it is. NEVER add a "
+                    "transfer to `price_display` or to another total, never "
+                    "multiply or divide it, and never call it 'per person'. If "
+                    "the party changes (more people, a child), call search_tours "
+                    "again with the real adults and child_ages. "
                     "Never explain a "
                     "tour's shared/private price by hotel distance — that is how "
                     "AIRPORT transfers work, not tours. A row with no "
@@ -548,7 +629,7 @@ def _impl(
                     # costs the prompt nothing. The `Type` column was lost when
                     # the table columns were last changed.
                     "Table columns, in this order: Tour | Price/adult (`price_display`) "
-                    "| Type (`category`) | Duration | Transfer (`sharing_display`) "
+                    "| Type (`category`) | Duration | Total for party (`sharing_display`) "
                     "| Cancellation (`cancellation_display`); add Extras "
                     "(`addon_names`) when any row has add-ons, then Start times "
                     "(`slots_display`) when any row has real times. Mark "
@@ -563,6 +644,14 @@ def _impl(
                 )
             ),
             "query": query or None,
+            **(
+                {"theme": theme_key, "theme_note": (
+                    f"Every tour here is a {theme_key} tour by its supplier category. "
+                    "Recommend only from these; never add a tour from another search "
+                    "under this heading."
+                )}
+                if theme_key in themes else {}
+            ),
             "search_params": {
                 "destination": destination_city,
                 "travel_date": travel_date,
@@ -577,8 +666,49 @@ def _impl(
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
 
 
+def _is_transfer_tour(o: Any) -> bool:
+    """An airport pickup or drop-off (sold per car), not an activity whose
+    unit is a kayak or a boat."""
+    text = f"{getattr(o, 'name', '') or ''} {getattr(o, 'category', '') or ''}".lower()
+    return any(w in text for w in ("airport", "transfer", "pickup", "pick up", "drop"))
+
+
+@functools.lru_cache(maxsize=1)
+def tour_themes() -> dict[str, list[str]]:
+    """Theme -> supplier tour categories (reference_data/tour_themes.json)."""
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "reference_data" / "tour_themes.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        logger.warning("tour themes unreadable: %s", path)
+        return {}
+    return {k: [c.lower() for c in v] for k, v in raw.items() if not k.startswith("_")}
+
+
 from mcp_tools.result_cache import cache_impl
 
-search_tours_tool = tool(cache_impl("search_tours")(_impl))
+_cached_impl = cache_impl("search_tours")(_impl)
+
+
+@functools.wraps(_impl)
+def _dated_impl(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """`_impl` behind a check that the CUSTOMER named the day.
+
+    Tour prices are per date, so a date the model picked itself quoted a real
+    price for a day nobody asked about. Checked above the cache, which is
+    shared across conversations.
+    """
+    from rules import customer_gave_date, customer_waived_field, needs_input_error
+
+    waived = kwargs.get("assume_missing") and customer_waived_field()
+    if not waived and not customer_gave_date():
+        return needs_input_error(["travel_date"])
+    return _cached_impl(*args, **kwargs)
+
+
+search_tours_tool = tool(_dated_impl)
 search_tours_tool.name = "search_tours"
 mcp.tool(name="search_tours")(_impl)

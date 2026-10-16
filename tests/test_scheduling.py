@@ -100,12 +100,13 @@ class TestDurationParsing:
 # Rest policy
 # =============================================================================
 class TestEarliestFreeTime:
-    def test_three_hour_rest_after_hotel(self) -> None:
-        assert earliest_free_time(arrival_time="16:00", hotel_checkin_time="17:00") == time(20, 0)
+    def test_two_hour_rest_after_hotel(self) -> None:
+        """Product decision 2026-10-16: 1-2 hours to settle in, then the day goes on."""
+        assert earliest_free_time(arrival_time="16:00", hotel_checkin_time="17:00") == time(19, 0)
 
     def test_transit_estimated_when_hotel_time_unknown(self) -> None:
-        """No hotel time given -> landing + 60min transit + 180min rest."""
-        assert earliest_free_time(arrival_time="16:00") == time(20, 0)
+        """No hotel time given -> landing + 60min transit + 120min rest."""
+        assert earliest_free_time(arrival_time="16:00") == time(19, 0)
 
     def test_rest_is_configurable(self) -> None:
         p = SchedulePolicy(rest_after_landing_min=60)
@@ -309,7 +310,7 @@ class TestStructure:
 
     def test_policy_echoed_for_transparency(self) -> None:
         out = build_itinerary(start_date="2026-09-15", nights=1)
-        assert out["policy"]["rest_after_landing_min"] == 180
+        assert out["policy"]["rest_after_landing_min"] == 120
 
     def test_no_tours_is_not_an_error(self) -> None:
         out = build_itinerary(start_date="2026-09-15", nights=2, arrival_time="10:00")
@@ -438,7 +439,25 @@ class TestComputedTripTotal:
             "fill_days": False,
         }
         args.update(kw)
+        if args.get("visa_per_adult_inr"):
+            from mcp_tools.quote_registry import remember
+
+            remember("visa", [args["visa_per_adult_inr"]])  # quoted earlier in the chat
         return plan_itinerary_tool.invoke(args)
+
+    def test_unquoted_visa_price_is_replaced_by_the_live_fare(self) -> None:
+        """Was: the model passed Rs 3,500 of its own; the live fare is Rs 7,752.29."""
+        from unittest.mock import patch
+
+        from agent_tools import plan_itinerary_tool
+
+        live = {"options": [{"price_per_person_inr": 7752.29}, {"price_per_person_inr": 13254.29}]}
+        with patch("mcp_tools.get_visa_info._impl", return_value=live):
+            out = plan_itinerary_tool.invoke({
+                "start_date": _SOON, "nights": 5, "adults": 4, "tours": self.TOURS,
+                "fill_days": False, "visa_per_adult_inr": 3500,
+            })
+        assert out["cost_breakdown"]["visa"] == pytest.approx(7752.29 * 4, abs=1.0)
 
     def test_tours_are_multiplied_by_the_party(self) -> None:
         out = self._plan()
@@ -503,9 +522,11 @@ class TestComputedTripTotal:
         out = self._plan(flight_total_inr=999999.0, origin_city="Hyderabad")
         assert out["cost_breakdown"]["flights"] == pytest.approx(999999.0, abs=1.0)
 
-    def test_adults_defaults_safely(self) -> None:
+    def test_missing_party_size_is_refused_not_guessed(self) -> None:
+        """It used to default to 1 adult, which priced a 2-adult package for
+        one person (client packages report, Oct 2026)."""
         out = self._plan(adults=0)
-        assert out["adults"] == 1
+        assert out["error_type"] == "MissingPartySize"
 
 
 class TestSpreadAndFill:
@@ -543,13 +564,14 @@ class TestSpreadAndFill:
         `target_activity_min_per_day` before moving to the next.
         """
         out = self._plan()
-        per_day = [
-            sum(1 for i in d["items"] if i["kind"] == "tour") for d in out["days"]
-        ]
-        assert max(per_day) >= 2, (
-            f"short tours should share a day, got {per_day} — a 30-minute city "
-            f"tour must not use up a day on a 5-night trip"
-        )
+        # A full day (not the arrival half-day or the departure day) whose
+        # only activity is a 30-minute tour is a wasted day.
+        for d in out["days"][1:-1]:
+            tours = [i for i in d["items"] if i["kind"] == "tour"]
+            if len(tours) == 1:
+                assert tours[0]["title"] != "Tour B", (
+                    "a 30-minute tour must not use up a full day on a 5-night trip"
+                )
 
     def test_a_full_day_tour_still_owns_its_day(self) -> None:
         """An 8-hour trip fills the budget on its own; nothing is crammed after."""
@@ -593,6 +615,9 @@ class TestSpreadAndFill:
             {"name": f"T{i}", "price_per_adult_inr": 1000.0, "duration": "7 Hours (Approx)"}
             for i in range(6)
         ]
+        # The arrival day is a half day: a 7-hour tour cannot follow a 10:25
+        # landing and the 2-hour rest, so it gets a short afternoon activity.
+        tours.append({"name": "Short", "price_per_adult_inr": 500.0, "duration": "2 Hours (Approx)"})
         out = self._plan(tours=tours)
         assert out["empty_days"] == [], f"unexpected gaps: {out['empty_days']}"
         assert "Every day has at least one activity" in out["planning_note"]
@@ -623,6 +648,9 @@ class TestAutoFillDays:
             "tours": self.THIN,
             "arrival_time": "05:25",
             "departure_time": "15:00",
+            # Auto-fill is opt-in (customer asked to fill free days); these
+            # tests are about what it does once asked.
+            "fill_days": True,
         }
         args.update(kw)
         return plan_itinerary_tool.invoke(args)
@@ -729,6 +757,7 @@ class TestNoFreeDaysEver:
             "tours": self.ONE_TOUR,
             "arrival_time": "05:25",
             "departure_time": "20:50",
+            "fill_days": True,  # opt-in, see TestAutoFillDays
         }
         args.update(kw)
         return plan_itinerary_tool.invoke(args)
@@ -823,15 +852,15 @@ class TestPdfReusesThePlan:
             }
         )
         assert not out.get("error"), out
-        assert out.get("download_url")
+        assert out.get("itinerary_id")
 
     def test_still_refuses_when_no_plan_was_ever_built(self) -> None:
         """The guard must not become a rubber stamp — a hollow PDF is worse."""
         import agent_tools
         from agent_tools import generate_itinerary_pdf_tool
 
-        saved = agent_tools._LAST_PLAN
-        agent_tools._LAST_PLAN = {}
+        saved = dict(agent_tools._LAST_PLANS)
+        agent_tools._LAST_PLANS.clear()
         try:
             out = generate_itinerary_pdf_tool.invoke(
                 {
@@ -844,7 +873,33 @@ class TestPdfReusesThePlan:
             )
             assert out.get("error_type") == "MissingDayPlans"
         finally:
-            agent_tools._LAST_PLAN = saved
+            agent_tools._LAST_PLANS.update(saved)
+
+    def test_a_plan_from_another_conversation_is_never_reused(self) -> None:
+        """The cached plan is per conversation. It used to be one dict for the
+        whole server, so a PDF in one customer's chat could pick up the plan
+        just built in another customer's."""
+        import agent_tools
+        from agent_tools import generate_itinerary_pdf_tool, plan_itinerary_tool
+        from rules import set_current_thread
+
+        set_current_thread("customer-a")
+        plan_itinerary_tool.invoke(
+            {"start_date": "2026-12-01", "nights": 5, "adults": 2,
+             "tours": [{"name": "Abu Dhabi City Tour from Dubai"}]}
+        )
+        assert agent_tools._last_plan().get("days")
+
+        set_current_thread("customer-b")
+        try:
+            assert agent_tools._last_plan() == {}
+            out = generate_itinerary_pdf_tool.invoke(
+                {"destination": "Dubai", "start_date": "2026-12-01", "end_date": "2026-12-06",
+                 "nights": 5, "party_summary": "2 adults"}
+            )
+            assert out.get("error_type") == "MissingDayPlans"
+        finally:
+            set_current_thread("")
 
     def test_stale_plan_for_other_dates_is_not_reused(self) -> None:
         """A plan for a different trip must not leak into this PDF."""
@@ -865,3 +920,143 @@ class TestPdfReusesThePlan:
             }
         )
         assert out.get("error_type") == "MissingDayPlans"
+
+
+# --- Time of day: a dinner cruise is in the evening ------------------------
+
+def test_dinner_cruise_is_scheduled_in_the_evening():
+    from scheduling import build_itinerary
+
+    plan = build_itinerary(
+        start_date="2026-10-23", nights=3,
+        tours=[{"name": "Dhow Cruise Dubai Marina With Dinner by GujjuTours", "duration": "2 Hours (Approx)"}],
+    )
+    starts = [i["start"] for d in plan["days"] for i in d["items"] if i["kind"] == "tour"]
+    assert starts and starts[0] >= "19:30"
+
+
+def test_daytime_tour_still_fits_before_an_evening_one_on_the_same_day():
+    from scheduling import build_itinerary
+
+    plan = build_itinerary(
+        start_date="2026-10-23", nights=1,
+        tours=[
+            {"name": "Dhow Cruise Dubai Marina With Dinner", "duration": "2 Hours (Approx)"},
+            {"name": "Dubai Frame Tickets", "duration": "2 Hours"},
+        ],
+    )
+    day = [i for d in plan["days"] for i in d["items"] if i["kind"] == "tour"]
+    by_title = {i["title"]: i["start"] for i in day}
+    assert by_title["Dubai Frame Tickets"] < "12:00"
+    assert by_title["Dhow Cruise Dubai Marina With Dinner"] >= "19:30"
+
+
+def test_time_of_day_floors():
+    from datetime import time
+
+    from scheduling import time_of_day_floor
+
+    assert time_of_day_floor({"name": "Global Village Dubai Tickets"}) == time(16, 0)
+    assert time_of_day_floor({"name": "Dubai Desert Safari by Gujjutours"}) == time(15, 0)
+    assert time_of_day_floor({"name": "Burj Khalifa Tickets"}) is None
+
+
+def test_trip_without_flight_times_still_opens_and_closes_at_the_hotel():
+    from scheduling import build_itinerary
+
+    plan = build_itinerary(start_date="2026-11-10", nights=2, hotel_name="Social Hotel",
+                           tours=[{"name": "Dubai Frame Tickets", "duration": "2 Hours"}])
+    first, last = plan["days"][0], plan["days"][-1]
+    assert first["items"][0]["title"] == "Check in at Social Hotel"
+    assert last["items"][-1]["title"] == "Check out of Social Hotel"
+    # The check-out day is a travel day, not an empty day to fill.
+    assert 3 not in plan["empty_days"]
+
+
+class TestPdfPricesComeFromThePlan:
+    """The PDF took the model's figures: a visa the customer had excluded
+    (Rs 15,504.58) appeared in it and in its total."""
+
+    def test_pdf_uses_the_plan_lines_and_drops_an_invented_visa(self, monkeypatch) -> None:
+        import agent_tools
+        import itinerary_store
+        from agent_tools import generate_itinerary_pdf_tool, plan_itinerary_tool
+
+        captured: dict = {}
+
+        def fake_save(doc):
+            captured.update(doc if isinstance(doc, dict) else doc.model_dump())
+            return "abc123", itinerary_store._dir() / "abc123.pdf"
+
+        monkeypatch.setattr(itinerary_store, "save_itinerary_pdf", fake_save)
+        from rules import set_conversation_text
+
+        set_conversation_text("Plan 2 nights in Dubai for 2 adults, hotel and a tour, no visa")
+        plan = plan_itinerary_tool.invoke({
+            "start_date": _SOON, "nights": 2, "adults": 2, "hotel_name": "Social Hotel",
+            "hotel_total_inr": 11281.23,
+            "tours": [{"name": "Dubai Frame Tickets", "price_per_adult_inr": 1239.27, "duration": "2 Hours"}],
+        })
+        generate_itinerary_pdf_tool.invoke({
+            "destination": "Dubai", "start_date": _SOON, "nights": 2,
+            "components": [{"label": "Visa (30-Day)", "amount_inr": 15504.58},
+                           {"label": "Hotel", "amount_inr": 1}],
+            "visa": {"visa_type": "30 Days"}, "total_inr": 30444.61,
+            "inclusions": ["Social Hotel", "30-Day Tourist Visa"],
+        })
+        assert captured["total_inr"] == plan["total_inr"]
+        labels = [c["label"] for c in captured["components"]]
+        assert not any("Visa" in x for x in labels)
+        assert captured["visa"] is None
+        assert all("visa" not in i.lower() for i in captured["inclusions"])
+        assert agent_tools._last_plan().get("total_inr") == plan["total_inr"]
+
+
+def test_customer_excluded_reads_the_customers_words():
+    from rules import customer_excluded, set_conversation_text
+
+    for said, excluded in [
+        ("Include a hotel. Do not add flights, meals or visa.", True),
+        ("we already have our visas", True),
+        ("no flights, just hotel. visa needed", False),
+        ("I need a visa and a hotel", False),
+    ]:
+        set_conversation_text(said)
+        assert customer_excluded("visa") is excluded, said
+
+
+def test_flight_times_without_a_flight_are_not_scheduled():
+    from agent_tools import plan_itinerary_tool
+    from rules import set_conversation_text
+
+    set_conversation_text("Plan 2 nights in Dubai for 2 adults, hotel and a tour, no flights")
+    plan = plan_itinerary_tool.invoke({
+        "start_date": _SOON, "nights": 2, "adults": 2, "hotel_name": "Social Hotel",
+        "hotel_total_inr": 11281.23, "arrival_time": "12:00", "departure_time": "10:00",
+        "tours": [{"name": "Dubai Frame Tickets", "price_per_adult_inr": 1239.27, "duration": "2 Hours"}],
+    })
+    titles = [i["title"] for d in plan["days"] for i in d["items"]]
+    assert "Arrive in Dubai" not in titles and "Departure flight" not in titles
+    assert "Check in at Social Hotel" in titles
+
+
+def test_flight_times_the_customer_gave_are_kept():
+    from agent_tools import plan_itinerary_tool
+    from rules import set_conversation_text
+
+    set_conversation_text("We land at 12:00, plan 2 nights in Dubai for 2 adults")
+    plan = plan_itinerary_tool.invoke({
+        "start_date": _SOON, "nights": 2, "adults": 2, "hotel_name": "Social Hotel",
+        "hotel_total_inr": 11281.23, "arrival_time": "12:00",
+        "tours": [{"name": "Dubai Frame Tickets", "price_per_adult_inr": 1239.27, "duration": "2 Hours"}],
+    })
+    assert "Arrive in Dubai" in [i["title"] for i in plan["days"][0]["items"]]
+
+
+def test_search_result_slots_are_used():
+    """Search rows give slots as {"time": "10:00", "slot_id": ...}."""
+    from scheduling import usable_slots
+
+    slots = usable_slots([{"time": "10:00", "available": 10, "slot_id": "18"},
+                          {"time": "10:30", "available": 0, "slot_id": "19"}])
+    assert [s[0].strftime("%H:%M") for s in slots] == ["10:00"]

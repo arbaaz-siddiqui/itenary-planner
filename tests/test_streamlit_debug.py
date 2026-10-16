@@ -314,6 +314,6 @@ class TestButtonAndEmptyReply:
     def test_empty_guard_prefers_a_successful_tool_summary(self) -> None:
         """A finished PDF must be reported as done, never apologised for."""
         src = self.APP.read_text(encoding="utf-8")
-        assert 'out.get("summary") and out.get("download_url")' in src
+        assert 'out.get("summary") and out.get("itinerary_id")' in src
         # the success branch has to come BEFORE the apology
         assert src.index("done_msg = str(out") < src.index("didn't get a reply out")

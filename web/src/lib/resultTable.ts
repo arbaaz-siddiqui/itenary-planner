@@ -75,9 +75,20 @@ function childElements(node: Parents | undefined, ...tags: string[]): Element[] 
   return out;
 }
 
-/** Cell text, normalised: collapsed whitespace, star marker removed. */
+// The model breaks lines inside a table cell with "<br>" ("7h 05m <br> 1 stop").
+// Markdown renders no raw HTML, so it arrived as literal text on the card.
+const LINE_BREAK_RE = /<br\s*\/?>/gi;
+
+/**
+ * Cell text, normalised: collapsed whitespace, star marker removed, and an
+ * in-cell "<br>" turned into the part separator so it renders as a new line.
+ */
 function cellText(cell: Element): string {
-  return textOf(cell).replace(STAR_RE, "").replace(/\s+/g, " ").trim();
+  return textOf(cell)
+    .replace(STAR_RE, "")
+    .replace(LINE_BREAK_RE, " · ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
@@ -98,7 +109,10 @@ export function findPriceIndex(headers: string[]): number {
  * body rows, fewer than two columns, or no price-ish header. The caller then
  * falls back to the plain table renderer.
  */
-export function parseResultTable(table: Element | undefined): ResultTable | null {
+export function parseResultTable(
+  table: Element | undefined,
+  opts: { requirePrice?: boolean } = {},
+): ResultTable | null {
   if (!table || table.tagName !== "table") return null;
 
   // GFM always emits thead + tbody, but read defensively: some rewriters drop
@@ -112,7 +126,9 @@ export function parseResultTable(table: Element | undefined): ResultTable | null
   if (headers.length < 2) return null;
 
   const priceIndex = findPriceIndex(headers);
-  if (priceIndex < 0) return null;
+  // Without a price column a table is a result list only when the caller has
+  // the results to match it against (a package list: name, type, nights).
+  if (priceIndex < 0 && opts.requirePrice !== false) return null;
 
   const bodyRows: Element[] = tbodies.length
     ? tbodies.flatMap((b) => childElements(b, "tr"))

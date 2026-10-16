@@ -52,7 +52,7 @@ _TOOL_TTL = {
     "get_transfer_details": _STATIC_TTL,
     "get_flight_details": _VOLATILE_TTL,
     "get_restaurant_details": _STATIC_TTL,
-    "get_package_details": _STATIC_TTL,
+    "get_package_details": _VOLATILE_TTL,  # carries the live price with dates + party
     "get_visa_info": _STATIC_TTL,
     "list_visa_countries": _STATIC_TTL,
     "list_city_hotels": _STATIC_TTL,
@@ -62,7 +62,7 @@ _TOOL_TTL = {
 
 # BUMP whenever a tool's output shape/semantics change — otherwise a fixed tool
 # keeps serving the pre-fix cached result for up to a full TTL.
-CACHE_EPOCH = 3  # bumped 2026-08-21: result shape + pricing changed
+CACHE_EPOCH = 4  # bumped 2026-10-14: restaurant results carry tags, menu, photos, distance
 
 _LOCK = threading.Lock()
 _CACHE: dict[str, tuple[Any, float]] = {}  # key -> (result, stored_at)

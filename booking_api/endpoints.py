@@ -35,6 +35,7 @@ Each function:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import lru_cache
 from typing import Any
 
@@ -116,12 +117,18 @@ def call_flight_search(
     cabin: str = "Y",
     max_stops: int = 1,
     airline_code: str = "",
+    infants: int = 0,
+    infant_ages: list[int] | None = None,
 ) -> dict[str, Any]:
     """Search flights. Payload mirrors client's FlightSearch sample exactly.
 
     Args:
         airline_code: IATA code to filter by a single airline provider (e.g. "EK").
                       Empty string = all providers (default).
+        infants: Lap infants (under 2). Sent as INF, which the supplier prices
+                 at roughly Rs 800-3,200; sending a baby as CHD charged a full
+                 child fare (~Rs 30,000) and would book the wrong passenger type.
+        infant_ages: Age of each infant (0 or 1). Defaults to 1 per infant.
     """
     od_infos: list[dict[str, Any]] = [
         {
@@ -144,6 +151,10 @@ def call_flight_search(
     pax_quantities: list[dict[str, Any]] = [{"Code": "ADT", "Quantity": adults}]
     if children > 0:
         pax_quantities.append({"Code": "CHD", "Quantity": children})
+    if infants > 0:
+        pax_quantities.append({"Code": "INF", "Quantity": infants})
+    ages_of_infants = list(infant_ages or [])[:infants]
+    ages_of_infants += [1] * (infants - len(ages_of_infants))
 
     from settings import get_booking_api_settings
 
@@ -157,7 +168,7 @@ def call_flight_search(
         "PricingSourceType": "all",
         "PassengerTypeQuantities": pax_quantities,
         "childAge": ",".join(str(a) for a in (child_ages or [])),
-        "infantAge": "",
+        "infantAge": ",".join(str(a) for a in ages_of_infants),
         "Target": get_booking_api_settings().flight_target,
         "agentID": 0,
         "rateCategoryId": 0,
@@ -940,6 +951,72 @@ def call_hotel_static_by_city(
 
 
 @lru_cache(maxsize=8)
+def city_hotel_catalogue(city_id: int) -> tuple[tuple[int, float, str], ...]:
+    """Every property the supplier sells in a city: (hotel_id, stars, category).
+
+    From GetStaticDataByCity (4,510 Dubai properties: Apartment 3,481, Hotel
+    625, Aparthotel 167, Villa 72, ...). `category` is the supplier's own
+    property type, the one gujjutours.com filters on. Cached for the process
+    lifetime; () on failure.
+    """
+    try:
+        raw = call_hotel_static_by_city(city_id=city_id, lookup_type="city")
+    except Exception:
+        return ()
+    items = None
+    if isinstance(raw, dict):
+        items = raw.get("Hotels") or raw.get("raw") or raw.get("result")
+    if not isinstance(items, list):
+        items = raw if isinstance(raw, list) else []
+    out: list[tuple[int, float, str]] = []
+    for h in items:
+        if not isinstance(h, dict):
+            continue
+        try:
+            hid = int(h.get("HotelId") or h.get("hotelId"))
+            star = float(h.get("StarRating") or 0)
+        except (ValueError, TypeError):
+            continue
+        out.append((hid, star, str(h.get("Category") or "").strip()))
+    return tuple(out)
+
+
+# The availability call takes at most 200 hotel IDs ("Max HotelIds limit is
+# 200"); gujjutours.com prices a city the same way, 200 IDs per batch.
+HOTEL_IDS_PER_CALL = 200
+
+
+def call_hotel_availability_many(*, hotel_ids: list[int], **kwargs: Any) -> dict[str, Any]:
+    """`call_hotel_availability` over any number of hotels, 200 per call, in
+    parallel, merged into one response. Pricing the whole of Dubai is 23 calls
+    and ~6.5 s; a 40-hotel batch is what made "show me cheaper hotels" miss a
+    hotel 59% cheaper than our "lowest"."""
+    import concurrent.futures as cf
+
+    chunks = [hotel_ids[i:i + HOTEL_IDS_PER_CALL] for i in range(0, len(hotel_ids), HOTEL_IDS_PER_CALL)]
+    if len(chunks) <= 1:
+        return call_hotel_availability(hotel_ids=hotel_ids, **kwargs)
+    merged: list[Any] = []
+    currency = ""
+    errors: list[Exception] = []
+    with cf.ThreadPoolExecutor(max_workers=min(24, len(chunks))) as pool:
+        futures = [pool.submit(call_hotel_availability, hotel_ids=c, **kwargs) for c in chunks]
+        for f in futures:
+            try:
+                raw = f.result()
+            except Exception as e:  # noqa: BLE001 - one failed batch must not sink the rest
+                errors.append(e)
+                continue
+            rs = (raw or {}).get("AvailabilityRS") or {} if isinstance(raw, dict) else {}
+            currency = currency or str(rs.get("Currency") or "")
+            if isinstance(rs.get("HotelResult"), list):
+                merged.extend(rs["HotelResult"])
+    if errors and not merged:
+        raise errors[0]
+    return {"AvailabilityRS": {"Currency": currency or "INR", "HotelResult": merged}}
+
+
+@lru_cache(maxsize=8)
 def discover_city_hotel_ids(city_id: int) -> tuple[tuple[int, float], ...]:
     """Live (hotel_id, star_rating) list for a city, from GetStaticDataByCity.
 
@@ -1315,6 +1392,31 @@ def call_tour_options(*, tour_id: int, travel_date: str, lang: str = "en") -> di
         ) from e
 
 
+def _tour_pax_details(
+    adults: int, child_ages: Sequence[int], units: int = 0, extra_units: int = 0,
+    adult_age: str = "",
+) -> list[dict[str, str]]:
+    """The optionRate party: adults, then children with their ages.
+
+    An option sold per unit (a quad bike, a private majlis) is priced by unit
+    count instead; the supplier answers 500 to an adult count on those.
+    `extra_units` adds a unit line AFTER the adults, for an option priced per
+    person plus per vehicle (its `restrictedRateType` lists "Unit"): the
+    website sends both for the desert safari dune buggy option.
+    """
+    if units:
+        return [{"label": "unit", "value": str(units), "age": ""}]
+    pax = [{"label": "adult", "value": str(adults), "age": adult_age}]
+    ages = [int(a) for a in child_ages or ()]
+    if ages:
+        pax.append(
+            {"label": "child", "value": str(len(ages)), "age": ",".join(map(str, ages))}
+        )
+    if extra_units:
+        pax.append({"label": "unit", "value": str(extra_units), "age": ""})
+    return pax
+
+
 def call_tour_option_rate(
     *,
     tour_id: int,
@@ -1324,25 +1426,44 @@ def call_tour_option_rate(
     adults: int = 2,
     transfer_id: int = 1,
     lang: str = "en",
+    child_ages: Sequence[int] = (),
+    units: int = 0,
+    vehicle_id: int = 0,
+    extra_units: int = 0,
+    time_slot_id: str = "",
+    start_time: str = "",
 ) -> dict[str, Any]:
     """Rate for one tour option, INCLUDING the per-transfer-type prices.
 
     `result[0].initialTransferRates` is the field the flat toursearchlistrate
     never had: one entry per transferTypeId with `startingFromRate`. A tour with
     no pickup returns an empty list -- that is "Without Transfer", not an error.
+
+    `result[0].rate` is the supplier's TOTAL for the whole party on the
+    `transfer_id` basis (1 Sharing, 2 Private, 3 Without): ticket plus that
+    transfer, vehicles included. It is exactly what gujjutours.com charges, so
+    it is the figure to quote; no client-side arithmetic reproduces it as well.
+    Children are priced from `child_ages` (one age per child); `units`
+    replaces both for an option sold per unit. A private transfer on a tour
+    with named vehicles needs `vehicle_id` from `vehicleRates`: without it the
+    supplier silently returns the ticket-only rate.
     """
     payload = {
         "tourID": tour_id,
         "travelDate": travel_date,
         "optionId": str(option_id),
         "transferId": transfer_id,
-        "StartTime": "",
+        "StartTime": start_time,
         "guideId": 0,
         "lang": lang,
-        "paxDetails": [{"label": "adult", "value": str(adults), "age": ""}],
+        "paxDetails": _tour_pax_details(adults, child_ages, units, extra_units),
         "supplierId": supplier_id,
-        "timeSlotId": "",
-        "vehicleId": 0,
+        "timeSlotId": time_slot_id,
+        "vehicleId": vehicle_id,
+        # Live rate, as the website asks. Left out, the supplier answers from
+        # its rate cache: Desert Safari 30647 private came back AED 474.10
+        # against the website's live 914.10.
+        "isCache": False,
     }
     try:
         return get_b2c_client().post(
@@ -1352,3 +1473,102 @@ def call_tour_option_rate(
         raise BookingApiError(
             f"Tour option rate call failed: {e}", endpoint=TOUR_OPTION_RATE_PATH
         ) from e
+
+
+TOUR_MEDIAS_PATH = "/api/tours/medias"
+
+
+def call_tour_medias(*, tour_id: int, lang: str = "en") -> dict[str, Any]:
+    """Every photo of a tour (B2C host), as the website's gallery loads them.
+
+    `result[*]` carries `imagePath` and `displayOrder`. Tour search and both
+    details endpoints return a single imagePath; this is the full list.
+    Verified 2026-10-16: Global Village 46045 has 8, Desert Safari 53632 has 6.
+    """
+    try:
+        return get_b2c_client().get(
+            TOUR_MEDIAS_PATH, params={"tourId": int(tour_id), "lang": lang},
+            headers=base_headers(),
+        )
+    except Exception as e:
+        raise BookingApiError(f"Tour medias call failed: {e}", endpoint=TOUR_MEDIAS_PATH) from e
+
+
+# =============================================================================
+# Package composition and live price, the way gujjutours.com builds them
+# =============================================================================
+# No package API we hold returns a package's parts or price: packagerate
+# answers empty lists and packagestaticdata carries only day titles. The
+# website's package page embeds the parts (`itineraryServices`: tour, option
+# and transfer per day; `packageHotels`: the hotels in priority order) and
+# prices them live in the browser: the hotel through packagehotelv1, each
+# service through optionRate. Verified 2026-10-16 on "Dubai Budget Escape 3
+# Nights" (id 2): reproducing those calls gives the website's Rs 31,455.11.
+PACKAGE_PAGE_PATH = "/en/holidays/{country}-{country_id}/{city}-{city_id}/{name}-{package_id}"
+PACKAGE_HOTELS_PATH = "/api/package/packagehotelv1"
+
+
+def call_package_page(*, path: str) -> str:
+    """A package's public page HTML (its parts are embedded in it)."""
+    import requests
+
+    from settings import get_booking_api_settings, get_http_settings
+
+    url = get_booking_api_settings().b2c_base_url.rstrip("/") + path
+    try:
+        resp = requests.get(url, timeout=get_http_settings().timeout_secs,
+                            headers={"Accept": "text/html"})
+        resp.raise_for_status()
+        return resp.text
+    except Exception as e:
+        raise BookingApiError(f"Package page fetch failed: {e}", endpoint=PACKAGE_PAGE_PATH) from e
+
+
+def call_package_hotels(
+    *,
+    city_id: int,
+    country_id: int,
+    check_in: str,
+    check_out: str,
+    hotel_ids: Sequence[int],
+    rooms: Sequence[dict[str, Any]],
+    nationality: str = "India",
+) -> dict[str, Any]:
+    """Live room rates for a package's hotels (B2C host), as the website asks.
+
+    Dates are ISO in, mm-dd-yyyy out (the endpoint's format). `rooms` is one
+    dict per room: {"adults": n, "child_ages": [..]}. Prices come back in
+    `data[*].AvailabilityRS` with Currency AED, one total for the whole stay.
+    """
+    def mdy(iso: str) -> str:
+        y, m, d = iso.split("-")
+        return f"{m}-{d}-{y}"
+
+    body = {
+        "cityId": str(city_id),
+        "checkInDate": mdy(check_in),
+        "checkOutDate": mdy(check_out),
+        "nationality": nationality,
+        "currency": "INR",
+        "lang": "en",
+        "rooms": [
+            {"RoomNo": i + 1, "NoofAdults": int(r.get("adults") or 0),
+             "NoOfChild": len(r.get("child_ages") or []), "Units": 1,
+             "ChildAge": [int(a) for a in r.get("child_ages") or []]}
+            for i, r in enumerate(rooms)
+        ],
+        "hotelIds": [int(h) for h in hotel_ids],
+        "IsPackage": True,
+        "CountryID": int(country_id),
+        "SupplierId": "5,4",
+        "Filters": {"IsRecommendedOnly": "0", "IsShowRooms": "1", "IsOnlyAvailable": "1",
+                    "StarRating": {"Max": 5, "Min": 1}},
+        "AdvancedOptions": {"Currency": "INR", "SearchByOneID": False,
+                            "CustomerIpAddress": "127.0.0.1", "HotelName": ""},
+        "IsSearch": 1,
+        "IsMobile": 1,
+    }
+    try:
+        return get_b2c_client().post(PACKAGE_HOTELS_PATH, json=body, headers=base_headers())
+    except Exception as e:
+        raise BookingApiError(f"Package hotels call failed: {e}", endpoint=PACKAGE_HOTELS_PATH) from e

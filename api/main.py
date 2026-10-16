@@ -15,7 +15,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -86,17 +86,85 @@ class Credentials(BaseModel):
     password: str = Field(min_length=8)
 
 
+class Registration(Credentials):
+    # Optional so an older client that sends only email + password still
+    # registers; the UI asks for both and greets by first name.
+    first_name: str = Field(default="", max_length=80)
+    last_name: str = Field(default="", max_length=80)
+
+
+class Preferences(BaseModel):
+    """Travel defaults the customer sets in Settings.
+
+    Stored with the facts the agent already remembers between chats, under
+    the same keys, so a preference set here and one the agent learned from
+    the conversation are the same thing and the newest wins.
+    """
+
+    origin_city: str = Field(default="", max_length=60)
+    usual_party_size: int | None = Field(default=None, ge=1, le=20)
+    diet: Literal["", "Veg", "Jain", "Vegan"] = ""
+    nationality: str = Field(default="", max_length=60)
+
+
+_PREF_KEYS = ("origin_city", "usual_party_size", "diet", "nationality")
+
+
+class ProfileUpdate(BaseModel):
+    first_name: str = Field(min_length=1, max_length=80)
+    last_name: str = Field(default="", max_length=80)
+
+
+def _user_out(user: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(user["id"]),
+        "email": user["email"],
+        "first_name": user.get("first_name") or "",
+        "last_name": user.get("last_name") or "",
+    }
+
+
 class SessionCreate(BaseModel):
     title: str | None = None
 
 
-class SessionRename(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
+class SessionUpdate(BaseModel):
+    """Rename and/or pin a chat. Either field may be left out."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    pinned: bool | None = None
+
+
+class SavedCard(BaseModel):
+    """One hearted result card, stored as the customer saw it."""
+
+    kind: str = Field(min_length=1, max_length=40)
+    item: dict[str, Any]
+
+
+class UiSettings(BaseModel):
+    """Screen preferences that follow the account across devices."""
+
+    theme: Literal["dark", "light", "system"] | None = None
+    sidebar_collapsed: bool | None = None
+
+
+_UI_KEYS = ("theme", "sidebar_collapsed")
+# One saved card is one option payload; this bounds a single save.
+_SAVED_ITEM_MAX_BYTES = 64_000
 
 
 class ChatRequest(BaseModel):
     session_id: str
     message: str = Field(min_length=1)
+    # "ask": answer the question in hand. "plan": build a whole trip.
+    mode: Literal["ask", "plan"] = "ask"
+    # Answer the last question again, replacing the reply it got.
+    regenerate: bool = False
+
+
+class Feedback(BaseModel):
+    value: Literal["up", "down"] | None = None
 
 
 # ----------------------------------------------------------------- health
@@ -106,6 +174,55 @@ async def health() -> dict[str, str]:
     Postgres is briefly unavailable — a failing probe would roll the deploy
     back and take the whole service down with it."""
     return {"status": "ok"}
+
+
+def _keep_pdf(itinerary_id: str, session_id: str, filename: str) -> None:
+    """Store a freshly generated PDF with its chat, so it survives redeploys."""
+    from itinerary_store import get_itinerary_path
+
+    path = get_itinerary_path(itinerary_id)
+    if path is None:
+        log.warning("itinerary_pdf_missing_after_build id=%s", itinerary_id)
+        return
+    try:
+        repository.save_itinerary_pdf(itinerary_id, session_id, filename, path.read_bytes())
+    except Exception as e:  # noqa: BLE001 -- the file still serves from disk today
+        log.warning("itinerary_pdf_store_failed id=%s: %s", itinerary_id, e)
+
+
+@app.get("/itinerary/{itinerary_id}.pdf")
+async def serve_itinerary(itinerary_id: str) -> Response:
+    """The generated itinerary PDF.
+
+    Public on purpose, like the WhatsApp surface's copy of this route: the
+    customer opens the link from a chat message, often on a device that is not
+    signed in, and the id is an unguessable hash. Without this route the PDF
+    was written and linked but every download 404'd.
+    """
+    from fastapi.responses import FileResponse
+
+    from itinerary_store import get_itinerary_path
+
+    path = get_itinerary_path(itinerary_id)
+    if path is not None:
+        return FileResponse(
+            path, media_type="application/pdf", filename="Dubai-itinerary.pdf"
+        )
+    # The API's disk is replaced on every deploy; the copy kept with the
+    # chat is what makes an older PDF still download.
+    if itinerary_id.isalnum():
+        try:
+            stored = await asyncio.to_thread(repository.get_itinerary_pdf, itinerary_id)
+        except Exception as e:  # noqa: BLE001 -- a DB hiccup is a 404, not a 500
+            log.warning("itinerary_pdf_lookup_failed id=%s: %s", itinerary_id, e)
+            stored = None
+        if stored:
+            filename, data = stored
+            return Response(
+                content=data, media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+    return Response(content="Not found", status_code=404)
 
 
 @app.get("/health/db")
@@ -119,12 +236,14 @@ async def health_db() -> dict[str, Any]:
 
 # ------------------------------------------------------------------- auth
 @app.post("/auth/register", status_code=status.HTTP_201_CREATED)
-async def register(body: Credentials, response: Response) -> dict[str, Any]:
+async def register(body: Registration, response: Response) -> dict[str, Any]:
     if repository.find_user_by_email(body.email):
         raise HTTPException(status_code=409, detail="That email is already registered")
-    user = repository.create_user(body.email, auth.hash_password(body.password))
+    user = repository.create_user(
+        body.email, auth.hash_password(body.password), body.first_name, body.last_name
+    )
     auth.set_session_cookie(response, str(user["id"]))
-    return {"user": {"id": str(user["id"]), "email": user["email"]}}
+    return {"user": _user_out(user)}
 
 
 @app.post("/auth/login")
@@ -135,7 +254,7 @@ async def login(body: Credentials, response: Response) -> dict[str, Any]:
     if not user or not auth.verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     auth.set_session_cookie(response, str(user["id"]))
-    return {"user": {"id": str(user["id"]), "email": user["email"]}}
+    return {"user": _user_out(user)}
 
 
 @app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -145,7 +264,81 @@ async def logout(response: Response) -> None:
 
 @app.get("/auth/me")
 async def me(user: dict = Depends(auth.current_user)) -> dict[str, Any]:
-    return {"user": {"id": str(user["id"]), "email": user["email"]}}
+    return {"user": _user_out(user)}
+
+
+@app.get("/me/preferences")
+async def get_preferences(user: dict = Depends(auth.current_user)) -> dict[str, Any]:
+    facts = repository.get_memory(str(user["id"]))
+    return {"preferences": {k: facts.get(k) for k in _PREF_KEYS if facts.get(k) not in (None, "")}}
+
+
+@app.patch("/me/preferences")
+async def set_preferences(
+    body: Preferences, user: dict = Depends(auth.current_user)
+) -> dict[str, Any]:
+    # An empty field clears that preference rather than being ignored, so the
+    # customer can take one back.
+    facts = {k: (v if v not in ("", None) else None) for k, v in body.model_dump().items()}
+    merged = repository.merge_memory(str(user["id"]), facts)
+    return {"preferences": {k: merged.get(k) for k in _PREF_KEYS if merged.get(k) not in (None, "")}}
+
+
+@app.patch("/auth/me")
+async def update_me(
+    body: ProfileUpdate, user: dict = Depends(auth.current_user)
+) -> dict[str, Any]:
+    updated = repository.update_user_name(str(user["id"]), body.first_name, body.last_name)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return {"user": _user_out(updated)}
+
+
+# ----------------------------------------------------- saved cards, settings
+@app.get("/me/saved-cards")
+async def get_saved_cards(user: dict = Depends(auth.current_user)) -> dict[str, Any]:
+    return {
+        "cards": [
+            {"id": r["card_id"], "kind": r["kind"], "item": r["item"],
+             "saved_at": r["created_at"].isoformat()}
+            for r in repository.list_saved_cards(str(user["id"]))
+        ]
+    }
+
+
+@app.put("/me/saved-cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def put_saved_card(
+    card_id: str, body: SavedCard, user: dict = Depends(auth.current_user)
+) -> Response:
+    if len(card_id) > 300:
+        raise HTTPException(status_code=422, detail="Card id too long")
+    if len(json.dumps(body.item)) > _SAVED_ITEM_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Card too large to save")
+    repository.save_card(str(user["id"]), card_id, body.kind, body.item)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.delete("/me/saved-cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_saved_card(card_id: str, user: dict = Depends(auth.current_user)) -> Response:
+    # Idempotent: unsaving a card that is already gone is not an error.
+    repository.unsave_card(str(user["id"]), card_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/me/settings")
+async def get_ui_settings(user: dict = Depends(auth.current_user)) -> dict[str, Any]:
+    s = repository.get_ui_settings(str(user["id"]))
+    return {"settings": {k: s[k] for k in _UI_KEYS if k in s}}
+
+
+@app.patch("/me/settings")
+async def patch_ui_settings(
+    body: UiSettings, user: dict = Depends(auth.current_user)
+) -> dict[str, Any]:
+    changes = body.model_dump(exclude_none=True)
+    uid = str(user["id"])
+    s = repository.merge_ui_settings(uid, changes) if changes else repository.get_ui_settings(uid)
+    return {"settings": {k: s[k] for k in _UI_KEYS if k in s}}
 
 
 # --------------------------------------------------------------- sessions
@@ -164,9 +357,11 @@ async def post_session(
 
 @app.patch("/chat/sessions/{session_id}")
 async def patch_session(
-    session_id: str, body: SessionRename, user: dict = Depends(auth.current_user)
+    session_id: str, body: SessionUpdate, user: dict = Depends(auth.current_user)
 ) -> dict[str, Any]:
-    s = repository.rename_session(session_id, str(user["id"]), body.title)
+    s = repository.update_session(
+        session_id, str(user["id"]), title=body.title, pinned=body.pinned
+    )
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
     return _session_out(s)
@@ -195,18 +390,65 @@ async def get_messages(
             # Without this the option cards -- and every tour image on them --
             # were gone the moment the page reloaded.
             "options": m.get("options") or [],
+            "feedback": {1: "up", -1: "down"}.get(m.get("feedback")),
         }
         for m in repository.list_messages(session_id)
     ]
 
 
+@app.get("/chat/sessions/{session_id}/status")
+async def session_status(session_id: str, user: dict = Depends(auth.current_user)) -> dict[str, Any]:
+    """Whether a reply is still being worked on in this chat."""
+    if not repository.get_session(session_id, str(user["id"])):
+        raise HTTPException(status_code=404, detail="Session not found")
+    task = _RUNNING.get(session_id)
+    return {"busy": bool(task and not task.done())}
+
+
+@app.post("/chat/sessions/{session_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_turn(session_id: str, user: dict = Depends(auth.current_user)) -> Response:
+    """Stop button: drop the reply in progress; nothing is saved for it."""
+    if not repository.get_session(session_id, str(user["id"])):
+        raise HTTPException(status_code=404, detail="Session not found")
+    task = _RUNNING.pop(session_id, None)
+    if task and not task.done():
+        task.cancel()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post("/chat/messages/{message_id}/feedback", status_code=status.HTTP_204_NO_CONTENT)
+async def rate_message(
+    message_id: str, body: Feedback, user: dict = Depends(auth.current_user)
+) -> Response:
+    value = {"up": 1, "down": -1}.get(body.value or "")
+    if not repository.set_feedback(message_id, str(user["id"]), value):
+        raise HTTPException(status_code=404, detail="Message not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.get("/chat/messages/{message_id}/tool-calls")
 async def get_tool_calls(
-    message_id: str, _user: dict = Depends(auth.current_user)
+    message_id: str, user: dict = Depends(auth.current_user)
 ) -> list[dict[str, Any]]:
     """Debug payload for one message, fetched only when the panel opens —
-    these reach 200KB+ for a tour search."""
-    return repository.get_message_tool_calls(message_id)
+    these reach 200KB+ for a tour search. Only for the owner of the chat."""
+    calls = repository.get_message_tool_calls(message_id, str(user["id"]))
+    if calls is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return calls
+
+
+@app.get("/tours/{tour_id}/images")
+async def tour_images(tour_id: int, _user: dict = Depends(auth.current_user)) -> dict[str, Any]:
+    """Every photo of a tour, for the detail panel's gallery.
+
+    Search gives one photo per tour; the rest are read when the card is
+    opened. An empty list (not an error) when none can be read, so the panel
+    keeps the photo it already has.
+    """
+    from mcp_tools.tour_gallery import tour_image_urls
+
+    return {"images": await asyncio.to_thread(tour_image_urls, tour_id)}
 
 
 @app.get("/tours/{tour_id}/options/{option_id}/details")
@@ -250,8 +492,11 @@ async def chat_stream(
     session = repository.get_session(body.session_id, str(user["id"]))
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    running = _RUNNING.get(str(session["id"]))
+    if running and not running.done():
+        raise HTTPException(status_code=409, detail="Still answering your last message in this chat")
     return StreamingResponse(
-        _stream_turn(session, body.message),
+        _stream_turn(session, body.message, body.mode, body.regenerate),
         media_type="text/event-stream",
         # Nginx and some proxies buffer SSE into one chunk at the end, which
         # defeats streaming entirely.
@@ -259,7 +504,149 @@ async def chat_stream(
     )
 
 
-async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
+def _seed_plan_from_history(thread_id: str, messages: list[dict[str, Any]]) -> None:
+    """Restore the chat's latest plan from its saved itinerary card."""
+    from agent_tools import seed_plan
+
+    for m in reversed(messages or []):
+        groups = m.get("options") if m.get("role") == "assistant" else None
+        if isinstance(groups, str):
+            try:
+                groups = json.loads(groups)
+            except ValueError:
+                groups = None
+        for g in groups or []:
+            if not isinstance(g, dict) or g.get("kind") != "itinerary" or not g.get("items"):
+                continue
+            card = g["items"][0]
+            days = card.get("days") or []
+            lines = card.get("package_lines") or []
+            hotel = next((str(l.get("item"))[7:-1] for l in lines
+                          if str(l.get("item") or "").startswith("Hotel (")), "")
+            seed_plan(thread_id, {
+                "days": days,
+                "start_date": card.get("start_date") or (days[0].get("date") if days else ""),
+                "nights": max(0, len(days) - 1),
+                "adults": card.get("adults"),
+                "hotel_name": hotel,
+                "total_inr": card.get("total_inr"),
+                "package_lines": lines,
+            })
+            return
+
+
+# Plan mode turns a question into a trip. Sent as context ahead of the
+# customer's words (like the remembered facts), never stored as their message.
+# Ask mode needs no instruction: answering the question in hand is the
+# agent's default.
+_MODE_CONTEXT = {
+    "plan": (
+        "[system] Plan mode: the customer wants a complete trip planned, not a "
+        "single answer. If the customer lists what to include (\"Include ...\", "
+        "\"Do not add ...\"), plan exactly those parts and nothing else: no "
+        "flights, visa or meals they did not ask for, and no departure city "
+        "unless flights are included. Otherwise plan the whole trip: flights, a "
+        "hotel, and tours for every day (call plan_itinerary_tool with "
+        "fill_days=true); the tool adds and prices the airport pickup and "
+        "drop-off, the visa and the meals itself. If the destination, travel dates, party (adults, children and "
+        "their ages) or, for flights, the departure city is missing, ask for "
+        "all the missing ones in ONE short question. Never assume a return "
+        "date or the number of nights: \"the dates I shared\" with only an "
+        "outbound date, or two different sets of dates in the chat, is a "
+        "question, not 4 nights you chose. A full trip has return flights "
+        "unless the customer said one-way. Once known, search each part live "
+        "and build the plan with plan_itinerary_tool. The chat shows that plan "
+        "as an itinerary card (every day, time by time, with every price), so "
+        "your reply is short: one line naming the hotel and dates, three to "
+        "five highlights, the TOTAL for the party from total_inr, and an offer "
+        "to change any part or make the PDF. Never paste the search results' "
+        "tables or the day-by-day.\n\n"
+    ),
+}
+
+# Follow-up chips after a reply that showed results, by result kind. Each is
+# phrased as the customer would type it, because tapping one sends it as
+# their next message. Only things the agent can actually do.
+_FOLLOW_UPS: dict[str, list[str]] = {
+    "tours": ["Show private transfer prices", "Add a hotel for these dates", "Plan my full trip"],
+    "hotels": ["Only free cancellation", "Show cheaper hotels", "Add an airport transfer"],
+    "flights": ["Show cheaper flights", "Only non-stop flights", "Find hotels in Dubai"],
+    "restaurants": ["Jain-friendly options", "Restaurants near Burj Khalifa", "Show the menu"],
+    "transfers": ["Shared transfer instead", "Add the return transfer", "Find a hotel"],
+    "visa": ["Which documents do I need?", "How long does processing take?", "Find flights to Dubai"],
+    "packages": ["Show package details", "Compare the top two", "Plan a custom trip"],
+}
+
+def _step_summary(out: Any) -> dict[str, Any]:
+    """What the step line needs from a tool result: a count or a failure.
+
+    The full result stays on the server. Sending it made every step event as
+    large as the search itself, and the browser only ever showed a count.
+    """
+    if not isinstance(out, dict):
+        return {}
+    if out.get("error"):
+        return {"error": str(out.get("message") or "failed")[:200]}
+    for key in ("options", "results", "items"):
+        if isinstance(out.get(key), list):
+            return {"count": len(out[key])}
+    return {}
+
+
+_REGENERATE_CONTEXT = (
+    "[system] The customer asked for a fresh answer to the message below, "
+    "which they already sent once. Answer it again from live tool results.\n\n"
+)
+
+_TURN_FAILED = (
+    "Sorry, I could not finish that one. Please send it again, and I will "
+    "pick up from where we were."
+)
+
+
+# Turns in progress, by session id. A turn runs as its own task so it is NOT
+# tied to the browser's connection: switching to another chat used to close
+# the stream, which cancelled the turn before its reply was saved, so the
+# answer was simply lost. Now the turn finishes and saves either way, and the
+# chat shows "still working" until it has. Single process: Railway runs one
+# worker for chat-api.
+_RUNNING: dict[str, asyncio.Task[None]] = {}
+
+
+async def _stream_turn(
+    session: dict, message: str, mode: str = "ask", regenerate: bool = False
+) -> AsyncIterator[str]:
+    """Start a turn and relay its events for as long as the browser listens."""
+    sid = str(session["id"])
+    out: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def run() -> None:
+        try:
+            async for event in _turn_events(session, message, mode, regenerate):
+                out.put_nowait(event)
+        except asyncio.CancelledError:
+            log.info("turn_cancelled session=%s", sid)
+            raise
+        except Exception as e:  # noqa: BLE001 -- reported to the customer in words
+            log.exception("turn_failed: %s", e)
+            out.put_nowait(_sse("error", {"message": _TURN_FAILED}))
+        finally:
+            out.put_nowait(None)
+            if _RUNNING.get(sid) is task:
+                _RUNNING.pop(sid, None)
+
+    task = asyncio.create_task(run())
+    _RUNNING[sid] = task
+    while True:
+        event = await out.get()
+        if event is None:
+            break
+        yield event
+
+
+async def _turn_events(
+    session: dict, message: str, mode: str = "ask", regenerate: bool = False
+) -> AsyncIterator[str]:
     """Run one agent turn, emitting SSE events as tokens arrive."""
     from agent import StreamResult, extract_tool_calls, stream_and_log
 
@@ -268,7 +655,11 @@ async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
 
     # Persist the customer's message BEFORE streaming: an interrupted stream
     # must not lose what they asked.
-    repository.add_message(str(session["id"]), "user", message)
+    if regenerate:
+        # The question is already stored; only its old answer goes.
+        repository.delete_last_reply(str(session["id"]))
+    else:
+        repository.add_message(str(session["id"]), "user", message)
 
     # Carry known facts across sessions so a returning customer is not re-asked
     # their departure city every time. Prepended as context rather than written
@@ -282,8 +673,8 @@ async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
         existing = repository.list_messages(str(session["id"]))
         if len([m for m in existing if m["role"] == "user"]) <= 1:
             facts = repository.get_memory(str(session["user_id"]))
-            if facts:
-                pairs = ", ".join(f"{k}: {v}" for k, v in facts.items())
+            pairs = ", ".join(f"{k}: {v}" for k, v in (facts or {}).items() if v not in (None, ""))
+            if pairs:
                 memory_prefix = (
                     f"[system] Known about this customer from earlier "
                     f"conversations — use it instead of asking again, but "
@@ -291,6 +682,14 @@ async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
                 )
     except Exception as e:  # noqa: BLE001 — memory is an aid, never the reply
         log.warning("memory_read_failed: %s", e)
+
+    # The plan the PDF is built from lives in this process's memory; after a
+    # restart or a deploy it is gone. The itinerary card saved with the reply
+    # is the same plan, so it is put back before the turn runs.
+    try:
+        _seed_plan_from_history(thread_id, existing)
+    except Exception as e:  # noqa: BLE001 - the turn still runs without it
+        log.warning("plan_seed_failed: %s", e)
 
     holder = StreamResult()
     loop = asyncio.get_running_loop()
@@ -335,9 +734,10 @@ async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
                         seen_results.add(cid)
                         raw = getattr(m, "content", "")
                         try:
-                            out = json.loads(raw) if isinstance(raw, str) else raw
+                            parsed = json.loads(raw) if isinstance(raw, str) else raw
                         except (ValueError, TypeError):
-                            out = {"raw": str(raw)[:2000]}
+                            parsed = None
+                        out = _step_summary(parsed)
                         loop.call_soon_threadsafe(
                             queue.put_nowait,
                             ("tool", {"id": cid,
@@ -345,12 +745,24 @@ async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
                                       "output": out, "status": "done"}),
                         )
 
+        # Steps reach the browser as they happen, not when text next arrives.
+        holder.on_update = _drain_tool_events
+        # This UI draws a built plan as an itinerary card (set in the worker
+        # thread the agent runs in).
+        from rules import set_itinerary_card
+
+        set_itinerary_card(True)
         try:
             for token in stream_and_log(
                 agent=agent,
                 surface="streamlit",
                 thread_id=thread_id,
-                user_message=memory_prefix + message,
+                user_message=(
+                    memory_prefix
+                    + (_REGENERATE_CONTEXT if regenerate else "")
+                    + _MODE_CONTEXT.get(mode, "")
+                    + message
+                ),
                 result=holder,
             ):
                 # Flush tool progress before the token, so the chips appear in
@@ -359,7 +771,11 @@ async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
                 loop.call_soon_threadsafe(queue.put_nowait, ("token", token))
             _drain_tool_events()
         except Exception as e:  # noqa: BLE001
-            loop.call_soon_threadsafe(queue.put_nowait, ("error", str(e)))
+            # Logged in full, shown to the customer in words: a framework
+            # message ("Recursion limit of 12 reached ... visit docs.langchain")
+            # is not something a traveller can act on.
+            log.exception("stream_turn_failed: %s", e)
+            loop.call_soon_threadsafe(queue.put_nowait, ("error", _TURN_FAILED))
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)
 
@@ -395,21 +811,95 @@ async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
     # disappeared on reload while the reply text stayed.
     option_groups: list[dict[str, Any]] = []
     try:
-        from agent import extract_search_options
+        from agent import extract_all_search_options
 
-        # Returns a single {kind, options, raw} for the most recent search, not
-        # a dict of groups — the UI's `items` key maps to `options` here.
-        found = extract_search_options(holder.response) or {}
-        items = found.get("options") or []
-        if items:
+        # One group per kind searched this turn (hotels AND their transfer),
+        # latest search of each kind; the UI's `items` key maps to `options`.
+        follow: list[str] | None = None
+        for found in extract_all_search_options(holder.response):
+            items = found.get("options") or []
+            if not items:
+                continue
             # The extractor returns a singular kind ("tour", "hotel") but the
             # UI selects its card component on the plural. Left unmapped, a
             # hotel search silently rendered with the tour card layout.
             kind = str(found.get("kind") or "tour")
-            plural = {"tour": "tours", "hotel": "hotels", "flight": "flights"}
-            option_groups = [{"kind": plural.get(kind, kind), "items": items}]
+            plural = {
+                "tour": "tours", "hotel": "hotels", "flight": "flights",
+                "restaurant": "restaurants", "transfer": "transfers",
+                "package": "packages", "visa": "visa",
+            }
+            option_groups.append({"kind": plural.get(kind, kind), "items": items})
+            follow = _FOLLOW_UPS.get(plural.get(kind, kind)) or follow
+        if follow:
+            # Next steps for the last thing shown, as tappable chips. Same
+            # persisted channel as the cards, so they survive a reload.
+            option_groups.append(
+                {"kind": "suggestions", "items": [{"text": t} for t in follow]}
+            )
     except Exception as e:  # noqa: BLE001 — cards are a bonus, never the reply
         log.warning("option_extraction_failed: %s", e)
+
+    # The plan itself, as the itinerary card: every day time by time with
+    # every priced line and the total. Shown first; the search results it
+    # was built from become "other options" under it.
+    try:
+        from agent import _coerce_to_dict as _as_dict
+
+        plan_out = None
+        for call in tool_calls:
+            if "plan_itinerary" in str(call.get("tool_name") or ""):
+                out = _as_dict(call.get("output"))
+                if out and out.get("days") and not out.get("error"):
+                    plan_out = out
+        if plan_out:
+            option_groups.insert(0, {"kind": "itinerary", "items": [{
+                "start_date": plan_out.get("start_date") or (plan_out["days"][0].get("date")),
+                "days": plan_out.get("days"),
+                "package_lines": plan_out.get("package_lines") or [],
+                "total_inr": plan_out.get("total_inr"),
+                "adults": plan_out.get("adults"),
+                "auto_filled_tours": plan_out.get("auto_filled_tours") or [],
+                "excluded": plan_out.get("excluded") or [],
+                "flight": plan_out.get("flight") or None,
+                # A tour the plan could not fit is said on the card, never
+                # dropped silently (the reply claimed a swap the plan lacked).
+                "notes": [n for n in (plan_out.get("visa_note"),) if n] + [
+                    f"{e.get('title')} is not in the plan: {e.get('reason')}."
+                    for e in (plan_out.get("excluded") or [])
+                    if isinstance(e, dict) and e.get("title")
+                ],
+            }]})
+    except Exception as e:  # noqa: BLE001 -- the reply still stands without the card
+        log.warning("itinerary_card_failed: %s", e)
+
+    # The generated PDF rides the same persisted `options` channel as the
+    # cards, so it survives a reload and needs no schema change. Without this
+    # the only trace of a PDF was the URL the model happened to type into its
+    # reply, which rendered as a bare link with nothing to click.
+    try:
+        from agent import _coerce_to_dict
+
+        for call in tool_calls:
+            # A ToolMessage's content is a JSON STRING, not a dict.
+            out = _coerce_to_dict(call.get("output"))
+            if not out or not out.get("itinerary_id"):
+                continue
+            # No URL here on purpose: the browser fetches the same-origin
+            # path /itinerary/{id}.pdf, so this works on localhost and in
+            # production without either knowing the other's hostname.
+            option_groups.append({
+                "kind": "itinerary_pdf",
+                "items": [{
+                    "itinerary_id": out.get("itinerary_id"),
+                    "filename": out.get("filename") or "itinerary.pdf",
+                }],
+            })
+            _keep_pdf(str(out.get("itinerary_id")), str(session["id"]),
+                      str(out.get("filename") or "itinerary.pdf"))
+            break
+    except Exception as e:  # noqa: BLE001 — never fail a turn over the PDF
+        log.warning("pdf_extraction_failed: %s", e)
 
     saved = repository.add_message(
         str(session["id"]), "assistant", reply, tool_calls, option_groups
@@ -438,7 +928,10 @@ async def _stream_turn(session: dict, message: str) -> AsyncIterator[str]:
     for group in option_groups:
         yield _sse("options", group)
 
-    yield _sse("done", {"message_id": str(saved["id"])})
+    # `content` is the reply as stored. It differs from what streamed when a
+    # guard corrected it (invented fares, a dead PDF link), and the browser
+    # adopts it so the live bubble matches what a reload would show.
+    yield _sse("done", {"message_id": str(saved["id"]), "content": reply})
 
 
 _ORIGIN_CITIES = (
@@ -488,6 +981,7 @@ def _session_out(s: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(s["id"]),
         "title": s["title"],
+        "pinned": bool(s.get("pinned")),
         "created_at": s["created_at"].isoformat(),
         "updated_at": s["updated_at"].isoformat(),
     }

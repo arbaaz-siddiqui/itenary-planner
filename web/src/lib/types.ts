@@ -5,11 +5,24 @@
 export interface User {
   id: string;
   email: string;
+  /** Empty for accounts created before sign-up asked for a name. */
+  first_name?: string;
+  last_name?: string;
+}
+
+/** Travel defaults from Settings; the agent reads them at the start of a chat. */
+export interface Preferences {
+  origin_city?: string;
+  usual_party_size?: number | null;
+  diet?: "" | "Veg" | "Jain" | "Vegan";
+  nationality?: string;
 }
 
 export interface ChatSession {
   id: string;
   title: string;
+  /** Stored on the server with the chat, so it follows the account. */
+  pinned?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -35,9 +48,9 @@ export interface ToolCall {
   status?: "running" | "done" | "error";
 }
 
-export type OptionKind = "tours" | "hotels" | "flights";
+export type OptionKind = "tours" | "hotels" | "flights" | "restaurants";
 
-/** An option card. Keys are kind-dependent; see components/OptionCards.tsx. */
+/** An option card. Keys are kind-dependent; see components/cards/Cards.tsx. */
 export type OptionItem = Record<string, unknown>;
 
 export interface OptionGroup {
@@ -64,6 +77,8 @@ export interface Message {
    * refreshing the page dropped every card and every tour image with it.
    */
   options?: OptionGroup[];
+  /** The customer's thumbs up / down on an assistant reply. */
+  feedback?: "up" | "down" | null;
   /** Client-side only: streaming/errored state for the live bubble. */
   pending?: boolean;
   error?: string | null;
@@ -77,7 +92,8 @@ export type StreamEvent =
   | { type: "tool"; tool: ToolCall }
   | { type: "options"; group: OptionGroup }
   | { type: "error"; message: string }
-  | { type: "done"; message_id: string };
+  // `content` is the reply as the server stored it; absent from older servers.
+  | { type: "done"; message_id: string; content?: string };
 
 // --- Live-stream segments -------------------------------------------------
 // While a turn streams we keep an ORDERED list of what happened instead of one
@@ -96,3 +112,17 @@ export type Segment =
       result?: unknown;
       status: "running" | "done" | "error";
     };
+
+/** Screen preferences stored on the account (server: users.ui_settings). */
+export interface UiSettings {
+  theme?: "dark" | "light" | "system";
+  sidebar_collapsed?: boolean;
+}
+
+/** A hearted card as the server returns it. */
+export interface SavedCardOut {
+  id: string;
+  kind: string;
+  item: Record<string, unknown>;
+  saved_at: string;
+}

@@ -3,7 +3,7 @@
 Sections (search by `# ===`):
     # === PRICING — child discount, infant, group, peak, markup, GST, tourism dirham
     # === POLICIES — cancellation (DYNAMIC from supplier), payment schedule, TCS, EMI
-    # === POLICIES — airport routing, food, visa, handoff
+    # === POLICIES — airport routing, visa, handoff
     # === BUDGET — floor check, remaining, selection tracking
 
 Per client direction (Tanvir, 2026-05): child pricing, cancellation, and
@@ -468,38 +468,6 @@ def suggest_uae_airport(*, budget_inr: float, stay_area: str = "", primary: str 
 
 
 # =============================================================================
-# === POLICIES — food handling
-# =============================================================================
-# CLIENT_PLACEHOLDER: actual restaurants client books for these groups
-JAIN_FRIENDLY_RESTAURANTS: Final[list[str]] = [
-    "Rasoi Ghar (Bur Dubai)",
-    "Govinda's (Karama)",
-    "Maharaja Bhog (Bur Dubai)",
-]
-SWAMINARAYAN_FRIENDLY_RESTAURANTS: Final[list[str]] = [
-    "BAPS Hindu Mandir Restaurant (Abu Dhabi)",
-    "Govinda's (Karama)",
-    "Maharaja Bhog (Bur Dubai)",
-]
-HALAL_ONLY_RESTAURANTS: Final[list[str]] = [
-    "Bait Al Mandi",
-    "Al Mallah",
-    "Ravi Restaurant",
-]
-
-
-def suggest_restaurants(diet: str = "") -> list[str]:
-    d = diet.lower()
-    if "jain" in d:
-        return JAIN_FRIENDLY_RESTAURANTS
-    if "swami" in d:
-        return SWAMINARAYAN_FRIENDLY_RESTAURANTS
-    if "halal" in d:
-        return HALAL_ONLY_RESTAURANTS
-    return []
-
-
-# =============================================================================
 # === POLICIES — visa edge cases
 # =============================================================================
 # CLIENT_PLACEHOLDER
@@ -857,6 +825,64 @@ def compute_hotel_block_cost(
 # =============================================================================
 # === BUDGET — deterministic line-item trip total
 # =============================================================================
+def cancellation_breakdown(lines: list[dict[str, object]]) -> dict[str, object]:
+    """Split a package into what a cancellation refunds and what it loses.
+
+    Each line is {"label", "amount_inr", "refund"} with refund "full",
+    "none" or "partial"; a partial line also carries "refund_pct" (0-100).
+    A bare percentage was ambiguous to the model: it sent refund_pct "1"
+    meaning "fully refundable" and got a 1% refund. `refund_pct` alone is
+    still read (old callers), but only a number above 1 counts as a percent.
+    Decimal arithmetic, rounded to the paisa once per line, so refunded + lost
+    always equals the package total exactly. The model used to do this sum
+    itself and was off by Rs 1 on both sides.
+    """
+    from decimal import ROUND_HALF_UP, Decimal
+
+    paisa = Decimal("0.01")
+    out_lines: list[dict[str, object]] = []
+    refunded = lost = total = Decimal("0")
+    for line in lines or []:
+        if not isinstance(line, dict):
+            continue
+        try:
+            amount = Decimal(str(line.get("amount_inr") or 0)).quantize(paisa, ROUND_HALF_UP)
+            refund = str(line.get("refund") or "").strip().lower()
+            raw_pct = line.get("refund_pct")
+            if refund in {"full", "yes", "refundable", "true"}:
+                pct = Decimal("100")
+            elif refund in {"none", "no", "non-refundable", "nonrefundable", "false"}:
+                pct = Decimal("0")
+            elif raw_pct is not None:
+                pct = Decimal(str(raw_pct))
+                # 0-1 without an explicit "partial" reads as a yes/no flag.
+                if refund != "partial" and Decimal("0") < pct <= Decimal("1"):
+                    pct = Decimal("100")
+            else:
+                pct = Decimal("0")
+        except Exception:  # noqa: BLE001 -- a bad line is skipped, not guessed
+            continue
+        pct = min(max(pct, Decimal("0")), Decimal("100"))
+        back = (amount * pct / 100).quantize(paisa, ROUND_HALF_UP)
+        gone = amount - back
+        refunded += back
+        lost += gone
+        total += amount
+        out_lines.append({
+            "label": str(line.get("label") or "Item"),
+            "amount_inr": float(amount),
+            "refund_pct": float(pct),
+            "refunded_inr": float(back),
+            "lost_inr": float(gone),
+        })
+    return {
+        "lines": out_lines,
+        "total_inr": float(total),
+        "refunded_inr": float(refunded),
+        "lost_inr": float(lost),
+    }
+
+
 def sum_trip_total(line_items: list[dict[str, object]]) -> dict[str, object]:
     """Sum named line items into ONE inclusive trip total, deterministically.
 
@@ -992,7 +1018,15 @@ def normalize_reply(text: str) -> str:
         text,
         flags=re.I,
     )
+    # Links the model writes are guesses: restaurant names came back linked to
+    # https://example.com, to a Google search and to a photo URL. Keep the
+    # label, drop the link. Image embeds (`![..](..)`) are left alone.
+    text = _MODEL_LINK_RE.sub(r"\1", text)
     return re.sub(r"[~≈]\s*(₹|Rs\.?\s)", r"\1", text).strip()
+
+
+#: A markdown link `[label](http...)` that is not an image embed.
+_MODEL_LINK_RE = re.compile(r"(?<!!)\[([^\]\n]+)\]\((?:https?://|www\.)[^)\s]*\)")
 
 _FIELD_PROMPTS: dict[str, str] = {
     "origin_city": "which city they are flying from",
@@ -1001,6 +1035,7 @@ _FIELD_PROMPTS: dict[str, str] = {
     "check_out": "the check-out date",
     "travel_date": "the travel date",
     "adults": "how many adults are travelling",
+    "child_ages": "the age of each child (under-2s fly as lap infants)",
 }
 
 
@@ -1010,8 +1045,60 @@ _FIELD_PROMPTS: dict[str, str] = {
 _CONVERSATION_TEXT: ContextVar[str] = ContextVar("conversation_text", default="")
 
 
-def set_conversation_text(text: str) -> None:
+# The customer's message for THIS turn alone: "replace AYA Universe" removes a
+# tour now, while the same name earlier in the chat was a request to add it.
+_LATEST_TEXT: ContextVar[str] = ContextVar("latest_customer_text", default="")
+
+
+def set_conversation_text(text: str, latest: str = "") -> None:
     _CONVERSATION_TEXT.set((text or "").lower())
+    _LATEST_TEXT.set((latest or "").lower())
+
+
+def customer_named_now(name: str) -> bool:
+    """True when this turn's message names `name` (its words of 3+ letters,
+    ignoring "dubai", "by", "tickets", "gujjutours" and the like)."""
+    said = _LATEST_TEXT.get()
+    if not said or not name:
+        return False
+    filler = {"dubai", "gujjutours", "ticket", "tickets", "tour", "tours", "with", "the",
+              "and", "from", "entry", "admission", "experience", "transfer", "transfers"}
+    words = [w for w in re.findall(r"[a-z0-9]+", name.lower()) if len(w) >= 3 and w not in filler]
+    return bool(words) and all(re.search(rf"\b{re.escape(w)}\b", said) for w in words)
+
+
+# Which conversation (LangGraph thread) the current turn belongs to, set once
+# per turn next to the conversation text. Tools that keep anything between
+# calls key it by this, so one customer's state can never be read in another
+# customer's chat on the same server process.
+_CURRENT_THREAD: ContextVar[str] = ContextVar("current_thread", default="")
+
+
+def exact_star_request(stars: int) -> bool:
+    """Did the customer ask for exactly this star level ("a 4-star hotel")?
+
+    False for open-ended asks ("4 star or above", "at least 4", "4+"), and
+    when we have no conversation text (fail open: the caller keeps its range).
+    """
+    import re
+
+    text = _CONVERSATION_TEXT.get()
+    if not text:
+        return False
+    named = re.search(rf"\b{stars}\s*(?:-|\s)?\s*(?:star|★|\*)", text)
+    if not named:
+        return False
+    tail = text[named.end(): named.end() + 25]
+    head = text[max(0, named.start() - 15): named.start()]
+    return not re.search(r"\+|above|or more|plus|and up|or better|minimum|at least", tail + " " + head)
+
+
+def set_current_thread(thread_id: str) -> None:
+    _CURRENT_THREAD.set(str(thread_id or ""))
+
+
+def current_thread() -> str:
+    return _CURRENT_THREAD.get()
 
 
 def customer_said(value: str) -> bool:
@@ -1024,7 +1111,70 @@ def customer_said(value: str) -> bool:
     said = _CONVERSATION_TEXT.get()
     if not said or not value:
         return True
-    return value.strip().lower().split()[0] in said
+    first = value.strip().lower().split()[0]
+    if first in said.lower():
+        return True
+    # A typo still counts as naming it: the customer wrote "Ahemdabad" and the
+    # model sent "Ahmedabad", which was refused as a city they never named.
+    # Long words only, so a short guess never passes for something they said.
+    from reference_data_loader import close_spelling
+
+    return any(close_spelling(first, w) for w in re.findall(r"[a-z]+", said.lower()))
+
+
+# Any way a customer names a day: "22 Oct", "22/10", "2026-10-22", "the 5th",
+# "tomorrow", "next friday", "this weekend", "in december".
+_MONTHS = (
+    r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|june?|july?|"
+    r"aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+)
+_DATE_WORDS = re.compile(
+    rf"\b(?:{_MONTHS})\b"
+    # "may" is a month only beside a day number or after "in"/"of".
+    r"|\bmay\s+\d|\d(?:st|nd|rd|th)?\s+(?:of\s+)?may\b|\b(?:in|of)\s+may\b"
+    r"|\b\d{4}-\d{1,2}-\d{1,2}\b"
+    r"|\b\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?\b"
+    r"|\b\d{1,2}(?:st|nd|rd|th)\b"
+    r"|\b(?:today|tonight|tomorrow|tmrw|weekend|monday|tuesday|wednesday|"
+    r"thursday|friday|saturday|sunday)\b"
+    r"|\bnext (?:week|month)\b|\bday after\b",
+    re.IGNORECASE,
+)
+
+
+def customer_gave_date() -> bool:
+    """True if the customer has named a day anywhere in this conversation.
+
+    A dated search the customer never asked for quotes that day's prices as
+    if they were theirs: asked "how much is the desert safari", the agent
+    picked a date itself and quoted Rs 16,689. Fails open when there is no
+    conversation text, so a direct tool call is never blocked.
+    """
+    said = _CONVERSATION_TEXT.get()
+    return not said or bool(_DATE_WORDS.search(said))
+
+
+# The customer telling us to go ahead without a value: "any date", "not sure
+# yet", "just a rough price". Only this unlocks assume_missing.
+_WAIVED = re.compile(
+    r"\b(?:any ?(?:date|day|time)|anytime|whenever|not sure|unsure|"
+    r"(?:don'?t|do not|dont) know|not (?:decided|fixed|planned)|undecided|"
+    r"no (?:fixed )?dates?|flexible|search anyway|go ahead|doesn'?t matter|"
+    r"does not matter|rough(?:ly)?|approx(?:imate(?:ly)?)?|estimate|"
+    r"indicative|ballpark|you (?:pick|choose|decide))\b",
+    re.IGNORECASE,
+)
+
+
+def customer_waived_field() -> bool:
+    """True if the customer told us to proceed without a mandatory value.
+
+    `assume_missing=True` is the customer's escape hatch, not the model's: the
+    agent set it on its own, picked 1 Nov, and quoted a desert safari price
+    to a customer who had named no day. Fails open with no conversation text.
+    """
+    said = _CONVERSATION_TEXT.get()
+    return not said or bool(_WAIVED.search(said))
 
 
 def missing_search_fields(**fields: object) -> list[str]:
@@ -1044,6 +1194,12 @@ def needs_input_error(missing: list[str], *, assumed_ok: bool = False) -> dict[s
         "error": True,
         "error_type": "NeedsCustomerInput",
         "missing_fields": missing,
+        # No search ran, so there are no results. Said explicitly because the
+        # refusal used to carry no `options` key at all: asked for flights with
+        # the origin city missing, the model filled the silence with four
+        # invented airlines and prices and showed them as fact.
+        "options": [],
+        "total_results": 0,
         "message": (
             f"Cannot search accurately without {joined}. Ask the customer for "
             f"{'it' if len(asks) == 1 else 'these'} in ONE short question, then "
@@ -1195,3 +1351,38 @@ def transfer_quote(
             "and never multiply a private price by the party size."
         ),
     }
+
+
+# "no visa", "without a visa", "do not add flights, meals or visa", "we already
+# have our visas": the customer has said a part is not wanted.
+_EXCLUDES_TEMPLATE = (
+    r"\b(?:no|without|excluding|exclude|skip|minus|"
+    r"(?:do not|don'?t|dont)\s+(?:add|need|want|include|book))\b[^.?!\n]{0,60}?\b{part}s?\b"
+    r"|\b(?:already\s+(?:have|got)|have\s+(?:our|my)\s+own)\b[^.?!\n]{0,30}?\b{part}s?\b"
+)
+
+
+def customer_excluded(part: str) -> bool:
+    """True if the customer's own words say they do not want `part`.
+
+    Fails closed (False) with no conversation text, so a direct tool call
+    keeps its default.
+    """
+    said = _CONVERSATION_TEXT.get()
+    if not said or not part:
+        return False
+    pattern = _EXCLUDES_TEMPLATE.replace("{part}", re.escape(part.lower()))
+    return bool(re.search(pattern, said.lower()))
+
+
+# Set by the web chat API: its UI draws a built plan as an itinerary card, so
+# the reply should summarise it rather than write the day-by-day out again.
+_ITINERARY_CARD: ContextVar[bool] = ContextVar("itinerary_card", default=False)
+
+
+def set_itinerary_card(on: bool) -> None:
+    _ITINERARY_CARD.set(bool(on))
+
+
+def itinerary_card_shown() -> bool:
+    return _ITINERARY_CARD.get()

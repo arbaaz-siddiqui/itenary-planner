@@ -18,6 +18,7 @@ import re
 import sqlite3
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -308,9 +309,96 @@ def build_react_agent(
         model=llm,
         tools=parallel_tools,
         prompt=load_system_prompt(surface=surface),
+        pre_model_hook=_supersede_earlier_searches,
         post_model_hook=_split_concatenated_args,
         checkpointer=checkpointer,
     )
+
+
+#: Searches whose earlier results the model must not reuse once the customer
+#: has spoken again. Restaurant answers depend on the arguments (area, budget,
+#: cuisine, dish) and the model re-filtered old rows instead of searching: asked
+#: for "dinner in Deira" after a Marina search, it re-listed the Marina rows as
+#: "nearby", and asked for a ₹500 budget it quoted starting prices as meals.
+_SUPERSEDED_EACH_TURN = frozenset({"search_restaurants"})
+
+
+def _supersede_earlier_searches(state: dict[str, Any]) -> dict[str, Any]:
+    """Show the model a stub, not the rows, of searches from earlier turns.
+
+    Only the model's INPUT changes (`llm_input_messages`); the stored thread
+    keeps every result, so cards, transcripts and logs are untouched. Results
+    from the current turn -- everything after the latest customer message --
+    stay whole, so the search the model makes now is read in full.
+    """
+    from langchain_core.messages import ToolMessage
+
+    msgs = list(state.get("messages") or [])
+    last_human = max(
+        (i for i, m in enumerate(msgs) if _message_role(m) in {"human", "user"}), default=-1
+    )
+    out: list[Any] = []
+    for i, m in enumerate(msgs):
+        name = str(_safe_attr(m, "name") or "")
+        if i < last_human and _message_role(m) == "tool" and name in _SUPERSEDED_EACH_TURN:
+            asked = (_coerce_to_dict(_message_content(m)) or {}).get("search_params") or {}
+            m = ToolMessage(
+                content=(
+                    f"[superseded] Earlier {name} result (asked: "
+                    f"{json.dumps(asked, ensure_ascii=False, default=str)}). Its rows "
+                    f"are not shown again: for the customer's current message call "
+                    f"{name} again with what they asked for now, and answer from that. "
+                    f"A question about ONE restaurant's cuisine, menu, prices, rating or "
+                    f"hours → get_restaurant_details(restaurant_id) — never answer it "
+                    f"from an earlier reply."
+                ),
+                tool_call_id=_safe_attr(m, "tool_call_id") or "",
+                name=name,
+            )
+        out.append(m)
+    return {"llm_input_messages": out}
+
+
+_INLINE_CALL = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\((.*?)\)?\s*(?:<\|?\s*tool[ _]call\s*\|?>)?\s*$", re.S)
+_TEMPLATE_JUNK = re.compile(r"<\|?\s*\"?\s*\|?>|<\|[^>]*\|>")
+
+
+def _coerce_scalar(value: str) -> Any:
+    v = value.strip().strip("\"'").strip()
+    if re.fullmatch(r"-?\d+", v):
+        return int(v)
+    if re.fullmatch(r"-?\d+\.\d+", v):
+        return float(v)
+    if v.lower() in ("true", "false"):
+        return v.lower() == "true"
+    return v
+
+
+def repair_inline_tool_call(call: dict[str, Any]) -> dict[str, Any] | None:
+    """A call whose arguments were written into its NAME, made runnable.
+
+    Some models emit `get_tour_details(tour id:53632)<tool call|>` as the tool
+    name with empty arguments. No tool has that name, so the call failed, the
+    step line showed the raw text, and the agent told the customer it had a
+    technical problem. The name is the real tool; the parentheses hold
+    `key:value` (or `key=value`) pairs. Returns None when nothing needs fixing.
+    """
+    name = str(call.get("name") or "")
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        return None
+    m = _INLINE_CALL.match(_TEMPLATE_JUNK.sub("", name))
+    if not m:
+        return None
+    base, inner = m.group(1), m.group(2) or ""
+    args = dict(call.get("args") or {}) if isinstance(call.get("args"), dict) else {}
+    for part in re.split(r",(?=\s*[A-Za-z_][A-Za-z0-9_ ]*\s*[:=])", inner):
+        if not re.search(r"[:=]", part):
+            continue
+        key, _, value = re.split(r"([:=])", part, maxsplit=1)
+        key = re.sub(r"\s+", "_", key.strip())
+        if key and key not in args:
+            args[key] = _coerce_scalar(value)
+    return {**call, "name": base, "args": args}
 
 
 def _split_concatenated_args(state: dict[str, Any]) -> dict[str, Any] | None:
@@ -341,7 +429,18 @@ def _split_concatenated_args(state: dict[str, Any]) -> dict[str, Any] | None:
     decoder = json.JSONDecoder()
     fixed: list[dict[str, Any]] = []
     changed = False
+    calls: list[dict[str, Any]] = []
     for call in [*raw_calls, *invalid]:
+        repaired_call = repair_inline_tool_call(call)
+        if repaired_call is not None:
+            changed = True
+            logging.getLogger("agent.turn").warning(
+                "repaired inline tool call %r -> %s(%s)", call.get("name"),
+                repaired_call["name"], repaired_call["args"],
+            )
+            call = repaired_call
+        calls.append(call)
+    for call in calls:
         args = call.get("args")
         # A recoverable call carries its arguments as an unparsed string.
         text = args if isinstance(args, str) else None
@@ -372,6 +471,11 @@ def _split_concatenated_args(state: dict[str, Any]) -> dict[str, Any] | None:
                 "type": "tool_call",
             })
 
+    dropped = _drop_repeated_failures(msgs, fixed)
+    if dropped is not None:
+        fixed = dropped
+        changed = True
+
     if not changed:
         return None
     logging.getLogger("agent.turn").warning(
@@ -380,6 +484,293 @@ def _split_concatenated_args(state: dict[str, Any]) -> dict[str, Any] | None:
     repaired = last.model_copy(update={"tool_calls": fixed, "invalid_tool_calls": []})
     repaired.id = last.id
     return {"messages": [repaired]}
+
+
+_PDF_LINK = re.compile(r"\[([^\]]*)\]\((?:https?://)?[^)\s]*/itinerary/[^)\s]+\)|(?:https?://)?\S*/itinerary/\S+\.pdf")
+
+
+def _strip_pdf_links(response: dict[str, Any]) -> None:
+    """Remove any itinerary-PDF URL the model wrote into its reply.
+
+    The tool stopped returning a URL, but the link also travels in the thread:
+    once one reply carries it, later turns copy it forward verbatim. Those
+    links 404 as soon as the file moves -- a container restart, or a base URL
+    pointing at a host that never held the file -- and the customer sees a dead
+    link where the download button belongs. A markdown link keeps its text so
+    the sentence still reads.
+    """
+    messages = response.get("messages") or []
+    for msg in reversed(messages):
+        if _message_role(msg) not in {"ai", "assistant"}:
+            continue
+        text = _message_content(msg)
+        if not isinstance(text, str) or "/itinerary/" not in text:
+            return
+        cleaned = _PDF_LINK.sub(lambda m: m.group(1) or "", text)
+        cleaned = re.sub(r"[ 	]{2,}", " ", cleaned).strip()
+        if hasattr(msg, "content"):
+            msg.content = cleaned
+        elif isinstance(msg, dict):
+            msg["content"] = cleaned
+        return
+
+
+_PDF_CLAIM = re.compile(
+    r"(?:ready to download|download (?:it|the|your)[^.\n]*|\[[^\]]*download[^\]]*\])",
+    re.IGNORECASE,
+)
+
+
+def _pdf_id_in_thread(msgs: list[Any]) -> str:
+    """The itinerary_id of a PDF this thread actually produced, or ""."""
+    for msg in reversed(msgs):
+        if _message_role(msg) != "tool":
+            continue
+        if "pdf" not in str(_safe_attr(msg, "name") or ""):
+            continue
+        out = _coerce_to_dict(_message_content(msg)) or {}
+        if out.get("itinerary_id"):
+            return str(out["itinerary_id"])
+    return ""
+
+
+def _correct_unbuilt_pdf_claim(response: dict[str, Any]) -> None:
+    """Stop a reply promising a download when no PDF was built.
+
+    generate_itinerary_pdf_tool refuses a trip with no day_plans (a PDF with a
+    price table and no schedule is worse than none). The model answered that
+    refusal with "the itinerary is ready to download below" and even typed
+    "[Download Itinerary PDF]" as literal text -- so the customer read success,
+    saw something button-shaped, and clicked nothing. Asked again, it made no
+    tool call at all and repeated the claim.
+
+    A promise of a download is only honest when a tool actually returned an
+    itinerary_id, because that id is what renders the real button.
+    """
+    messages = response.get("messages") or []
+    if _pdf_id_in_thread(messages):
+        return
+    for msg in reversed(messages):
+        if _message_role(msg) not in {"ai", "assistant"}:
+            continue
+        text = _message_content(msg)
+        if not isinstance(text, str) or not _PDF_CLAIM.search(text):
+            return
+        replacement = (
+            "I could not build the PDF yet — it needs a day-by-day plan, and we "
+            "have not settled one. Tell me which tours you want (or say \"you "
+            "pick\") and I will put the schedule together and generate it."
+        )
+        if hasattr(msg, "content"):
+            msg.content = replacement
+        elif isinstance(msg, dict):
+            msg["content"] = replacement
+        return
+
+
+def _replace_invented_results(response: dict[str, Any]) -> None:
+    """Replace a reply that lists results no search produced.
+
+    A search tool that is missing a mandatory field returns a refusal naming
+    what to ask for, and no results. The model sometimes answers it with a
+    table anyway: asked for flights with the origin city missing, it printed
+    four airlines with departure times and fares, none of which came from the
+    supplier. The customer cannot tell that apart from a real quote.
+
+    So when the only search results this turn were refusals and the reply still
+    contains a priced table, the reply is discarded and the tool's own question
+    is asked instead. Fabricated prices are worse than an extra turn.
+    """
+    msgs = response.get("messages") or []
+    refusals: list[dict[str, Any]] = []
+    produced_results = False
+
+    for msg in msgs:
+        if msg.__class__.__name__ != "ToolMessage":
+            continue
+        parsed = _coerce_to_dict(getattr(msg, "content", None))
+        if not isinstance(parsed, dict):
+            continue
+        if parsed.get("error_type") == "NeedsCustomerInput":
+            refusals.append(parsed)
+        elif parsed.get("options"):
+            produced_results = True
+
+    if produced_results or not refusals:
+        return
+
+    last = next(
+        (m for m in reversed(msgs) if _message_role(m) in {"ai", "assistant"}), None
+    )
+    text = _message_content(last) if last is not None else None
+    if not isinstance(text, str) or "₹" not in text:
+        return
+
+    # Worded for the customer. rules._FIELD_PROMPTS is written for the model
+    # ("which city they are flying from") and reads wrong addressed to someone.
+    ASK_FOR = {
+        "origin_city": "which city you are flying from",
+        "departure_date": "your departure date",
+        "check_in": "your check-in date",
+        "check_out": "your check-out date",
+        "travel_date": "your travel date",
+        "adults": "how many adults are travelling",
+        "child_ages": "the age of each child",
+    }
+
+    fields: list[str] = []
+    for r in refusals:
+        for f in r.get("missing_fields") or []:
+            if f not in fields:
+                fields.append(f)
+    asks = [ASK_FOR.get(f, f.replace("_", " ")) for f in fields]
+    joined = asks[0] if len(asks) == 1 else ", ".join(asks[:-1]) + f" and {asks[-1]}"
+
+    logging.getLogger("agent.turn").warning(
+        "replaced a reply that quoted prices with no search behind it (missing: %s)",
+        ", ".join(fields),
+    )
+    last.content = (
+        f"Before I can pull live prices I need {joined}. Could you tell me "
+        f"{'that' if len(asks) == 1 else 'those'}?"
+    )
+
+
+_RUPEE_AMOUNT = re.compile(r"₹\s?(\d[\d,]*(?:\.\d+)?)")
+_ANY_NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+_RESEARCH_MARKER = (
+    "[system] Your last reply answered from memory instead of a search. Prices "
+    "are live and must never be retyped or pointed back to. Call the search "
+    "tool again now with the customer's details (a repeat search is fast) and "
+    "answer only from its result, with no comment about searching again."
+)
+# "I have already pulled those", "see the table above".
+_POINTS_BACK = re.compile(r"\b(already|above|earlier|previous(ly)?)\b", re.IGNORECASE)
+
+
+def _tool_numbers(messages: list[Any]) -> set[int]:
+    """Every number a tool returned or the customer typed in this thread, in
+    whole rupees. The customer's own figures ("budget Rs 50,000") may be echoed."""
+    seen: set[int] = set()
+    for msg in messages:
+        if _message_role(msg) not in {"tool", "human", "user"}:
+            continue
+        content = _message_content(msg)
+        text = content if isinstance(content, str) else json.dumps(content, default=str)
+        for raw in _ANY_NUMBER.findall(text or ""):
+            try:
+                seen.add(round(float(raw.replace(",", ""))))
+            except ValueError:
+                continue
+    return seen
+
+
+def _repeats_earlier_request(history: list[Any]) -> bool:
+    """True when the customer's latest message is one they already sent."""
+    said = [
+        " ".join(_customer_part(str(_message_content(m) or "")).lower().split())
+        for m in history
+        if _message_role(m) in {"human", "user"}
+    ]
+    said = [s for s in said if s]
+    return len(said) >= 2 and said[-1] in said[:-1]
+
+
+def _unsourced_prices(history: list[Any], turn: list[Any]) -> list[str]:
+    """Rupee amounts in a tool-less reply that no tool result ever contained.
+
+    Asked for the same flights a second time, the model skipped the search,
+    said "I have already found some flight options" and retyped a table from
+    memory: Flydubai Rs 56,494.41 and IndiGo Rs 61,545.94 (the supplier had
+    quoted Rs 36,380.55 and Rs 32,242.87), then called a third figure the
+    cheapest. Nothing marks such a table as invented, so a price is accepted
+    only when some tool in this conversation returned it.
+    """
+    if extract_tool_calls({"messages": turn}):
+        return []
+    text = _final_reply({"messages": turn})
+    amounts = _RUPEE_AMOUNT.findall(text or "")
+    if (amounts or _POINTS_BACK.search(text or "")) and _repeats_earlier_request(history):
+        # Real prices, but the customer asked for the search again and got
+        # "I have already pulled them" with no cards. Prices are live: run it.
+        return amounts or ["(repeated request)"]
+    if not amounts:
+        return []
+    known = _tool_numbers(history)
+    unsourced: list[str] = []
+    for raw in amounts:
+        try:
+            value = round(float(raw.replace(",", "")))
+        except ValueError:
+            continue
+        if not (known & {value - 1, value, value + 1}):
+            unsourced.append(raw)
+    return unsourced
+
+
+def _thread_messages(agent: Any, config: dict[str, Any]) -> list[Any]:
+    try:
+        state = agent.get_state(config)
+    except Exception:  # noqa: BLE001 — no checkpoint means no history to check
+        return []
+    return list((getattr(state, "values", None) or {}).get("messages") or [])
+
+
+def _failed_calls_so_far(msgs: list[Any]) -> set[tuple[str, str]]:
+    """(tool name, arguments) pairs that already returned NeedsCustomerInput.
+
+    Read from the thread rather than tracked separately so it survives the
+    replay LangGraph does on every step.
+    """
+    seen: set[tuple[str, str]] = set()
+    by_id: dict[str, tuple[str, str]] = {}
+    for msg in msgs:
+        for call in getattr(msg, "tool_calls", None) or []:
+            cid = call.get("id")
+            if cid:
+                by_id[cid] = (
+                    call.get("name", ""),
+                    json.dumps(call.get("args"), sort_keys=True, default=str),
+                )
+        if msg.__class__.__name__ != "ToolMessage":
+            continue
+        key = by_id.get(getattr(msg, "tool_call_id", ""))
+        if key and "NeedsCustomerInput" in str(getattr(msg, "content", "")):
+            seen.add(key)
+    return seen
+
+
+def _drop_repeated_failures(
+    msgs: list[Any], calls: list[dict[str, Any]]
+) -> list[dict[str, Any]] | None:
+    """Remove calls whose exact arguments already earned a refusal.
+
+    A missing mandatory field makes the tool refuse and name what to ask for.
+    The model sometimes re-sends the identical arguments instead, and with
+    nothing to break the cycle it did so 42 times in one turn -- burning the
+    recursion budget and the credit balance, then answering from invention
+    because it never got a result.
+
+    Dropping the duplicate leaves the earlier refusal as the only thing in
+    front of the model, which is the message that tells it what to ask.
+    """
+    failed = _failed_calls_so_far(msgs)
+    if not failed:
+        return None
+    kept = [
+        c
+        for c in calls
+        if (c.get("name", ""), json.dumps(c.get("args"), sort_keys=True, default=str))
+        not in failed
+    ]
+    if len(kept) == len(calls):
+        return None
+    logging.getLogger("agent.turn").warning(
+        "dropped %d repeated tool call(s) that already failed",
+        len(calls) - len(kept),
+    )
+    return kept
 
 
 
@@ -434,15 +825,42 @@ def extract_tool_calls(response: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def extract_search_options(response: dict[str, Any]) -> dict[str, Any]:
+    from mcp_tools.ui_payload import full_result
+
     for tc in reversed(extract_tool_calls(response)):
         parsed = _coerce_to_dict(tc.get("output"))
         if isinstance(parsed, dict) and isinstance(parsed.get("options"), list):
+            # The model saw a slim copy; the cards get the full one.
+            parsed = full_result(parsed)
             return {
                 "kind": _kind_from_tool_name(tc.get("tool_name") or ""),
                 "options": parsed["options"],
                 "raw": parsed,
             }
     return {"kind": None, "options": [], "raw": None}
+
+
+def extract_all_search_options(response: dict[str, Any]) -> list[dict[str, Any]]:
+    """One card group per kind of result this turn produced, in order.
+
+    A reply often covers two things at once (hotels and the airport transfer
+    to them). Taking only the last search left the hotels without cards. The
+    latest search of each kind wins, so a refined search replaces the first.
+    """
+    from mcp_tools.ui_payload import full_result
+
+    by_kind: dict[str, dict[str, Any]] = {}
+    for tc in extract_tool_calls(response):
+        parsed = _coerce_to_dict(tc.get("output"))
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("options"), list):
+            continue
+        parsed = full_result(parsed)
+        if not parsed.get("options"):
+            continue
+        kind = _kind_from_tool_name(tc.get("tool_name") or "")
+        by_kind.pop(kind, None)  # re-insert so order follows the latest search
+        by_kind[kind] = {"kind": kind, "options": parsed["options"], "raw": parsed}
+    return list(by_kind.values())
 
 
 def _kind_from_tool_name(name: str) -> str:
@@ -791,6 +1209,33 @@ def _repair_thread(agent: Any, config: dict[str, Any]) -> None:
         logger.warning("thread repair failed: %s", e)
 
 
+def _customer_words(agent: Any, config: dict[str, Any], user_message: str) -> str:
+    """Everything the customer has said in this thread, this message last.
+
+    The search tools refuse a departure city the customer never said. Checking
+    only the latest message refused the city they gave one message earlier:
+    "now show me business class for the same trip" was answered with a
+    NeedsCustomerInput for origin_city, and the model, holding a city it knew
+    was right and a refusal it could not explain, told the customer it had
+    "lost track of our previous conversation".
+    """
+    said: list[str] = []
+    try:
+        state = agent.get_state(config)
+        for m in (state.values or {}).get("messages") or []:
+            text = _message_content(m)
+            if _message_role(m) in {"human", "user"} and isinstance(text, str):
+                said.append(_customer_part(text))
+    except Exception:  # noqa: BLE001 -- no history is a fresh conversation
+        pass
+    # The API prepends [system] blocks (Plan mode, remembered facts) to the
+    # message; they are not the customer's words. Kept in, Plan mode's own
+    # "no flights, visa or meals they did not ask for" read as the customer
+    # saying "no visa", and every planned trip lost its visa.
+    said.append(_customer_part(user_message))
+    return "\n".join(said)
+
+
 def invoke_and_log(
     agent: Any,
     *,
@@ -801,11 +1246,19 @@ def invoke_and_log(
 ) -> dict[str, Any]:
     # Injection guard runs in code, not in the prompt: a matched message never
     # reaches the model, never enters the checkpoint, and costs zero tokens.
-    from rules import detect_prompt_injection, injection_reply, set_conversation_text
+    from rules import (
+        detect_prompt_injection,
+        injection_reply,
+        set_conversation_text,
+        set_current_thread,
+    )
 
     # Tools need the customer's own words to tell an invented departure
-    # city from a real one.
-    set_conversation_text(user_message)
+    # city from a real one -- all of them, not just this message.
+    set_current_thread(thread_id)
+    set_conversation_text(
+        _customer_words(agent, {"configurable": {"thread_id": thread_id}}, user_message),
+        latest=_customer_part(user_message))
 
     category = detect_prompt_injection(user_message)
     if category:
@@ -840,6 +1293,10 @@ def invoke_and_log(
             {"messages": [{"role": "user", "content": user_message}]}, config
         )
     latency = time.perf_counter() - start
+    model_reply = _final_reply(response)
+    _apply_reply_guards(response)
+    if _final_reply(response) != model_reply:
+        _save_final_reply(agent, config, response)
     # Colored per-turn timeline to the console: serving model, tools, [CACHED] tags.
     print_turn_timeline(
         surface=surface, user_message=user_message,
@@ -856,8 +1313,269 @@ def invoke_and_log(
     )
     response = _recover_empty_turn(agent, response, config,
                                    surface=surface, thread_id=thread_id)
+    all_msgs = list(response.get("messages") or [])
+    retry = _research_unsourced(agent, config, all_msgs, _this_turn(all_msgs),
+                                thread_id=thread_id)
+    if retry is not None:
+        before = _final_reply(retry)
+        _apply_reply_guards(retry)
+        if _final_reply(retry) != before:
+            _save_final_reply(agent, config, retry)
+        response = retry
     _guard_empty_turn(response, surface=surface, thread_id=thread_id)
     return response
+
+
+def _apply_reply_guards(response: dict[str, Any]) -> None:
+    """Every correction a finished reply gets, in one place for both paths.
+
+    These only ran in invoke_and_log, so the streaming path -- the Next.js chat
+    the client tested -- showed invented fares and dead PDF links that the
+    Streamlit path would have caught.
+    """
+    _replace_invented_results(response)
+    _strip_pdf_links(response)
+    _correct_unbuilt_pdf_claim(response)
+    _enforce_visa_timeline(response)
+    _ensure_visa_party_total(response)
+
+
+def _ensure_visa_party_total(response: dict[str, Any]) -> None:
+    """A party of 2+ is told what the visa costs them all, not one adult fare.
+
+    The cards show per-person prices. Asked for "2 adults and 1 child", the
+    reply gave only the Express family total and never the Normal one
+    (Rs 17,713.08), though the tool returned it. When the reply carries no
+    party total for the first (cheapest) visa option, the tool's own line is
+    added.
+    """
+    turn = _this_turn((response or {}).get("messages") or [])
+    first: dict[str, Any] | None = None
+    calls = extract_tool_calls({"messages": turn})
+    # A plan built this turn carries the visa the customer chose inside its
+    # own total; adding the cheapest visa's total under it read as a second
+    # price ("Total, 30 Days Single Entry" under a multiple-entry plan).
+    if any("plan_itinerary" in str(c.get("tool_name") or "") for c in calls):
+        return
+    for call in calls:
+        if str(call.get("tool_name") or "") != "get_visa_info":
+            continue
+        out = _coerce_to_dict(call.get("output"))
+        opts = (out or {}).get("options") or []
+        if opts and isinstance(opts[0], dict) and opts[0].get("party_totals"):
+            first = opts[0]
+    if not first:
+        return
+    normal = next((t for t in first["party_totals"] if t.get("track") == "Normal"), None)
+    if not normal or "1 adult (" in str(normal.get("display")):
+        return
+    text = _final_reply(response)
+    amount = f"{float(normal['total_inr']):,.2f}"
+    # Indian grouping in the display ("17,713.08" either way for 5 digits);
+    # check the display's own digits so 1,77,130.80 also matches.
+    shown = str(normal.get("display") or "").split(" for ")[0].lstrip("₹")
+    if not text or shown in text or amount in text:
+        return
+    _set_final_reply(
+        response,
+        f"{text.rstrip()}\n\n**Total, {first.get('visa_type') or 'visa'}:** {normal['display']}",
+    )
+
+
+# A promise about a visa's outcome or timing. Approval is UAE immigration's
+# decision, so none of these can be honest.
+_VISA_GUARANTEE = re.compile(
+    r"\b(definitely|certainly|surely|guarantee[ds]?|no problem|for sure)\b", re.IGNORECASE
+)
+
+
+def _enforce_visa_timeline(response: dict[str, Any]) -> None:
+    """Make the visa-timing answer match get_visa_info's timeline.
+
+    Asked on 16 Oct about a 20 Oct flight, with the tool's timeline saying one
+    working day was left and neither track was sure to finish, the model
+    replied "Yes, your visa can definitely be ready in time" -- the report's
+    original finding, unchanged by a prompt rule. So in code: when this turn
+    looked a visa up, any sentence promising readiness or approval is removed,
+    and when time is tight the tool's own note is added if the reply lacks it.
+    """
+    turn = _this_turn((response or {}).get("messages") or [])
+    timeline: dict[str, Any] | None = None
+    for call in extract_tool_calls({"messages": turn}):
+        if str(call.get("tool_name") or call.get("name") or "") != "get_visa_info":
+            continue
+        out = _coerce_to_dict(call.get("output"))
+        if isinstance(out, dict) and isinstance(out.get("timeline"), dict):
+            timeline = out["timeline"]
+    if not timeline or not timeline.get("note"):
+        return
+    text = _final_reply(response)
+    if not text:
+        return
+    # Drop just the offending sentences, in place, so tables and line breaks
+    # in the rest of the reply survive.
+    fixed = text
+    for m in reversed(list(re.finditer(r"[^.!?\n]*[.!?]", text))):
+        s = m.group(0)
+        if _VISA_GUARANTEE.search(s) and re.search(r"ready|in time|approv|visa", s, re.I):
+            fixed = fixed[:m.start()] + fixed[m.end():]
+    fixed = re.sub(r"[ \t]{2,}", " ", fixed).strip()
+    tight = timeline.get("recommended_track") != "Normal"
+    note = str(timeline["note"])
+    if tight and note[:40] not in fixed and "may not finish" not in fixed and "Neither" not in fixed:
+        fixed = f"**Timing:** {note}\n\n{fixed}"
+    if fixed != text:
+        _set_final_reply(response, fixed)
+
+
+def _final_reply(response: dict[str, Any]) -> str:
+    """The customer-facing text of the turn's last assistant message."""
+    for m in reversed((response or {}).get("messages") or []):
+        c = getattr(m, "content", None)
+        if (isinstance(c, str) and c.strip() and m.__class__.__name__ == "AIMessage"
+                and not getattr(m, "tool_calls", None) and not is_internal_marker(c)):
+            return c
+    return ""
+
+
+def _this_turn(messages: list[Any]) -> list[Any]:
+    """Messages produced after the latest human message.
+
+    invoke() returns the whole thread, so "did this turn call a tool" has to be
+    asked of this slice, not of the full history.
+    """
+    for i in range(len(messages) - 1, -1, -1):
+        if _message_role(messages[i]) in {"human", "user"}:
+            return list(messages[i + 1:])
+    return list(messages)
+
+
+# A reply announcing a lookup it never made. Asked for business-class options,
+# the model answered "One moment while I pull those premium options for you"
+# with no tool call and ended the turn; the customer waited for nothing and had
+# to ask again.
+_PROMISE = re.compile(
+    r"\b(one moment|just a moment|give me a (moment|second|minute)|hold on|"
+    r"let me (now |quickly )?(check|pull|search|find|look|get|fetch)|"
+    r"i(?:'ll| will) (now |quickly )?(check|pull|search|find|look|get|fetch)|"
+    r"(pulling|fetching|checking|searching) (up |for |those |the )?)",
+    re.IGNORECASE,
+)
+
+# A lookup offered on the customer's answer is not a broken promise: "Just let
+# me know which one interests you, and I'll pull up the timings" waits for them
+# by design. Retrying it appended a second "which one?" answer to the first.
+_WAITS_FOR_CUSTOMER = re.compile(
+    r"\b(let me know|tell me|once you|if you|when you|which (one|flight|hotel|option)|"
+    r"you('d| would) like|your (pick|choice)|pick one|choose)\b",
+    re.IGNORECASE,
+)
+
+_ACT_NOW_MARKER = (
+    "[system] Your last reply said you would look something up, but no search "
+    "ran. If you have what you need, call the tools now and answer from their "
+    "results in this reply. If you need something from the customer first, ask "
+    "for it in one question. Do not announce the search again."
+)
+
+
+def _is_unfulfilled_promise(response: dict[str, Any]) -> bool:
+    """True when the reply ENDS on a promised lookup and shows no results.
+
+    Ending on the promise is what makes it unfulfilled: "here are your flights
+    — let me know if you want hotels" is a finished answer. Tool calls alone do
+    not settle it: told a 10-person search was over the 9-passenger limit (and
+    with the party tool having run fine), the model replied "I'll search for a
+    group of 9 first ... One moment while I pull those options." and ended.
+    """
+    turn = _this_turn((response or {}).get("messages") or [])
+    for call in extract_tool_calls({"messages": turn}):
+        out = _coerce_to_dict(call.get("output"))
+        if isinstance(out, dict) and not out.get("error") and out.get("options"):
+            return False
+    text = _final_reply({"messages": turn}).strip()
+    if not text:
+        return False
+    last = re.split(r"(?<=[.!?])\s+", text)[-1]
+    return bool(_PROMISE.search(last)) and not _WAITS_FOR_CUSTOMER.search(last)
+
+
+# What the customer sees when a nudged retry still produced nothing to stand on.
+_COULD_NOT_FINISH = (
+    "I couldn't complete that search just now. Please ask me again and I'll run "
+    "it straight away."
+)
+
+
+def _retry_is_grounded(response: dict[str, Any]) -> bool:
+    """A nudged retry may be shown only if it looked something up or asked.
+
+    Nudged to finish a promised 10-passenger search, the model wrote a table of
+    flights that do not exist -- with no tool call behind it. A reply with no
+    lookup is acceptable only as a question back to the customer.
+    """
+    turn = _this_turn((response or {}).get("messages") or [])
+    if extract_tool_calls({"messages": turn}):
+        return True
+    return _final_reply({"messages": turn}).rstrip().endswith("?")
+
+
+def _save_final_reply(agent: Any, config: dict[str, Any], response: dict[str, Any]) -> None:
+    """Write the (possibly corrected) last reply back into the checkpoint.
+
+    The guards rewrite the reply the customer sees; without this the thread kept
+    the original, and the next turn read its own invented flights as history.
+    A message with the same id replaces the stored one.
+    """
+    for m in reversed((response or {}).get("messages") or []):
+        if m.__class__.__name__ == "AIMessage" and not getattr(m, "tool_calls", None):
+            if getattr(m, "id", None):
+                try:
+                    agent.update_state(config, {"messages": [m]})
+                except Exception as e:  # noqa: BLE001 — the reply shown is already right
+                    logging.getLogger("agent.turn").warning("could not save corrected reply: %s", e)
+            return
+
+
+def _set_final_reply(response: dict[str, Any], text: str) -> None:
+    """Replace the last assistant message's text in place."""
+    for m in reversed((response or {}).get("messages") or []):
+        c = getattr(m, "content", None)
+        if (isinstance(c, str) and m.__class__.__name__ == "AIMessage"
+                and not getattr(m, "tool_calls", None) and not is_internal_marker(c)):
+            m.content = text
+            return
+
+
+def _research_unsourced(agent: Any, config: dict[str, Any], history: list[Any],
+                        turn: list[Any], *, thread_id: str) -> dict[str, Any] | None:
+    """Re-run the search when a tool-less reply quoted prices nobody returned.
+
+    Returns the retry's response, or None when the reply was fine. A retry that
+    still looks nothing up is not shown: the customer is asked to send the
+    request again rather than read a second set of made-up fares.
+    """
+    bad = _unsourced_prices(history, turn)
+    if not bad:
+        return None
+    log = logging.getLogger("agent.turn")
+    log.warning("reply had no search behind it (%s) — re-searching thread=%s",
+                ", ".join(bad[:5]), thread_id)
+    try:
+        retry = agent.invoke({"messages": [{"role": "user", "content": _RESEARCH_MARKER}]},
+                             config)
+    except Exception:  # noqa: BLE001 — fall back to the safe message below
+        retry = None
+    if retry is None or not extract_tool_calls(
+            {"messages": _this_turn(list(retry.get("messages") or []))}):
+        log.warning("re-search made no lookup — not shown thread=%s", thread_id)
+        if retry is None:
+            # Rewritten in place; the caller's own messages now carry it.
+            _set_final_reply({"messages": turn}, _COULD_NOT_FINISH)
+            return {"messages": list(history) or list(turn), "in_place": True}
+        _set_final_reply(retry, _COULD_NOT_FINISH)
+        _save_final_reply(agent, config, retry)
+    return retry
 
 
 def _turn_is_dead(response: dict[str, Any]) -> bool:
@@ -892,18 +1610,28 @@ def _recover_empty_turn(agent: Any, response: dict[str, Any], config: dict[str, 
 
     Certain phrasings ("2 adults 2 kids ages 6 and 9...") reproducibly make the
     model return an empty completion; a nudge recovers it. Stage 1 nudges it to
-    search, stage 2 to write up results it already has.
+    search, stage 2 to write up results it already has. A reply that only
+    promises a lookup it never made is not a usable reply either.
     """
     log = logging.getLogger("agent.turn")
     for _ in range(2):
-        if _has_prose(response):
+        promised = _is_unfulfilled_promise(response)
+        if _has_prose(response) and not promised:
             return response
-        nudge = _NO_DATA_MARKER if _turn_is_dead(response) else _WRITE_UP_MARKER
+        if promised:
+            nudge = _ACT_NOW_MARKER
+        else:
+            nudge = _NO_DATA_MARKER if _turn_is_dead(response) else _WRITE_UP_MARKER
         log.warning("empty turn — nudge retry surface=%s thread=%s", surface, thread_id)
         try:
             retry = agent.invoke({"messages": [{"role": "user", "content": nudge}]}, config)
         except Exception:  # noqa: BLE001 — keep what we have on retry failure
             return response
+        if promised and not _retry_is_grounded(retry):
+            log.warning("nudged retry made no lookup — not shown thread=%s", thread_id)
+            _set_final_reply(retry, _COULD_NOT_FINISH)
+            _save_final_reply(agent, config, retry)
+            return retry
         response = retry
     return response
 
@@ -915,6 +1643,30 @@ def _recover_empty_turn(agent: Any, response: dict[str, Any], config: dict[str, 
 # the next turn can see that nothing was retrieved.
 # Prefix that marks a message as internal guidance, never shown to a customer.
 INTERNAL_MARKER_PREFIX = "[system]"
+
+# Graph steps per tool round: pre_model_hook, model, post_model_hook, tools.
+_STEPS_PER_TOOL_ROUND = 4
+# Tool rounds a chat turn may take before the backstop ends it.
+PLAN_TOOL_ROUNDS = 8
+
+
+def _customer_part(text: str) -> str:
+    """What the customer typed, without a leading `[system]` context block.
+
+    The API prepends remembered facts to a session's first message
+    ("[system] Known about this customer ...", a blank line, then their
+    message). Dropping every marker-led message threw the customer's own words
+    away with it: "Burj Khalifa on 22 October" was forgotten, and "the same
+    day" on the next turn was refused for having no date. A marker with no
+    customer text after it yields "".
+    """
+    # Several context blocks can lead one message (remembered facts, then the
+    # Plan mode instruction), so strip them all.
+    while is_internal_marker(text):
+        _, sep, text = text.partition("\n\n")
+        if not sep:
+            return ""
+    return text
 
 
 def is_internal_marker(text: object) -> bool:
@@ -997,6 +1749,11 @@ class StreamResult:
         self.messages: list[Any] = []
         self.tool_event_log: list[dict[str, Any]] = []
         self.latency_seconds: float = 0.0
+        # Called whenever a node finishes (a tool was chosen, a tool returned).
+        # Text tokens are yielded, but a turn spends most of its time in tools
+        # and yields nothing then; this is how a caller shows each step the
+        # moment it happens instead of when the next token arrives.
+        self.on_update: Callable[[], None] | None = None
 
     @property
     def response(self) -> dict[str, Any]:
@@ -1032,9 +1789,18 @@ def stream_and_log(
 
     # Same code-level injection guard as invoke_and_log: Streamlit streams, so
     # without this the model would already be leaking before any post-check.
-    from rules import detect_prompt_injection, injection_reply, set_conversation_text
+    from rules import (
+        detect_prompt_injection,
+        injection_reply,
+        set_conversation_text,
+        set_current_thread,
+    )
 
-    set_conversation_text(user_message)
+    set_current_thread(thread_id)
+
+    set_conversation_text(
+        _customer_words(agent, {"configurable": {"thread_id": thread_id}}, user_message),
+        latest=_customer_part(user_message))
 
     if detect_prompt_injection(user_message):
         from langchain_core.messages import AIMessage, HumanMessage
@@ -1054,10 +1820,14 @@ def stream_and_log(
         config["recursion_limit"] = 25
     else:
         # Backstop against tool-loops (some models re-call the same search 5-7×,
-        # hanging the turn for 90s). ~12 steps = the model + up to ~5 tool cycles,
-        # plenty for a legit multi-tool turn, but caps a runaway loop. Generous
-        # enough not to cut mid-tool-call (which would corrupt the thread).
-        config["recursion_limit"] = 12
+        # hanging the turn for 90s). Counted in graph steps, and one tool round
+        # is FOUR of them since the pre/post model hooks were added (hook,
+        # model, hook, tools): the old 12 allowed only three rounds, so
+        # lookup -> options -> details hit the cap and the customer saw a raw
+        # "Recursion limit of 12 reached". Eight rounds, plus the final answer:
+        # a built package (hotel, tours, transfers, airport legs, the plan)
+        # used six and was cut off before its reply.
+        config["recursion_limit"] = _STEPS_PER_TOOL_ROUND * PLAN_TOOL_ROUNDS + 1
     start = time.perf_counter()
 
     def _process_chunk(mode: str, chunk: Any) -> list[str]:
@@ -1080,6 +1850,11 @@ def stream_and_log(
                 for m in msgs or []:
                     holder.messages.append(m)
                     _record_tool_events(m, node_name, holder)
+            if holder.on_update is not None:
+                try:
+                    holder.on_update()
+                except Exception:  # progress is cosmetic; never fail the turn over it
+                    logging.getLogger("agent.turn").debug("on_update failed", exc_info=True)
         return tokens
 
     def _clear_thread() -> None:
@@ -1119,29 +1894,58 @@ def stream_and_log(
         ):
             yield from _process_chunk(mode, chunk)
 
-    # Same empty-turn recovery as invoke_and_log — some phrasings make the
-    # model emit nothing; retry once with a nudge instead of an empty bubble.
-    if _turn_is_dead(holder.response):
+    # Same recovery as invoke_and_log: a turn that emitted nothing, or only
+    # promised a lookup it never made, is retried once with a nudge. The
+    # promise has already streamed, so the real answer is appended to it.
+    dead = _turn_is_dead(holder.response)
+    if dead or _is_unfulfilled_promise(holder.response):
         logging.getLogger("agent.turn").warning(
-            "empty turn (stream) — retrying once thread=%s", thread_id
+            "%s (stream) — retrying once thread=%s",
+            "empty turn" if dead else "unfulfilled promise", thread_id,
         )
         try:
             retry = agent.invoke(
-                {"messages": [{"role": "user", "content": _NO_DATA_MARKER}]}, config
+                {"messages": [{"role": "user",
+                               "content": _NO_DATA_MARKER if dead else _ACT_NOW_MARKER}]},
+                config,
             )
-            if not _turn_is_dead(retry):
-                holder.messages = list(retry.get("messages") or [])
-                for m in reversed(holder.messages):
-                    c = getattr(m, "content", None)
-                    if (isinstance(c, str) and c.strip()
-                            and m.__class__.__name__ == "AIMessage"
-                            and not getattr(m, "tool_calls", None)
-                            and not is_internal_marker(c)):
-                        holder.text = c
-                        yield c
-                        break
+            if not dead and not _retry_is_grounded(retry):
+                logging.getLogger("agent.turn").warning(
+                    "nudged retry made no lookup — not shown thread=%s", thread_id)
+                _set_final_reply(retry, _COULD_NOT_FINISH)
+                _save_final_reply(agent, config, retry)
+            reply = _final_reply({"messages": _this_turn(list(retry.get("messages") or []))})
+            if reply:
+                holder.messages = [*holder.messages,
+                                   *_this_turn(list(retry.get("messages") or []))]
+                joined = f"\n\n{reply}" if holder.text else reply
+                holder.text += joined
+                yield joined
         except Exception:  # noqa: BLE001 — the surface fallback handles it
             pass
+
+    # A reply with no search behind it may only quote prices some tool returned.
+    # The invented one has already streamed; `done` carries the replacement.
+    retry = _research_unsourced(agent, config, _thread_messages(agent, config),
+                                _this_turn(list(holder.messages)), thread_id=thread_id)
+    if retry is not None and retry.get("in_place"):
+        holder.text = _COULD_NOT_FINISH
+    elif retry is not None:
+        fresh = _this_turn(list(retry.get("messages") or []))
+        holder.messages = [*holder.messages, *fresh]
+        reply = _final_reply({"messages": fresh})
+        if reply:
+            holder.text = reply
+
+    # Corrections apply here too; the caller sends `holder.text` as the final
+    # reply so a corrected answer replaces what streamed.
+    last_before = _final_reply(holder.response)
+    _apply_reply_guards(holder.response)
+    last_after = _final_reply(holder.response)
+    if last_after != last_before:
+        _save_final_reply(agent, config, holder.response)
+        holder.text = (holder.text.replace(last_before, last_after)
+                       if last_before and last_before in holder.text else last_after)
 
     holder.latency_seconds = time.perf_counter() - start
     log_turn(

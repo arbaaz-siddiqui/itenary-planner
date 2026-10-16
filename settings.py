@@ -303,6 +303,44 @@ def get_http_settings() -> HttpSettings:
 
 
 # =============================================================================
+# Places + restaurants
+# =============================================================================
+class GeoSettings(BaseSettings):
+    """Placing an area or landmark the customer names ("Dubai Marina")."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # A place resolved by name only counts when it lies this close to the
+    # city's centre. The supplier's place search is worldwide, and "Deira"
+    # on its own comes back as Madeira; the radius is what rejects that.
+    place_radius_km: float = Field(default=60.0, validation_alias="PLACE_RADIUS_KM")
+
+
+@lru_cache(maxsize=1)
+def get_geo_settings() -> GeoSettings:
+    return GeoSettings()
+
+
+class RestaurantSettings(BaseSettings):
+    """How much of a city's restaurant catalogue one search reads in full."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # Cuisines, tags, dishes and per-day hours exist only on the per-restaurant
+    # details call, so a search fetches details for each listed restaurant.
+    # Calls run in parallel up to `detail_workers`; at most `detail_fanout`
+    # restaurants are read in full, and a larger city reports the rest as
+    # partially described rather than silently dropping them.
+    detail_workers: int = Field(default=8, ge=1, validation_alias="RESTAURANT_DETAIL_WORKERS")
+    detail_fanout: int = Field(default=60, ge=1, validation_alias="RESTAURANT_DETAIL_FANOUT")
+
+
+@lru_cache(maxsize=1)
+def get_restaurant_settings() -> RestaurantSettings:
+    return RestaurantSettings()
+
+
+# =============================================================================
 # Utility to clear caches (for tests)
 # =============================================================================
 def clear_all_caches() -> None:
@@ -313,3 +351,5 @@ def clear_all_caches() -> None:
     get_currency_settings.cache_clear()
     get_pricing_settings.cache_clear()
     get_http_settings.cache_clear()
+    get_geo_settings.cache_clear()
+    get_restaurant_settings.cache_clear()

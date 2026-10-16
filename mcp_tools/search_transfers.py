@@ -272,8 +272,17 @@ def _impl(
                     "transfer for this route right now."
                 ),
                 "agent_instructions": (
-                    "Say we have no transfer available for these dates and offer to "
-                    "try different dates. DO NOT invent Careem/Uber/private car "
+                    # The website's own packages price their airport legs as
+                    # tours sold per vehicle ("Dubai Airport Pickup by
+                    # Gujjutours", "... Dropoff ..."), which the transfer
+                    # inventory does not list.
+                    "GujjuTours also sells airport pickup and drop-off as tours, "
+                    "priced per vehicle: call search_tours ONCE with "
+                    "query='Airport' (it returns both 'Dubai Airport Pickup by "
+                    "Gujjutours' and '... Dropoff ...') and offer those two, quoting "
+                    "their prices. Only if those "
+                    "return nothing, say we have no transfer for these dates and "
+                    "offer to try different dates. DO NOT invent Careem/Uber/private car "
                     "services or any provider we didn't search — we only sell what "
                     "this tool returns. DO NOT ask the customer more questions about "
                     "pax or vehicle type; the search already ran and found nothing."
@@ -288,6 +297,11 @@ def _impl(
             if _o.get("per_person_inr") is not None:
                 _o["per_person_display"] = f"₹{_o['per_person_inr']:,.0f}"
 
+        # What this conversation was quoted, so a package can only include an
+        # airport transfer that was actually offered (see quote_registry).
+        from mcp_tools.quote_registry import remember
+
+        remember("airport_transfer", [o.get("price_inr") for o in options_out])
         return {
             "options": options_out,
             "table_markdown": _transfers_table(options_out),

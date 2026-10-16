@@ -25,6 +25,8 @@ from booking_api.endpoints import (
     call_transfer_details,
     call_transfer_search,
     call_visa_info,
+    city_hotel_catalogue,
+    call_hotel_availability_many,
     discover_city_hotel_ids,
 )
 from booking_api.http_client import BookingApiClient, get_client
@@ -55,6 +57,8 @@ __all__ = [
     "call_visa_info",
     "call_entity_search",
     "call_visa_countries",
+    "city_hotel_catalogue",
+    "call_hotel_availability_many",
     "discover_city_hotel_ids",
     "get_client",
 ]

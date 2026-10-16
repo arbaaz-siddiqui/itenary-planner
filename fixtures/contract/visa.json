@@ -1,0 +1,59 @@
+{
+  "ref": "ref_visa_uae_in",
+  "kind": "visa",
+  "summary_md": "UAE visa options for Indian passport holders travelling 12 October.\n",
+  "rows": [
+    {
+      "id": "VIS-30S",
+      "kind": "visa",
+      "title": "UAE Tourist Visa — 30 days, single entry",
+      "subtitle": "Processing 3–4 working days",
+      "price_inr": 8150.0,
+      "price_basis": "per_adult",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "Most chosen",
+          "tone": "ok"
+        }
+      ],
+      "image": null,
+      "detail_ref": "visa:VIS-30S",
+      "facets": {
+        "Validity": "60 days from issue",
+        "Stay": "30 days",
+        "Entries": "Single",
+        "Processing": "3–4 working days"
+      }
+    },
+    {
+      "id": "VIS-60M",
+      "kind": "visa",
+      "title": "UAE Tourist Visa — 60 days, multiple entry",
+      "subtitle": "Processing 4–5 working days",
+      "price_inr": 19400.0,
+      "price_basis": "per_adult",
+      "priced_for_pax": 2,
+      "badges": [],
+      "image": null,
+      "detail_ref": "visa:VIS-60M",
+      "facets": {
+        "Validity": "60 days from issue",
+        "Stay": "60 days",
+        "Entries": "Multiple",
+        "Processing": "4–5 working days"
+      }
+    }
+  ],
+  "facts": {
+    "priced_for_pax": 2,
+    "currency": "INR",
+    "as_of": "2026-09-29T09:15:00Z",
+    "nationality_id": 245,
+    "nationality": "India"
+  },
+  "more": null,
+  "degraded": null,
+  "suggest": [],
+  "error": null
+}

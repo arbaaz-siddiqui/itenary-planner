@@ -30,7 +30,6 @@ from rules import (
     remove_selection,
     resolve_party,
     should_hand_off,
-    suggest_restaurants,
     suggest_uae_airport,
     sum_trip_total,
     total_spent,
@@ -156,20 +155,6 @@ class TestAirportRouting:
     def test_area_overrides_budget(self) -> None:
         assert suggest_uae_airport(budget_inr=100000, stay_area="Abu Dhabi") == "AUH"
         assert suggest_uae_airport(budget_inr=100000, stay_area="Sharjah") == "SHJ"
-
-
-class TestFoodSuggestions:
-    def test_jain(self) -> None:
-        assert suggest_restaurants("Jain") != []
-
-    def test_swaminarayan(self) -> None:
-        assert suggest_restaurants("swaminarayan") != []
-
-    def test_halal(self) -> None:
-        assert suggest_restaurants("halal") != []
-
-    def test_no_diet(self) -> None:
-        assert suggest_restaurants("") == []
 
 
 class TestHandoff:

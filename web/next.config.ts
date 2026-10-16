@@ -32,9 +32,14 @@ const nextConfig: NextConfig = {
         { source: "/chat/sessions/:path*", destination: `${target}/chat/sessions/:path*` },
         { source: "/chat/messages/:path*", destination: `${target}/chat/messages/:path*` },
         { source: "/health/:path*", destination: `${target}/health/:path*` },
+        // Travel preferences in Settings.
+        { source: "/me/:path*", destination: `${target}/me/:path*` },
         // "Show details" on a tour card. Without this the request never left
         // Next, so the panel sat on "Loading details…" forever.
         { source: "/tours/:path*", destination: `${target}/tours/:path*` },
+        // The generated itinerary PDF. Without this the download link resolved
+        // against Next and 404'd.
+        { source: "/itinerary/:path*", destination: `${target}/itinerary/:path*` },
       ],
       fallback: [],
     };

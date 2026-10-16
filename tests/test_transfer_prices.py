@@ -13,6 +13,7 @@ Sharing 68.2 AED -> Rs 1,789, Private 440 AED -> Rs 11,542 (site: 1,790.03 /
 """
 
 import pytest
+from tests.factories import future_date
 
 
 class TestTransferPricesReachTheCustomer:
@@ -20,7 +21,7 @@ class TestTransferPricesReachTheCustomer:
     def result(self):
         from mcp_tools.search_tours import _impl
 
-        return _impl(destination_city="Dubai", travel_date="2026-09-24",
+        return _impl(destination_city="Dubai", travel_date=future_date(14),
                      adults=4, query="desert safari", force_refresh=True)
 
     def test_a_tour_with_transfers_shows_two_real_prices(self, result):
@@ -69,7 +70,7 @@ class TestPriceFreshness:
     def test_a_cached_price_result_tells_the_agent_to_offer_a_refresh(self):
         from mcp_tools.search_tours import search_tours_tool
 
-        args = {"destination_city": "Dubai", "travel_date": "2026-09-24",
+        args = {"destination_city": "Dubai", "travel_date": future_date(14),
                 "adults": 2, "query": "desert safari"}
         search_tours_tool.invoke(args)
         second = search_tours_tool.invoke(args)
@@ -91,7 +92,7 @@ class TestOnlyPaidTiersAreShown:
     def test_burj_lists_only_tiers_that_cost_something(self):
         from mcp_tools.search_tours import _impl
 
-        r = _impl(destination_city="Dubai", travel_date="2026-09-30",
+        r = _impl(destination_city="Dubai", travel_date=future_date(14),
                   adults=1, query="burj khalifa tickets", force_refresh=True)
         burj = [o for o in r["options"] if o["tour_id"] == 30614]
         assert burj, "tour 30614 not in results"

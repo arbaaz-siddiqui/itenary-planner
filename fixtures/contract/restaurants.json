@@ -1,0 +1,73 @@
+{
+  "ref": "ref_restaurants_dxb_1013",
+  "kind": "restaurants",
+  "summary_md": "Two vegetarian-friendly options near Downtown for 13 October.\n",
+  "rows": [
+    {
+      "id": "RST-4412",
+      "kind": "restaurants",
+      "title": "Rangoli",
+      "subtitle": "Indian · Downtown",
+      "price_inr": 3200.0,
+      "price_basis": "per_adult",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "4.4 rating",
+          "tone": "ok"
+        },
+        {
+          "label": "Pure veg",
+          "tone": "ok"
+        }
+      ],
+      "image": {
+        "src": "/api/img?src=supplier%2Frestaurant-4412.jpg&w=640",
+        "alt": "",
+        "ratio": 1.5
+      },
+      "detail_ref": "restaurants:RST-4412",
+      "facets": {
+        "Cuisine": "North Indian, Jain options",
+        "Timings": "12:00–15:30, 19:00–23:30",
+        "Set menu": "₹3,200 per adult"
+      }
+    },
+    {
+      "id": "RST-4471",
+      "kind": "restaurants",
+      "title": "Asha's",
+      "subtitle": "Indian · Wafi",
+      "price_inr": 4100.0,
+      "price_basis": "per_adult",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "4.2 rating",
+          "tone": "ok"
+        }
+      ],
+      "image": {
+        "src": "/api/img?src=supplier%2Frestaurant-4471.jpg&w=640",
+        "alt": "",
+        "ratio": 1.5
+      },
+      "detail_ref": "restaurants:RST-4471",
+      "facets": {
+        "Cuisine": "Indian contemporary",
+        "Timings": "12:30–16:00, 19:00–00:00",
+        "Set menu": "₹4,100 per adult"
+      }
+    }
+  ],
+  "facts": {
+    "priced_for_pax": 2,
+    "currency": "INR",
+    "as_of": "2026-09-29T09:15:00Z",
+    "date": "2026-10-13"
+  },
+  "more": null,
+  "degraded": null,
+  "suggest": [],
+  "error": null
+}

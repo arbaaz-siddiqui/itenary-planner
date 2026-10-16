@@ -17,6 +17,7 @@ Sections (search by `# ===`):
 from __future__ import annotations
 
 import html
+import json
 import re
 from datetime import datetime
 from typing import Any
@@ -32,6 +33,7 @@ from core import (
     HotelStaticNormalizationError,
     InvalidSettingError,
     PenaltyInfo,
+    RestaurantDish,
     RestaurantNormalizationError,
     RestaurantOption,
     TourNormalizationError,
@@ -43,6 +45,7 @@ from core import (
     VisaNormalizationError,
     VisaOption,
     to_inr,
+    weekday_order,
 )
 from fx import convert_supplier_price, live_rate_map
 
@@ -81,12 +84,27 @@ def parse_tour_option_description(raw: dict[str, Any]) -> list[dict[str, Any]]:
         items = [i for i in items if i]
         if not items:
             # No list: split on block boundaries so a multi-paragraph overview
-            # does not collapse into one run-on line.
-            items = [_strip_html(part) for part in _BLOCK_SPLIT_RE.split(markup)]
-            items = [i for i in items if i]
+            # does not collapse into one run-on line. Some suppliers send
+            # markdown instead ("## What's included\n\n- Admission to ..."),
+            # which showed as "## What's included - Admission to ..." in one
+            # bullet: lines are split, bullet marks removed, and heading lines
+            # dropped (the section title already says what they say).
+            items = []
+            for part in _BLOCK_SPLIT_RE.split(markup):
+                for line in _strip_html(part).splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    items.append(re.sub(r"^[-*•]\s+", "", line))
 
         summary = _strip_html(entry.get("content"))
         if not title or (not items and not summary):
+            continue
+        same = next((s for s in sections if s["title"] == title), None)
+        if same:
+            # The supplier repeats a section title ("Things to note" twice).
+            same["items"].extend(i for i in items if i not in same["items"])
+            same["summary"] = same["summary"] or summary
             continue
         sections.append({"title": title, "summary": summary, "items": items})
     return sections
@@ -142,12 +160,107 @@ def _is_bogus_flight(opt: FlightOption) -> bool:
     return False
 
 
+def _seg_value(segment: Any, name: str) -> Any:
+    """Read a segment field from a FlightSegment or its model_dump() dict."""
+    if isinstance(segment, dict):
+        return segment.get(name)
+    return getattr(segment, name, None)
+
+
+def flight_layovers(segments: list[Any]) -> list[tuple[str, int]]:
+    """(airport, minutes) for every connection on one leg.
+
+    Measured from the arrival to the next departure at the SAME airport, so
+    both clock times share one timezone and the gap is exact (it matched the
+    supplier's layoverTimeInMinute on 2,055 of 2,055 live connections). The
+    supplier stores that figure on the segment ARRIVING at the stop; it is the
+    fallback when the two times are unusable.
+    """
+    out: list[tuple[str, int]] = []
+    for prev, nxt in zip(segments, segments[1:]):
+        arrived = _parse_datetime(_seg_value(prev, "arrival"))
+        leaves = _parse_datetime(_seg_value(nxt, "departure"))
+        minutes = int((leaves - arrived).total_seconds() // 60) if arrived and leaves else -1
+        if minutes < 0:
+            minutes = int(_seg_value(prev, "layover_min") or 0)
+        airport = str(_seg_value(nxt, "from_airport") or _seg_value(prev, "to_airport") or "")
+        out.append((airport, minutes))
+    return out
+
+
+def flight_leg_duration_min(segments: list[Any]) -> int:
+    """Door-to-door minutes for one leg: flying time plus every connection.
+
+    Segment times are local clock times with no UTC offset, so arrival minus
+    departure is wrong whenever a leg crosses a timezone -- by 1h30m on every
+    India-Gulf flight (FZ 438 AMD 04:25 -> DXB 06:20 is 3h25m, not 1h55m). The
+    supplier's journeyDuration is real elapsed flying time per segment; adding
+    the connections gives the true total (matched 1,440 of 1,440 live legs).
+    Returns 0 when a segment carries no flying time: unknown, never a guess.
+    """
+    if not segments:
+        return 0
+    flying = [int(_seg_value(s, "duration_min") or 0) for s in segments]
+    if any(m <= 0 for m in flying):
+        return 0
+    return sum(flying) + sum(m for _, m in flight_layovers(segments))
+
+
+# Cabin ladder. A segment's cabinClassText is free text from the supplier
+# ("ECONOMY", "Economy Standard", "Business", ...).
+FLIGHT_CABIN_RANK: dict[str, int] = {"Y": 0, "S": 1, "C": 2, "F": 3}
+
+
+def flight_cabin_code(text: Any) -> str:
+    """Normalise a segment's cabin text to Y/S/C/F, or "" when unknown.
+
+    "Economy Premium" and "Economy Standard" are economy FARE BRANDS, not the
+    premium-economy cabin, so only the phrase "premium economy" maps to S.
+    """
+    t = str(text or "").upper()
+    if "FIRST" in t:
+        return "F"
+    if "BUSINESS" in t:
+        return "C"
+    if "PREMIUM ECONOMY" in t:
+        return "S"
+    if "ECONOMY" in t:
+        return "Y"
+    return ""
+
+
+def _itinerary_cabin(segments: list[FlightSegment]) -> str:
+    """The lowest cabin flown on any segment, or "" if any segment is unknown."""
+    codes = [flight_cabin_code(s.cabin_class_text) for s in segments]
+    if not codes or "" in codes:
+        return ""
+    return min(codes, key=FLIGHT_CABIN_RANK.__getitem__)
+
+
+def _meets_cabin(option: FlightOption, requested: str) -> bool:
+    """True when every segment is flown in the requested cabin or better.
+
+    A business search returns economy itineraries too (255 of 371 on a live
+    AMD-DXB search); without this they were sorted to the top of a "business"
+    answer. An itinerary whose cabin the supplier did not state only passes an
+    economy request -- economy is the supplier's default, anything higher must
+    be stated to be believed.
+    """
+    want = FLIGHT_CABIN_RANK.get(requested.upper())
+    if want is None:
+        return True
+    if not option.cabin:
+        return want == 0
+    return FLIGHT_CABIN_RANK[option.cabin] >= want
+
+
 def parse_flight_response(
     raw: dict[str, Any],
     *,
     expected_destination: str | None = None,
     expected_origin: str | None = None,
     max_results: int | None = None,
+    cabin: str | None = None,
 ) -> list[FlightOption]:
     """Parse a FlightSearch response into ranked FlightOption objects.
 
@@ -158,6 +271,8 @@ def parse_flight_response(
             related-route suggestions (e.g. DEL→NMI when you asked DEL→BOM).
         expected_origin: Same idea for origin.
         max_results: Cap on returned options.
+        cabin: Requested cabin (Y/S/C/F). Itineraries flown below it are
+            dropped. None keeps every cabin.
     """
     if not isinstance(raw, dict):
         raise FlightNormalizationError("Expected dict response", missing_field="root")
@@ -168,14 +283,17 @@ def parse_flight_response(
 
     expected_dest_upper = expected_destination.upper() if expected_destination else None
     expected_origin_upper = expected_origin.upper() if expected_origin else None
+    conversation_id = str(raw.get("conversationId") or "")
 
     rates = live_rate_map()
     options: list[FlightOption] = []
     for item in itineraries:
-        opt = _parse_flight_itinerary(item, rates)
+        opt = _parse_flight_itinerary(item, rates, conversation_id=conversation_id)
         if opt is None:
             continue
         if _is_bogus_flight(opt):
+            continue
+        if cabin and not _meets_cabin(opt, cabin):
             continue
         # Drop itineraries to/from the wrong airport
         if expected_dest_upper and opt.segments_outbound:
@@ -191,7 +309,12 @@ def parse_flight_response(
     return options[:max_results] if max_results else options
 
 
-def _parse_flight_itinerary(item: dict[str, Any], rates: dict[str, float]) -> FlightOption | None:
+def _parse_flight_itinerary(
+    item: dict[str, Any],
+    rates: dict[str, float],
+    *,
+    conversation_id: str = "",
+) -> FlightOption | None:
     if not isinstance(item, dict):
         return None
 
@@ -229,25 +352,20 @@ def _parse_flight_itinerary(item: dict[str, Any], rates: dict[str, float]) -> Fl
     segs_out = _parse_segments(od_options[0]) if len(od_options) > 0 else []
     segs_ret = _parse_segments(od_options[1]) if len(od_options) > 1 else []
 
-    airline = segs_out[0].marketing_airline if segs_out else ""
+    # Every marketing carrier on the trip, in flying order. Naming only the
+    # first segment's carrier sold AI 2546 + FZ 442 / FZ 437 as "Air India"
+    # when two of its three flights are flydubai.
+    carriers = list(dict.fromkeys(
+        s.marketing_airline for s in [*segs_out, *segs_ret] if s.marketing_airline
+    ))
+    airline = " + ".join(carriers)
     airline_code = segs_out[0].marketing_airline_code if segs_out else ""
     stops = max(0, len(segs_out) - 1)
+    stops_return = max(0, len(segs_ret) - 1)
     route_out = f"{segs_out[0].from_airport} → {segs_out[-1].to_airport}" if segs_out else ""
     route_ret = f"{segs_ret[0].from_airport} → {segs_ret[-1].to_airport}" if segs_ret else ""
-    # Total journey = first departure to last arrival, which INCLUDES layovers.
-    # Summing the per-segment `journeyDuration` drops them: Saudia HYD-JED-DXB
-    # is 340 + 175 = 8h 35m of flying, but the customer departs 02:25 and lands
-    # 19:30 -- 17h 5m -- because of a long stop in Jeddah. The shorter figure
-    # made a one-stop look like a direct flight.
-    duration_min = 0
-    if segs_out:
-        first_dep, last_arr = segs_out[0].departure, segs_out[-1].arrival
-        if first_dep and last_arr:
-            duration_min = max(0, int((last_arr - first_dep).total_seconds() // 60))
-        if not duration_min:
-            # No usable timestamps: flying time alone is wrong, but better than
-            # claiming zero.
-            duration_min = sum(s.duration_min for s in segs_out)
+    duration_min = flight_leg_duration_min(segs_out)
+    duration_return_min = flight_leg_duration_min(segs_ret)
 
     is_refundable_label = pricing.get("isRefundable") or ""
     # New API uses "refundable"/"nonrefundable"; legacy used "Yes"/"No"
@@ -278,9 +396,13 @@ def _parse_flight_itinerary(item: dict[str, Any], rates: dict[str, float]) -> Fl
         airline=airline,
         airline_code=airline_code,
         stops=stops,
+        stops_return=stops_return,
         route_outbound=route_out,
         route_return=route_ret,
         duration_min=duration_min,
+        duration_return_min=duration_return_min,
+        cabin=_itinerary_cabin([*segs_out, *segs_ret]),
+        conversation_id=conversation_id,
         segments_outbound=segs_out,
         segments_return=segs_ret,
         refundable=refundable,
@@ -471,6 +593,7 @@ def _parse_hotel(
         cheapest_board=cheapest.mapped_meal_name or cheapest.meal_name,
         cheapest_room_supplier=cheapest.supplier_name,
         has_free_cancellation=cheapest.is_free_cancellation,
+        image_urls=hotel_image_urls(hotel_id_int),
     )
 
 
@@ -580,6 +703,10 @@ def parse_tour_response(
     return options[:max_results] if max_results else options
 
 
+# toursearchlistrate `tourRateTypeId`: "1" per adult, "11" per unit (vehicle).
+UNIT_RATE_TYPE = "11"
+
+
 def _parse_tour(
     t: Any,
     rate_map: dict[int, dict[str, Any]],
@@ -597,7 +724,8 @@ def _parse_tour(
     # Supplier's own currency rule (client-confirmed) rather than the generic
     # sellingROE map, which overquotes by ~2%. Falls back to the old path if no
     # live rate is available.
-    converted, _cur = convert_supplier_price(final_rate, fare_currency=currency)
+    # To the paisa, as the website lists it (Global Village: Rs 590.13, not 590).
+    converted, _cur = convert_supplier_price(final_rate, fare_currency=currency, places=2)
     price_inr = converted or _safe_to_inr(final_rate, currency, rates) or 0.0
     image_url = _resolve_image_url(t.get("imagePath"), image_base_url)
     return TourOption(
@@ -608,6 +736,7 @@ def _parse_tour(
         price_original=float(final_rate or 0),
         currency_original=str(currency),
         final_rate_original=float(final_rate or 0),
+        sold_per_vehicle=str(rate_entry.get("tourRateTypeId") or "") == UNIT_RATE_TYPE,
         discount_type=str(rate_entry.get("discountType") or ""),
         discount_value=float(rate_entry.get("discountValue") or 0),
         duration=str(t.get("duration") or ""),
@@ -657,15 +786,168 @@ _CDN_PREFIXES = ("/tour-images/", "/hotel-images/", "/restaurant-images/")
 # CDN serves it under `/uploads/{guid}/TourMedia/...` -- without that prefix it
 # answers 403. Confirmed by reading the URLs the client's own website uses.
 _CDN_UPLOADS_MARKERS = ("/TourMedia/", "/HotelMedia/", "/RestaurantMedia/")
+# Any tenant media folder: `/{guid}/PackageMedia/`, `/{guid}/TransferVehicleMedia/`
+# and whatever the supplier adds next. Listing folders one by one left package
+# and transfer photos on the API host, which answers 404 for all of them.
+_TENANT_MEDIA = re.compile(r"/[0-9a-f]{8}-[0-9a-f-]{27}/[a-z]+media/", re.IGNORECASE)
+
+
+def airline_logo_url(path: str) -> str:
+    """CDN URL for a segment's `airlinelogoPath` ("/Flightlogos/AI.svg").
+
+    The website loads these from the CDN's /uploads folder; the same path on
+    the API host or the bare CDN answers 404/400. Verified 2026-10-16.
+    """
+    path = (path or "").strip()
+    if not path:
+        return ""
+    if path.startswith("http"):
+        return path
+    return MEDIA_CDN_BASE + "/uploads" + (path if path.startswith("/") else "/" + path)
 
 
 def _cdn_url(path: str) -> str | None:
     """CDN URL for a media path, or None when it is not CDN-served."""
     if path.startswith(_CDN_PREFIXES):
         return MEDIA_CDN_BASE + path
-    if any(m in path for m in _CDN_UPLOADS_MARKERS):
+    # Case-insensitive: restaurant media arrives as ".../restaurantmedia/...",
+    # and a case-sensitive test left every restaurant and dish image pointing
+    # at the API host, which answers 404.
+    lowered = path.lower()
+    if any(m.lower() in lowered for m in _CDN_UPLOADS_MARKERS) or _TENANT_MEDIA.search(path):
         return MEDIA_CDN_BASE + "/uploads" + path
     return None
+
+
+# Hotel photos are not in any supplier response (checked 2026-09-11), but the
+# CDN holds them by hotel id at /hotel-images/{id}/{n}.webp, which is exactly
+# what gujjutours.com renders. Verified 2026-10-15: 21 photos per hotel for
+# every id tried, 404 past that and for unknown ids.
+HOTEL_PHOTOS_SHOWN = 8
+
+
+def hotel_image_urls(hotel_id: Any, count: int = HOTEL_PHOTOS_SHOWN) -> list[str]:
+    """The hotel's CDN photos, first one is the cover. Empty for a bad id."""
+    try:
+        hid = int(hotel_id)
+    except (TypeError, ValueError):
+        return []
+    if hid <= 0:
+        return []
+    return [f"{MEDIA_CDN_BASE}/hotel-images/{hid}/{n}.webp" for n in range(1, count + 1)]
+
+
+def parse_tour_medias(raw: Any) -> list[str]:
+    """A tour's photos from /api/tours/medias, in display order, as CDN URLs."""
+    items = (raw or {}).get("result") if isinstance(raw, dict) else None
+    rows = [m for m in items or [] if isinstance(m, dict) and m.get("imagePath")]
+    rows.sort(key=lambda m: (m.get("displayOrder") is None, m.get("displayOrder") or 0))
+    urls: list[str] = []
+    for m in rows:
+        url = _resolve_image_url(m.get("imagePath"), DEFAULT_IMAGE_BASE_URL)
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
+# The website streams its page data as `self.__next_f.push([1,"<json text>"])`
+# script chunks; the package's parts sit in one object `{"package":[...],
+# "itineraryServices":[...],"packageHotels":[...]}` inside that text.
+_NEXT_PUSH = re.compile(r'self\.__next_f\.push\(\[1,"((?:[^"\\]|\\.)*)"\]\)')
+
+
+def parse_package_page(page_html: str) -> dict[str, Any] | None:
+    """A package's parts from its gujjutours.com page, or None if absent.
+
+    Returns {"services": [...], "hotels": [...], "check_in": "yyyy-mm-dd"}:
+    services in day order (tour id, option id, transfer type, day), hotels in
+    the website's priority order (the first available one is the default).
+    """
+    try:
+        text = "".join(json.loads('"' + m.group(1) + '"') for m in _NEXT_PUSH.finditer(page_html or ""))
+    except ValueError:
+        return None
+    found = re.search(r'\{"package"\s*:\s*\[', text)
+    if not found:
+        return None
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text[found.start():])
+    except ValueError:
+        return None
+    services = []
+    for s in obj.get("itineraryServices") or []:
+        if not isinstance(s, dict) or not s.get("servicesId") or not s.get("optionId"):
+            continue
+        services.append({
+            "day": int(s.get("dayNo") or 0),
+            "tour_id": int(s["servicesId"]),
+            "option_id": int(s["optionId"]),
+            "name": str(s.get("serviceName") or "").strip(),
+            "option_name": str(s.get("optionName") or "").strip(),
+            "transfer_type_id": int(s.get("transferTypeId") or 0),
+            "transfer_type": str(s.get("transferType") or "").strip(),
+            "service_type": str(s.get("serviceType") or ""),
+            "supplier_id": int(s.get("transportProvider") or 1),
+            "optional": bool(s.get("isOptional")),
+            "image_url": _resolve_image_url(s.get("imagePath"), DEFAULT_IMAGE_BASE_URL),
+        })
+    services.sort(key=lambda x: (x["day"], 0))
+    hotels = []
+    for h in obj.get("packageHotels") or []:
+        if not isinstance(h, dict) or not h.get("hotelId"):
+            continue
+        hotels.append({
+            "hotel_id": int(h["hotelId"]),
+            "name": str(h.get("hotelName") or "").strip(),
+            "stars": int(h.get("rating") or 0),
+            "address": str(h.get("address") or "").strip(),
+            "nights": int(h.get("noofnight") or 0),
+            "priority": int(h.get("hotelPriority") or 0),
+            "image_url": _resolve_image_url(h.get("hotelFrontImage"), DEFAULT_IMAGE_BASE_URL),
+        })
+    hotels.sort(key=lambda x: x["priority"] or 999)
+    pkg = (obj.get("package") or [{}])[0] or {}
+    return {
+        "services": services,
+        "hotels": hotels,
+        "check_in": str(pkg.get("checkInDate") or "")[:10],
+        "nights": int(pkg.get("noOfNights") or 0),
+    }
+
+
+def parse_package_hotel_rates(raw: Any) -> dict[int, dict[str, Any]]:
+    """Cheapest room per hotel from packagehotelv1: {hotel_id: {...}}.
+
+    `price` is the supplier's total for the whole stay, in `currency` (AED).
+    """
+    out: dict[int, dict[str, Any]] = {}
+    for chunk in (raw or {}).get("data") or [] if isinstance(raw, dict) else []:
+        rs = (chunk or {}).get("AvailabilityRS") or {}
+        currency = str(rs.get("Currency") or "AED")
+        for h in rs.get("HotelResult") or []:
+            hid = _safe_int(h.get("HotelId"))
+            if hid is None:
+                continue
+            best = None
+            for opt in h.get("HotelOption") or []:
+                for combo in opt.get("HotelRooms") or []:
+                    rooms = [r for r in combo or [] if isinstance(r, dict)]
+                    if not rooms:
+                        continue
+                    price = sum(float(r.get("Price") or 0) for r in rooms)
+                    if price > 0 and (best is None or price < best["price"]):
+                        first = rooms[0]
+                        best = {
+                            "price": price,
+                            "currency": currency,
+                            "room": str(first.get("RoomTypeName") or "").strip(),
+                            "meal": str(first.get("MealName") or "").strip(),
+                            "refundable": "non refundable" not in str(first.get("RoomTypeName") or "").lower()
+                            and "non-refundable" not in str(first.get("RoomTypeName") or "").lower(),
+                        }
+            if best:
+                out[hid] = best
+    return out
 
 
 def _resolve_image_url(image_path: Any, base_url: str) -> str:
@@ -829,28 +1111,7 @@ def _parse_restaurant(
     # `review.reviewCount` is not a count — it is an HTML verdict, e.g.
     # "<p>Very Good</p>". Strip the markup and show it beside the number.
     review_label = _strip_html(review.get("reviewCount"))
-    # Per-meal windows from `restaurantMealTiming`. Each mealType carries one
-    # openingTiming row per weekday; identical hours across days collapse to a
-    # single range, and closed days are dropped.
-    meal_timings: list[dict[str, Any]] = []
-    for meal in r.get("restaurantMealTiming") or []:
-        if not isinstance(meal, dict):
-            continue
-        open_days = [
-            d for d in (meal.get("openingTiming") or [])
-            if isinstance(d, dict) and not d.get("isClosed")
-        ]
-        if not open_days:
-            continue
-        ranges = {
-            f"{str(d.get('openingTime') or '').strip()}-{str(d.get('closingTime') or '').strip()}"
-            for d in open_days
-        }
-        meal_timings.append({
-            "meal_type": str(meal.get("mealType") or "").strip(),
-            "hours": " / ".join(sorted(r for r in ranges if r != "-")),
-            "days": [str(d.get("weekDayName") or "").strip() for d in open_days],
-        })
+    meal_timings = _restaurant_meal_timings(r.get("restaurantMealTiming"))
     # Images: imageInfoList has full list; restaurantImagePath is primary thumbnail
     primary_img = _resolve_image_url(r.get("restaurantImagePath"), image_base_url)
     image_urls: list[str] = []
@@ -863,18 +1124,23 @@ def _parse_restaurant(
             image_urls.append(url)
     if primary_img and primary_img not in image_urls:
         image_urls.insert(0, primary_img)
+    primary_cuisine = str(food_type.get("foodTypeName") or "").strip()
     return RestaurantOption(
         restaurant_id=restaurant_id,
         name=str(r.get("restaurantName") or "").strip(),
         price_per_adult_inr=price_inr,
         price_original=float(price or 0),
         currency_original=str(currency),
-        cuisine=str(food_type.get("foodTypeName") or ""),
+        cuisine=primary_cuisine,
+        cuisines=_restaurant_cuisines(primary_cuisine, r.get("restaurantFoodType")),
         veg_type=str(restaurant_type.get("restaurantTypeName") or ""),
+        tags=_split_labels(r.get("componentName")),
         full_address=_strip_html(address.get("fullAddress")),
+        area=_restaurant_area(address),
         city=str(address.get("city") or ""),
         opening_time=str(hours.get("openingTime") or ""),
         closing_time=str(hours.get("closingTime") or ""),
+        opening_hours=_restaurant_opening_hours(r.get("restaurantTiming")),
         seating_capacity=int(r.get("seatingCapacity") or 0),
         rating=rating,
         review_label=review_label,
@@ -884,7 +1150,162 @@ def _parse_restaurant(
         image_urls=image_urls,
         latitude=latitude,
         longitude=longitude,
+        dishes=_restaurant_dishes(r.get("dishAndBuffetRates"), rates, image_base_url),
     )
+
+
+def _split_labels(value: Any) -> list[str]:
+    """"Pure Veg, Jain Friendly" -> ["Pure Veg", "Jain Friendly"], de-duplicated."""
+    out: list[str] = []
+    for part in str(value or "").split(","):
+        label = _strip_html(part)
+        if label and label.lower() not in {o.lower() for o in out}:
+            out.append(label)
+    return out
+
+
+def _restaurant_cuisines(primary: str, food_types: Any) -> list[str]:
+    """Every cuisine the restaurant serves, its primary one first.
+
+    The list endpoint carries only the primary `foodType`; the details call
+    adds `restaurantFoodType` with all of them. Reporting the primary alone is
+    how Atithi Veg -- pav bhaji, biryani, chaat, Chinese and pasta -- was
+    described to a customer as an Italian restaurant.
+    """
+    out: list[str] = [primary] if primary else []
+    for ft in food_types or []:
+        name = str((ft or {}).get("foodTypeName") or "").strip() if isinstance(ft, dict) else ""
+        if name and name.lower() not in {o.lower() for o in out}:
+            out.append(name)
+    return out
+
+
+#: An Open Location Code ("772R+QGR"): a map grid reference, not a place name.
+_PLUS_CODE_RE = re.compile(r"^[23456789CFGHJMPQRVWX]{2,8}\+[23456789CFGHJMPQRVWX]{0,3}$", re.I)
+
+
+def _restaurant_area(address: dict[str, Any]) -> str:
+    """The neighbourhood named in a supplier address.
+
+    Addresses arrive in Google's " - " form, most specific first:
+    "10 4A St - Al Karama - Dubai - United Arab Emirates". The area is the
+    last part before the city and country. Returns "" when nothing names one
+    ("772R+QGR - Dubai - ..." is a grid code, not an area).
+    """
+    full = _strip_html(address.get("fullAddress"))
+    if not full:
+        return ""
+    # City and country as the supplier spells them, so they can be dropped.
+    known = {
+        part.strip().lower()
+        for key in ("city", "cityNameDefault", "country", "countryNameDefault")
+        for part in str(address.get(key) or "").split(",")
+        if part.strip()
+    }
+    parts = [
+        p.strip() for p in full.split(" - ")
+        if p.strip() and p.strip().lower() not in known and not _PLUS_CODE_RE.match(p.strip())
+    ]
+    return parts[-1] if parts else ""
+
+
+def _restaurant_opening_hours(timings: Any) -> list[dict[str, Any]]:
+    """`restaurantTiming` as one row per weekday, in calendar order."""
+    rows: list[dict[str, Any]] = []
+    for t in timings or []:
+        if not isinstance(t, dict):
+            continue
+        day = str(t.get("weekDayName") or "").strip().title()
+        if not day:
+            continue
+        opens = str(t.get("openingTime") or "").strip()
+        closes = str(t.get("closingTime") or "").strip()
+        rows.append({
+            "day": day,
+            "hours": f"{opens}-{closes}" if opens and closes else "",
+            "closed": bool(t.get("isClosed")),
+        })
+    return sorted(rows, key=lambda row: weekday_order(row["day"]))
+
+
+def _restaurant_meal_timings(meals: Any) -> list[dict[str, Any]]:
+    """Per-meal windows from `restaurantMealTiming`.
+
+    Each mealType carries one openingTiming row per weekday. Days sharing the
+    same hours collapse into one entry; a meal served at different hours on
+    different days yields one entry per distinct window, each naming its days
+    -- merging them into one string lost which hours belonged to which day.
+    Closed days are dropped.
+    """
+    out: list[dict[str, Any]] = []
+    for meal in meals or []:
+        if not isinstance(meal, dict):
+            continue
+        meal_type = str(meal.get("mealType") or "").strip()
+        windows: dict[str, list[str]] = {}
+        for d in meal.get("openingTiming") or []:
+            if not isinstance(d, dict) or d.get("isClosed"):
+                continue
+            opens = str(d.get("openingTime") or "").strip()
+            closes = str(d.get("closingTime") or "").strip()
+            if not (opens and closes):
+                continue
+            windows.setdefault(f"{opens}-{closes}", []).append(
+                str(d.get("weekDayName") or "").strip()
+            )
+        for hours, days in windows.items():
+            out.append({
+                "meal_type": meal_type,
+                "hours": hours,
+                "days": sorted(days, key=weekday_order),
+            })
+    return out
+
+
+def _restaurant_dishes(
+    rates_raw: Any, rates: dict[str, float], image_base_url: str
+) -> list[RestaurantDish]:
+    """The priced menu (`dishAndBuffetRates`), adult and child price per item."""
+    dishes: list[RestaurantDish] = []
+    for dish in rates_raw or []:
+        if not isinstance(dish, dict) or not dish.get("dishName"):
+            continue
+        prices: dict[str, tuple[float | None, float, str, str]] = {}
+        for fi in dish.get("fareInfo") or []:
+            if not isinstance(fi, dict):
+                continue
+            pax = str(fi.get("paxType") or "").strip().lower()
+            currency = str(fi.get("currency") or "AED").strip()
+            amount = fi.get("price")
+            if pax and pax not in prices:
+                prices[pax] = (
+                    _safe_to_inr(amount, currency, rates),
+                    float(amount or 0),
+                    currency,
+                    str(fi.get("paxRateKey") or ""),
+                )
+        adult = prices.get("adult")
+        child = prices.get("child")
+        images = [
+            url for url in (
+                _resolve_image_url(img.get("imagePath"), image_base_url)
+                for img in dish.get("dishImages") or [] if isinstance(img, dict)
+            ) if url
+        ]
+        dishes.append(RestaurantDish(
+            dish_id=_safe_int(dish.get("dishId")),
+            name=str(dish.get("dishName")).strip(),
+            cuisine=str(dish.get("cuisineName") or "").strip(),
+            description=_strip_html(dish.get("description")),
+            adult_price_inr=adult[0] if adult else None,
+            child_price_inr=child[0] if child else None,
+            price_original=adult[1] if adult else 0.0,
+            currency_original=adult[2] if adult else "",
+            rate_key=str(dish.get("rateKey") or ""),
+            pax_rate_key=adult[3] if adult else "",
+            image_urls=images,
+        ))
+    return dishes
 
 
 # =============================================================================
@@ -925,16 +1346,120 @@ def parse_visa_response(raw: dict[str, Any], *, max_results: int | None = None) 
         if sub_options:
             parent_name = v.get("name") or v.get("visaType") or "Tourist Visa"
             visa_type_id = v.get("visaTypeId")
+            policy = parse_visa_policy(v)
+            tracks = policy.get("track_times") or {}
             for opt in sub_options:
                 row = _parse_visa_option(opt, parent_name, visa_type_id, rates)
-                if row is not None:
-                    options.append(row)
+                if row is None:
+                    continue
+                update = dict(policy)
+                # The supplier's per-rate text ("3-4 Working Days", "1 Working
+                # Day") disagrees with the website ("2–4 Working Days", "24–48
+                # Hours"). Every field the agent or the card can read carries
+                # the website's wording, so no reply can quote the other one.
+                if tracks.get("Normal"):
+                    update["processing_time_text"] = tracks["Normal"]
+                update["fares"] = [
+                    f.model_copy(update={"processing_time_text": tracks[f.process_type]})
+                    if tracks.get(f.process_type) else f
+                    for f in row.fares
+                ]
+                options.append(row.model_copy(update=update))
         else:
             # Legacy flat-option shape
             row = _parse_visa_flat(v, rates)
             if row is not None:
                 options.append(row)
     return options[:max_results] if max_results else options
+
+
+_VISA_TRACK_RE = re.compile(
+    r"\b(Normal|Express)\s+(\d+\s*[–-]\s*\d+\s*(?:Working\s+Days?|Hours?|Days?)"
+    r"|\d+\s*(?:Working\s+Days?|Hours?|Days?))",
+    re.I,
+)
+_APPLY_BEFORE_RE = re.compile(
+    r"Apply at least\s+\d+\s*(?:[–-]\s*\d+\s*)?days? before (?:departure|travel)\.?", re.I
+)
+# "Dubai tourist visa fees are non-refundable once ... regardless of the visa
+# outcome." At most one capitalised word before "tourist visa", so a heading
+# run into the sentence ("Please Read Before Paying") is not swept in.
+_VISA_REFUND_RE = re.compile(
+    r"((?:[A-Z][a-z]+ )?(?:tourist )?visa fees? (?:are|is) non-refundable[^.]*\.)", re.I
+)
+_COUNTED_FROM_RE = re.compile(r"Processing time is counted from[^.]*\.", re.I)
+_WEEKEND_RE = re.compile(r"weekends?\s*\(\s*([A-Za-z]{3,9})\s*[–-]\s*([A-Za-z]{3,9})\s*\)", re.I)
+
+
+def parse_visa_policy(visa: dict[str, Any]) -> dict[str, Any]:
+    """The policy facts gujjutours.com publishes for one visa type.
+
+    Everything here is read from the supplier's own data, the same text the
+    website renders: `cancellationPolicies` (refundability) and the
+    process-step article (processing time per track, when to apply, how
+    processing days are counted, the UAE weekend). Nothing is written by us,
+    so the agent can quote it instead of guessing; the guesses were wrong
+    ("a partial refund is likely", "1 Working Day", "definitely ready").
+    """
+    out: dict[str, Any] = {}
+
+    # Refundability: the structured policy is authoritative for the flag.
+    policies = [p for p in visa.get("cancellationPolicies") or [] if isinstance(p, dict)]
+    if policies:
+        out["refundable"] = any(bool(p.get("isRefundable")) for p in policies)
+        desc = " ".join(_strip_html(p.get("description")) for p in policies if p.get("description"))
+        if desc:
+            out["refund_policy"] = desc
+
+    # Tags become spaces, not nothing: table cells written without whitespace
+    # between them ("<td>Normal</td><td>2–4 Working Days</td>") must not run
+    # together into one word.
+    import html as _html
+
+    article = " ".join(
+        _html.unescape(re.sub(r"<[^>]+>", " ", str(s.get("processStepDescription"))))
+        for s in visa.get("processSteps") or []
+        if isinstance(s, dict) and s.get("processStepDescription")
+    )
+    article = re.sub(r"\s+", " ", article)
+    if article:
+        # The website's own refund sentence is the fuller one ("... regardless
+        # of the visa outcome"); prefer it over the short policy line.
+        m = _VISA_REFUND_RE.search(article)
+        if m:
+            out["refund_policy"] = m.group(1).strip()
+
+        tracks: dict[str, str] = {}
+        table_at = article.lower().find("track processing time")
+        scope = article[table_at:table_at + 400] if table_at >= 0 else article
+        for m in _VISA_TRACK_RE.finditer(scope):
+            tier = m.group(1).capitalize()
+            tracks.setdefault(tier, re.sub(r"\s+", " ", m.group(2)).strip())
+        if tracks:
+            out["track_times"] = tracks
+        if re.search(r"Express[^.]{0,80}additional charges apply", scope, re.I):
+            out["express_note"] = "Express costs extra (additional charges apply)."
+
+        m = _APPLY_BEFORE_RE.search(article)
+        if m:
+            out["apply_before_text"] = m.group(0).rstrip(".") + "."
+        m = _COUNTED_FROM_RE.search(article)
+        if m:
+            out["processing_counted_from"] = m.group(0).strip()
+        m = _WEEKEND_RE.search(article)
+        if m:
+            out["weekend_days"] = [m.group(1)[:3].title(), m.group(2)[:3].title()]
+
+    holidays: list[str] = []
+    for h in visa.get("holidays") or []:
+        if isinstance(h, dict) and h.get("fromDate"):
+            holidays.append(str(h.get("fromDate"))[:10])
+            to = str(h.get("toDate") or "")[:10]
+            if to and to != holidays[-1]:
+                holidays.append(to)
+    if holidays:
+        out["holidays"] = holidays
+    return out
 
 
 def _parse_visa_option(
@@ -984,8 +1509,10 @@ def _parse_visa_option(
             # This INCLUDES the service fee, so it is the total the customer
             # pays — deliberately ~fee more than `priceWithoutROE`, which is the
             # fare NET of the fee.
+            # To the paisa: gujjutours.com shows ₹7,755.30, and a whole-rupee
+            # figure can never match it line for line.
             converted, _cur = convert_supplier_price(
-                amount, fare_currency=str(fi.get("currency") or "")
+                amount, fare_currency=str(fi.get("currency") or ""), places=2
             )
             if not converted:
                 # No live rate — fall back to the supplier's own net figure
@@ -1492,7 +2019,7 @@ def _parse_hotel_static_record(h: Any) -> dict[str, Any] | None:
             _first_present(h, "Description", "description", "HotelDescription", "ShortDescription")
         ),
         "facilities": facilities,
-        "image_urls": image_urls,
+        "image_urls": image_urls or hotel_image_urls(hotel_id),
         "phone": str(_first_present(h, "Phone", "PhoneNo", "phone", "ContactNo") or ""),
     }
 

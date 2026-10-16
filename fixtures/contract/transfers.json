@@ -1,0 +1,76 @@
+{
+  "ref": "ref_transfers_dxb_1012",
+  "kind": "transfers",
+  "summary_md": "Airport to Rove Downtown, 12 October, 2 travellers.\n",
+  "rows": [
+    {
+      "id": "TR-SED-4",
+      "kind": "transfers",
+      "title": "Private sedan",
+      "subtitle": "DXB Terminal 3 → Rove Downtown",
+      "price_inr": 2450.0,
+      "price_basis": "per_vehicle",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "Private",
+          "tone": "ok"
+        },
+        {
+          "label": "Meet and greet",
+          "tone": "neutral"
+        }
+      ],
+      "image": {
+        "src": "/api/img?src=supplier%2Ftransfer-sedan.jpg&w=640",
+        "alt": "",
+        "ratio": 1.6
+      },
+      "detail_ref": "transfers:TR-SED-4",
+      "facets": {
+        "Vehicle": "Sedan — up to 3 passengers",
+        "Luggage": "2 large bags",
+        "Type": "Private — your vehicle only",
+        "Waiting time": "60 minutes free after landing"
+      }
+    },
+    {
+      "id": "TR-SHR-1",
+      "kind": "transfers",
+      "title": "Shared shuttle",
+      "subtitle": "DXB Terminal 3 → Rove Downtown",
+      "price_inr": 690.0,
+      "price_basis": "per_adult",
+      "priced_for_pax": 2,
+      "badges": [
+        {
+          "label": "Shared",
+          "tone": "warn"
+        }
+      ],
+      "image": {
+        "src": "/api/img?src=supplier%2Ftransfer-shuttle.jpg&w=640",
+        "alt": "",
+        "ratio": 1.6
+      },
+      "detail_ref": "transfers:TR-SHR-1",
+      "facets": {
+        "Vehicle": "Shuttle bus — shared with other travellers",
+        "Luggage": "1 large bag each",
+        "Type": "Shared — may stop at other hotels",
+        "Waiting time": "Departs on the half hour"
+      }
+    }
+  ],
+  "facts": {
+    "priced_for_pax": 2,
+    "currency": "INR",
+    "as_of": "2026-09-29T09:15:00Z",
+    "date": "2026-10-12",
+    "pricing_note": "Airport transfers are priced by distance and vehicle. This is not how tour transfers work — those are priced by published tier."
+  },
+  "more": null,
+  "degraded": null,
+  "suggest": [],
+  "error": null
+}

@@ -119,7 +119,7 @@ class TestPdfCarriesTheSchedule:
             {"destination": "Dubai", "nights": 5, "total_inr": 1000.0}
         )
         assert not out.get("error"), out.get("message")
-        assert out.get("download_url")
+        assert out.get("itinerary_id")
 
     def test_time_display_shows_the_full_range(self):
         from itinerary_pdf import DayItem

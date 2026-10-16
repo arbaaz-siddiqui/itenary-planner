@@ -101,7 +101,7 @@ class TestEndTimesAreBackfilled:
             {"start_date": "2026-09-01", "nights": 3, "adults": 2,
              "tours": [{"name": "Abu Dhabi City Tour from Dubai"}]}
         )
-        cached = at._LAST_PLAN.get("days") or []
+        cached = at._last_plan().get("days") or []
         assert cached, "expected a cached plan"
         timed = [i for d in cached for i in (d.get("items") or [])
                  if i.get("start") and i.get("end")]

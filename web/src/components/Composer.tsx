@@ -1,29 +1,66 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { ArrowUp, MessageCircle, Route, Square, X } from "lucide-react";
+import { serviceById, type ServiceId } from "@/lib/services";
 
-const MAX_ROWS_PX = 200;
+/** About six lines; then the box scrolls inside itself. */
+const MAX_HEIGHT_PX = 168;
 
-export function Composer({
-  onSend,
-  onStop,
-  streaming,
-  disabled,
-}: {
-  onSend: (text: string) => void;
-  onStop: () => void;
-  streaming: boolean;
-  disabled?: boolean;
-}) {
+export type ComposerMode = "ask" | "plan";
+
+export interface ComposerHandle {
+  /** Drop text into the box (a starter prompt, "Ask the agent about this"). */
+  prefill: (text: string) => void;
+  focus: () => void;
+}
+
+const MODES = [
+  { id: "ask", label: "Ask", icon: MessageCircle, hint: "Quick answers: prices, options, policies" },
+  { id: "plan", label: "Plan", icon: Route, hint: "Full trip: flights, hotel and tours, day by day" },
+] as const;
+
+export const Composer = forwardRef<
+  ComposerHandle,
+  {
+    onSend: (text: string) => void;
+    onStop: () => void;
+    streaming: boolean;
+    disabled?: boolean;
+    /** "hero" is the big centred box on the home screen; "dock" sits under the chat. */
+    variant?: "hero" | "dock";
+    service?: ServiceId | null;
+    onClearService?: () => void;
+    mode: ComposerMode;
+    onModeChange: (m: ComposerMode) => void;
+  }
+>(function Composer(
+  { onSend, onStop, streaming, disabled, variant = "dock", service, onClearService, mode, onModeChange },
+  ref,
+) {
   const [text, setText] = useState("");
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const area = useRef<HTMLTextAreaElement>(null);
+  const svc = serviceById(service);
+
+  useImperativeHandle(ref, () => ({
+    prefill: (t: string) => {
+      setText(t);
+      requestAnimationFrame(() => {
+        const el = area.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(t.length, t.length);
+      });
+    },
+    focus: () => area.current?.focus(),
+  }));
 
   // Grow with content up to a cap, then scroll internally.
   useEffect(() => {
-    const el = ref.current;
+    const el = area.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, MAX_ROWS_PX)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`;
   }, [text]);
 
   function submit() {
@@ -41,46 +78,109 @@ export function Composer({
     }
   }
 
-  return (
-    <div className="border-t border-border bg-bg px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
-      <div className="mx-auto flex w-full max-w-3xl items-end gap-2">
-        <textarea
-          ref={ref}
-          rows={1}
-          value={text}
-          disabled={disabled}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Ask about hotels, tours, flights…"
-          aria-label="Message"
-          className="flex-1 resize-none rounded-2xl border border-border bg-surface px-3.5 py-2.5 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-50"
-        />
-        {streaming ? (
-          <button
-            type="button"
-            onClick={onStop}
-            aria-label="Stop generating"
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-border bg-surface transition hover:bg-surface-2"
-          >
-            <span className="h-3 w-3 rounded-[2px] bg-fg" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!text.trim() || disabled}
-            aria-label="Send message"
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-white transition hover:opacity-90 disabled:opacity-40"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 19V5M5 12l7-7 7 7" />
-            </svg>
-          </button>
-        )}
+  const hero = variant === "hero";
+
+  const box = (
+    <div
+      className={`w-full rounded-3xl border border-border bg-surface shadow-lg transition focus-within:border-brand-blue/60 ${
+        hero ? "shadow-black/30" : "shadow-black/10"
+      }`}
+    >
+      {/* Text and mode toggle on the left; send, centred on the right. */}
+      <div className="flex items-center gap-2 pr-3">
+      <div className="min-w-0 flex-1">
+      {svc && (
+        <div className="px-4 pt-3">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-blue/15 py-1 pl-2.5 pr-1 text-xs font-medium text-link">
+            <svc.icon size={13} aria-hidden />
+            {svc.label}
+            <button
+              type="button"
+              onClick={onClearService}
+              aria-label={`Remove ${svc.label}`}
+              className="grid h-5 w-5 place-items-center rounded-full hover:bg-brand-blue/20"
+            >
+              <X size={12} aria-hidden />
+            </button>
+          </span>
+        </div>
+      )}
+      <textarea
+        ref={area}
+        rows={hero ? 2 : 1}
+        value={text}
+        disabled={disabled}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder={
+          mode === "plan"
+            ? "Describe the trip: where, when, who is travelling…"
+            : svc
+              ? `Ask about ${svc.label.toLowerCase()}…`
+              : "Ask about flights, hotels, tours, visas…"
+        }
+        aria-label="Message"
+        className={`no-scrollbar block w-full resize-none bg-transparent px-4 text-fg outline-none placeholder:truncate placeholder:text-fg-muted disabled:opacity-50 ${
+          hero ? "pt-4 text-base" : "pt-3 text-[15px]"
+        }`}
+      />
+      <div className="flex items-center gap-2 px-2 pb-2 pl-3 pt-3">
+        {/* Ask answers the question in hand; Plan builds the whole trip. The
+            server turns Plan into an instruction to gather the essentials and
+            produce a priced day-by-day itinerary. */}
+        <div role="radiogroup" aria-label="Mode" className="flex rounded-full bg-surface-2 p-0.5 text-xs">
+          {MODES.map(({ id, label, icon: Icon, hint }) => (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={mode === id}
+              title={hint}
+              onClick={() => onModeChange(id)}
+              className={`press inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-medium ${
+                mode === id ? "bg-brand-blue text-white shadow-sm" : "text-fg-muted hover:text-fg"
+              }`}
+            >
+              <Icon size={13} aria-hidden />
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="hidden min-w-0 flex-1 truncate text-xs text-fg-muted sm:block">
+          {MODES.find((m) => m.id === mode)?.hint}
+        </p>
+        <div className="flex-1 sm:hidden" />
       </div>
-      <p className="mx-auto mt-1.5 max-w-3xl text-center text-[11px] text-fg-muted">
-        Enter to send · Shift+Enter for a new line
-      </p>
+      </div>
+          {streaming ? (
+            <button
+              type="button"
+              onClick={onStop}
+              aria-label="Stop generating"
+              className="press grid h-11 w-11 shrink-0 place-items-center rounded-full bg-fg text-bg hover:opacity-85"
+            >
+              <Square size={13} fill="currentColor" aria-hidden />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!text.trim() || disabled}
+              aria-label="Send message"
+              className="press grid h-11 w-11 shrink-0 place-items-center rounded-full bg-fg text-bg hover:opacity-85 disabled:opacity-30"
+            >
+              <ArrowUp size={19} strokeWidth={2.25} aria-hidden />
+            </button>
+          )}
+      </div>
     </div>
   );
-}
+
+  if (hero) return box;
+
+  return (
+    <div className="px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
+      <div className="mx-auto w-full max-w-[820px]">{box}</div>
+    </div>
+  );
+});
