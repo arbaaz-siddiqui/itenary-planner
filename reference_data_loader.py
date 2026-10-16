@@ -6,6 +6,7 @@ read so we don't hit disk on every lookup.
 
 from __future__ import annotations
 
+import difflib
 import json
 from functools import lru_cache
 from pathlib import Path
@@ -50,7 +51,32 @@ def resolve_city(name: str) -> dict[str, Any] | None:
     token = name.strip().upper()
     if len(token) == 3 and token.isalpha():
         return _iata_index().get(token)
+    # Customers misspell cities ("Ahemdabad"). An exact-only lookup turned the
+    # typo into "unknown origin", and the corrected spelling was then refused
+    # as a city the customer never named, so the search could not run at all.
+    # Close spellings of long names only: short words stay exact so ordinary
+    # words in a sentence never turn into a city.
+    if len(key) >= FUZZY_MIN_LEN:
+        close = difflib.get_close_matches(key, list((_load_cities().get("cities") or {})),
+                                          n=1, cutoff=FUZZY_CUTOFF)
+        if close:
+            return (_load_cities().get("cities") or {}).get(close[0])
     return None
+
+
+# Thresholds for misspelt place names: "ahemdabad" -> "ahmedabad" scores 0.89.
+FUZZY_MIN_LEN = 6
+FUZZY_CUTOFF = 0.85
+
+
+def close_spelling(a: str, b: str) -> bool:
+    """True when two long words are the same name with a typo."""
+    a, b = a.strip().lower(), b.strip().lower()
+    if a == b:
+        return True
+    if min(len(a), len(b)) < FUZZY_MIN_LEN:
+        return False
+    return difflib.SequenceMatcher(None, a, b).ratio() >= FUZZY_CUTOFF
 
 
 def iter_cities() -> list[dict[str, Any]]:

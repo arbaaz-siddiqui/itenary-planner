@@ -17,6 +17,7 @@ import {
   Users,
   UtensilsCrossed,
 } from "lucide-react";
+import { useState } from "react";
 import type { CardRef } from "@/lib/cardActions";
 import { partyTotalNote, formatInr, imagesOf, num, obj, objList, str, strList, titleOf } from "@/lib/cards";
 import type { OptionItem } from "@/lib/types";
@@ -347,6 +348,36 @@ function LegRow({ leg, fallbackRoute }: { leg: OptionItem; fallbackRoute: string
 
 const CABINS: Record<string, string> = { Y: "Economy", S: "Premium economy", C: "Business", F: "First" };
 
+/** The airlines' own logos (from the supplier, on the CDN), stacked when a
+ *  trip flies more than one. Falls back to the airline code badge. */
+function AirlineLogos({ urls, code }: { urls: string[]; code: string | null }) {
+  const [failed, setFailed] = useState<string[]>([]);
+  const shown = urls.filter((u) => !failed.includes(u)).slice(0, 2);
+  if (!shown.length) {
+    return (
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-red/10 text-xs font-bold text-brand-red">
+        {code ?? <Plane size={16} aria-hidden />}
+      </span>
+    );
+  }
+  return (
+    <span className="flex shrink-0 -space-x-2">
+      {shown.map((u) => (
+        <span key={u} className="grid h-10 w-10 place-items-center overflow-hidden rounded-full bg-white p-1.5 ring-2 ring-surface">
+          <img
+            src={u}
+            alt=""
+            aria-hidden
+            loading="lazy"
+            className="h-full w-full object-contain"
+            onError={() => setFailed((f) => [...f, u])}
+          />
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export function FlightRow({ card }: CardProps) {
   const o = card.item;
   const outbound = obj(o, "outbound");
@@ -359,9 +390,7 @@ export function FlightRow({ card }: CardProps) {
     <CardShell card={card} className="!h-auto">
       <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
         <div className="flex min-w-0 items-center gap-3 sm:w-44">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-red/10 text-xs font-bold text-brand-red">
-            {code ?? <Plane size={16} aria-hidden />}
-          </span>
+          <AirlineLogos urls={strList(o, "airline_logos")} code={code} />
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-fg">{titleOf(o, "flight")}</p>
             <p className="truncate text-xs text-fg-muted">

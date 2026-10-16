@@ -1093,7 +1093,15 @@ def customer_said(value: str) -> bool:
     said = _CONVERSATION_TEXT.get()
     if not said or not value:
         return True
-    return value.strip().lower().split()[0] in said
+    first = value.strip().lower().split()[0]
+    if first in said.lower():
+        return True
+    # A typo still counts as naming it: the customer wrote "Ahemdabad" and the
+    # model sent "Ahmedabad", which was refused as a city they never named.
+    # Long words only, so a short guess never passes for something they said.
+    from reference_data_loader import close_spelling
+
+    return any(close_spelling(first, w) for w in re.findall(r"[a-z]+", said.lower()))
 
 
 # Any way a customer names a day: "22 Oct", "22/10", "2026-10-22", "the 5th",

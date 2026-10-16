@@ -770,6 +770,20 @@ _CDN_UPLOADS_MARKERS = ("/TourMedia/", "/HotelMedia/", "/RestaurantMedia/")
 _TENANT_MEDIA = re.compile(r"/[0-9a-f]{8}-[0-9a-f-]{27}/[a-z]+media/", re.IGNORECASE)
 
 
+def airline_logo_url(path: str) -> str:
+    """CDN URL for a segment's `airlinelogoPath` ("/Flightlogos/AI.svg").
+
+    The website loads these from the CDN's /uploads folder; the same path on
+    the API host or the bare CDN answers 404/400. Verified 2026-10-16.
+    """
+    path = (path or "").strip()
+    if not path:
+        return ""
+    if path.startswith("http"):
+        return path
+    return MEDIA_CDN_BASE + "/uploads" + (path if path.startswith("/") else "/" + path)
+
+
 def _cdn_url(path: str) -> str | None:
     """CDN URL for a media path, or None when it is not CDN-served."""
     if path.startswith(_CDN_PREFIXES):
