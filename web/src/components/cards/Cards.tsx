@@ -363,16 +363,17 @@ function AirlineLogos({ urls, code }: { urls: string[]; code: string | null }) {
   return (
     <span className="flex shrink-0 -space-x-2">
       {shown.map((u) => (
-        <span key={u} className="grid h-10 w-10 place-items-center overflow-hidden rounded-full bg-white p-1.5 ring-2 ring-surface">
-          <img
-            src={u}
-            alt=""
-            aria-hidden
-            loading="lazy"
-            className="h-full w-full object-contain"
-            onError={() => setFailed((f) => [...f, u])}
-          />
-        </span>
+        // Each supplier SVG is already a round 40x40 badge with its own
+        // colour, so it fills the slot with no frame of ours around it.
+        <img
+          key={u}
+          src={u}
+          alt=""
+          aria-hidden
+          loading="lazy"
+          className="h-10 w-10 rounded-full object-cover ring-2 ring-surface"
+          onError={() => setFailed((f) => [...f, u])}
+        />
       ))}
     </span>
   );
