@@ -897,3 +897,42 @@ class TestPdfReusesThePlan:
             }
         )
         assert out.get("error_type") == "MissingDayPlans"
+
+
+# --- Time of day: a dinner cruise is in the evening ------------------------
+
+def test_dinner_cruise_is_scheduled_in_the_evening():
+    from scheduling import build_itinerary
+
+    plan = build_itinerary(
+        start_date="2026-10-23", nights=3,
+        tours=[{"name": "Dhow Cruise Dubai Marina With Dinner by GujjuTours", "duration": "2 Hours (Approx)"}],
+    )
+    starts = [i["start"] for d in plan["days"] for i in d["items"] if i["kind"] == "tour"]
+    assert starts and starts[0] >= "19:30"
+
+
+def test_daytime_tour_still_fits_before_an_evening_one_on_the_same_day():
+    from scheduling import build_itinerary
+
+    plan = build_itinerary(
+        start_date="2026-10-23", nights=1,
+        tours=[
+            {"name": "Dhow Cruise Dubai Marina With Dinner", "duration": "2 Hours (Approx)"},
+            {"name": "Dubai Frame Tickets", "duration": "2 Hours"},
+        ],
+    )
+    day = [i for d in plan["days"] for i in d["items"] if i["kind"] == "tour"]
+    by_title = {i["title"]: i["start"] for i in day}
+    assert by_title["Dubai Frame Tickets"] < "12:00"
+    assert by_title["Dhow Cruise Dubai Marina With Dinner"] >= "19:30"
+
+
+def test_time_of_day_floors():
+    from datetime import time
+
+    from scheduling import time_of_day_floor
+
+    assert time_of_day_floor({"name": "Global Village Dubai Tickets"}) == time(16, 0)
+    assert time_of_day_floor({"name": "Dubai Desert Safari by Gujjutours"}) == time(15, 0)
+    assert time_of_day_floor({"name": "Burj Khalifa Tickets"}) is None

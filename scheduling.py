@@ -263,6 +263,26 @@ def earliest_free_time(
     return None if carry else free  # rolled past midnight -> nothing today
 
 
+# When an activity can start at the earliest, by what it is. The supplier gives
+# no start time for most tours (Tourdetails `startTime` is empty), so a dinner
+# cruise was scheduled at 09:45. Matched on the tour's name and category; the
+# first matching rule wins, and a tour with published slots uses those instead.
+_TIME_OF_DAY_FLOORS: tuple[tuple[re.Pattern[str], time], ...] = (
+    (re.compile(r"\b(dinner|night|evening|nocturnal|after dark)\b", re.I), time(19, 30)),
+    (re.compile(r"global village", re.I), time(16, 0)),
+    (re.compile(r"\b(sunset|desert safari|dune bash\w*|safari)\b", re.I), time(15, 0)),
+)
+
+
+def time_of_day_floor(tour: dict[str, Any]) -> time | None:
+    """The earliest sensible start for this kind of activity, or None."""
+    text = " ".join(str(tour.get(k) or "") for k in ("name", "title", "category", "option_name"))
+    for pattern, floor in _TIME_OF_DAY_FLOORS:
+        if pattern.search(text):
+            return floor
+    return None
+
+
 def _activity_minutes(tour: dict[str, Any], p: SchedulePolicy) -> int:
     return parse_duration_minutes(tour.get("duration")) or p.default_activity_min
 
@@ -310,7 +330,11 @@ def _place_on_day(
             f"last slot is {last}, but you are not free until {_fmt(ready)}"
         )
 
-    # No published slots: schedule by duration.
+    # No published slots: schedule by duration, but not before the hour this
+    # kind of activity happens at (a dinner cruise in the evening).
+    floor = time_of_day_floor(tour)
+    if floor and ready < floor:
+        ready = floor
     if ready > policy.latest_activity_start:
         return None, f"too late to start ({_fmt(ready)})"
     end, carry = _add_minutes(ready, dur)
@@ -428,7 +452,9 @@ def build_itinerary(
     # Sorting by duration keeps the caller's order as the tie-break, so
     # recommended-first still decides between tours of similar length.
     ordered = [t for t in (tours or []) if isinstance(t, dict)]
-    ordered.sort(key=lambda t: -_activity_minutes(t, p))
+    # Evening activities go last so a day's daytime tour is placed first;
+    # placed first, a dinner cruise would end the day before the morning tour.
+    ordered.sort(key=lambda t: (time_of_day_floor(t) is not None, -_activity_minutes(t, p)))
     # A tour priced for a particular date goes on THAT day, placed before the
     # free-floating ones so they cannot take its slot. The Desert Safari was
     # priced for 3 October and scheduled on 5 October; the customer would have
