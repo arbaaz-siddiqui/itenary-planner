@@ -456,7 +456,11 @@ def _impl(
         option_dicts = []
         for o in options:
             d = o.model_dump()
-            d["sharing_display"] = o.sharing_display
+            # An airport pickup is the transfer itself: "Ticket only, no
+            # transfer included" read as if the car were missing.
+            d["sharing_display"] = (
+                "Priced per vehicle" if getattr(o, "sold_per_vehicle", False) else o.sharing_display
+            )
             # Real per-transfer-type prices when the supplier has them.
             if getattr(o, "transfer_prices", None):
                 d["transfer_prices"] = o.transfer_prices

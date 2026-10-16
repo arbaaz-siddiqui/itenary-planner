@@ -1333,3 +1333,25 @@ def transfer_quote(
             "and never multiply a private price by the party size."
         ),
     }
+
+
+# "no visa", "without a visa", "do not add flights, meals or visa", "we already
+# have our visas": the customer has said a part is not wanted.
+_EXCLUDES_TEMPLATE = (
+    r"\b(?:no|without|excluding|exclude|skip|minus|"
+    r"(?:do not|don'?t|dont)\s+(?:add|need|want|include|book))\b[^.?!\n]{0,60}?\b{part}s?\b"
+    r"|\b(?:already\s+(?:have|got)|have\s+(?:our|my)\s+own)\b[^.?!\n]{0,30}?\b{part}s?\b"
+)
+
+
+def customer_excluded(part: str) -> bool:
+    """True if the customer's own words say they do not want `part`.
+
+    Fails closed (False) with no conversation text, so a direct tool call
+    keeps its default.
+    """
+    said = _CONVERSATION_TEXT.get()
+    if not said or not part:
+        return False
+    pattern = _EXCLUDES_TEMPLATE.replace("{part}", re.escape(part.lower()))
+    return bool(re.search(pattern, said.lower()))

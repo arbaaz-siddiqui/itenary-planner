@@ -707,6 +707,7 @@ def plan_itinerary_tool(
     visa_per_adult_inr: float = 0.0,
     transfer_total_inr: float = 0.0,
     fill_days: bool = False,
+    include_visa: bool = True,
     origin_city: str = "",
     destination_city: str = "Dubai",
     flight_fare_ref: str = "",
@@ -751,6 +752,8 @@ def plan_itinerary_tool(
             Rs 64,792.
         hotel_total_inr: total stay price of the hotel you showed, all rooms.
         visa_per_adult_inr: per-adult visa price you quoted (tool multiplies).
+        include_visa: False when the customer does not want a visa (has one,
+            or said "no visa"); the cheapest tourist visa is added otherwise.
         transfer_total_inr: the price of an AIRPORT transfer from
             search_airport_transfer_dubai that the customer has seen. 0 when no
             airport transfer was searched: never pass a tour's transfer price
@@ -868,6 +871,18 @@ def plan_itinerary_tool(
             )
             auto_filled.append(name.title())
             have_min += mins
+
+    from rules import customer_said
+
+    # Flight times with no flight behind them are invented: a trip planned
+    # without flights showed "12:00 Arrive in Dubai" and "10:00 Departure
+    # flight". Kept only when a flight is in the package or the customer said
+    # the time themselves.
+    if not flight_total_inr and not flight_fare_ref:
+        if arrival_time and not customer_said(str(arrival_time)):
+            arrival_time = ""
+        if departure_time and not customer_said(str(departure_time)):
+            departure_time = ""
 
     _sched_kwargs = dict(
         start_date=start_date,
@@ -1003,7 +1018,13 @@ def plan_itinerary_tool(
         except Exception as e:  # noqa: BLE001
             logger.debug("hotel lookup for total failed: %s", e)
 
-    if not visa_per_adult_inr:
+    from rules import customer_excluded
+
+    # A visa nobody asked for was added to every plan: "Do not add flights,
+    # meals or visa" still produced a Rs 15,504.58 visa line and total.
+    if not include_visa or customer_excluded("visa"):
+        visa_per_adult_inr = 0.0
+    elif not visa_per_adult_inr:
         try:
             from mcp_tools.get_visa_info import _impl as _gv
 
@@ -1089,16 +1110,6 @@ def plan_itinerary_tool(
         "visa": visa_total,
         "transfers": round(float(transfer_total_inr or 0.0), 2),
     }
-    # Cache for generate_itinerary_pdf_tool: the day plan it needs already
-    # exists here, so a PDF request should never bounce on MissingDayPlans.
-    _remember_plan({
-        "days": out.get("days") or [],
-        "start_date": start_date,
-        "nights": nights,
-        "adults": pax,
-        "total_inr": out.get("total_inr"),
-        "cost_breakdown": out.get("cost_breakdown") or {},
-    })
     # An airport transfer the package does not pay for must not read as part of
     # it. The scheduler always draws the arrival transfer; say when it is extra.
     if not components["transfers"]:
@@ -1136,6 +1147,32 @@ def plan_itinerary_tool(
     out["cost_breakdown"] = components
     out["total_inr"] = round(sum(components.values()), 2)
     out["adults"] = pax
+    # The reply kept pasting the search tools' tables and naming the plan in
+    # one line ("I have put together a sample itinerary ... total Rs 14,940"),
+    # so the customer never saw the day-by-day they asked for.
+    out["agent_instructions"] = (
+        "Your reply IS this plan. Write it as: one line naming the hotel and the "
+        "dates; the day-by-day from `days` (each day's items with their times; a "
+        "hotel check-in or check-out without a time stays untimed); then the cost "
+        "lines from `package_lines` and the TOTAL `total_inr` for the party, quoted "
+        "as they are. Do NOT paste the search results' tables or option lists: the "
+        "cards under the reply already show them. Then offer to change any part or "
+        "make the PDF."
+    )
+    # Cache for generate_itinerary_pdf_tool: the day plan and the priced lines
+    # it needs already exist here. Remembered AFTER pricing: stored before,
+    # the cached total was None and the PDF took whatever figures the model
+    # sent, including a visa the customer had said not to add.
+    _remember_plan({
+        "days": out.get("days") or [],
+        "start_date": start_date,
+        "nights": nights,
+        "adults": pax,
+        "hotel_name": hotel_name,
+        "total_inr": out["total_inr"],
+        "cost_breakdown": components,
+        "package_lines": lines,
+    })
     missing = [s["tour"] for s in scheduled if s["per_adult_inr"] <= 0]
     out["costing_note"] = (
         "These totals are computed, not estimated — quote `total_inr` and the "
@@ -1226,6 +1263,32 @@ def compose_customer_payment_summary_tool(
         "compliance_documents": summary.compliance_documents_required,
         "disclaimer": "All taxes and fees included.",
     }
+
+
+def _same_trip_as_plan(plan: dict[str, Any], start_date: str, nights: int | None) -> bool:
+    """The PDF asked for is the trip the last plan in this chat built."""
+    if not plan.get("days"):
+        return False
+    if start_date and str(plan.get("start_date") or "") != str(start_date):
+        return False
+    return nights is None or int(plan.get("nights") or -1) == int(nights)
+
+
+def _components_from_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """The plan's priced lines as the PDF's components."""
+    adults = int(plan.get("adults") or 0)
+    party = f"{adults} adult{'s' if adults != 1 else ''}" if adults else ""
+    out: list[dict[str, Any]] = []
+    for line in plan.get("package_lines") or []:
+        item = str(line.get("item") or "")
+        detail = str(line.get("detail") or "")
+        if not detail:
+            if item.startswith("Hotel"):
+                detail = f"{plan.get('nights')} nights" + (f", {party}" if party else "")
+            elif line.get("date"):
+                detail = f"{line['date']}" + (f", {party}" if party else "")
+        out.append({"label": item, "detail": detail, "amount_inr": line.get("amount_inr")})
+    return out
 
 
 @tool
@@ -1368,6 +1431,17 @@ def generate_itinerary_pdf_tool(
                       str(_it.get("start") or "").strip())
                 if _k in _ends:
                     _it["end"] = _ends[_k]
+
+    # The prices come from the plan this chat built, not from the call. The
+    # model sent its own figures and added a Rs 15,504.58 visa to a trip the
+    # customer had asked to plan without one; the plan's own lines are what
+    # the chat showed and what the total was made of.
+    if _same_trip_as_plan(last_plan, start_date, nights) and last_plan.get("package_lines"):
+        components = _components_from_plan(last_plan)
+        total_inr = last_plan.get("total_inr")
+        if not any(str(c.get("label", "")).lower().startswith("visa") for c in components):
+            visa = None
+            inclusions = [i for i in (inclusions or []) if "visa" not in str(i).lower()]
 
     data: dict[str, Any] = {
         "destination": destination,

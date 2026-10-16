@@ -176,6 +176,20 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _keep_pdf(itinerary_id: str, session_id: str, filename: str) -> None:
+    """Store a freshly generated PDF with its chat, so it survives redeploys."""
+    from itinerary_store import get_itinerary_path
+
+    path = get_itinerary_path(itinerary_id)
+    if path is None:
+        log.warning("itinerary_pdf_missing_after_build id=%s", itinerary_id)
+        return
+    try:
+        repository.save_itinerary_pdf(itinerary_id, session_id, filename, path.read_bytes())
+    except Exception as e:  # noqa: BLE001 -- the file still serves from disk today
+        log.warning("itinerary_pdf_store_failed id=%s: %s", itinerary_id, e)
+
+
 @app.get("/itinerary/{itinerary_id}.pdf")
 async def serve_itinerary(itinerary_id: str) -> Response:
     """The generated itinerary PDF.
@@ -190,11 +204,25 @@ async def serve_itinerary(itinerary_id: str) -> Response:
     from itinerary_store import get_itinerary_path
 
     path = get_itinerary_path(itinerary_id)
-    if path is None:
-        return Response(content="Not found", status_code=404)
-    return FileResponse(
-        path, media_type="application/pdf", filename="Dubai-itinerary.pdf"
-    )
+    if path is not None:
+        return FileResponse(
+            path, media_type="application/pdf", filename="Dubai-itinerary.pdf"
+        )
+    # The API's disk is replaced on every deploy; the copy kept with the
+    # chat is what makes an older PDF still download.
+    if itinerary_id.isalnum():
+        try:
+            stored = await asyncio.to_thread(repository.get_itinerary_pdf, itinerary_id)
+        except Exception as e:  # noqa: BLE001 -- a DB hiccup is a 404, not a 500
+            log.warning("itinerary_pdf_lookup_failed id=%s: %s", itinerary_id, e)
+            stored = None
+        if stored:
+            filename, data = stored
+            return Response(
+                content=data, media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+    return Response(content="Not found", status_code=404)
 
 
 @app.get("/health/db")
@@ -489,7 +517,13 @@ _MODE_CONTEXT = {
         "unless flights are included. Otherwise plan flights, a hotel and "
         "tours. If the destination, travel dates, party (adults, children and "
         "their ages) or, for flights, the departure city is missing, ask for "
-        "all the missing ones in ONE short question. Once known, search each "
+        "all the missing ones in ONE short question. Never assume a return "
+        "date or the number of nights: \"the dates I shared\" with only an "
+        "outbound date, or two different sets of dates in the chat, is a "
+        "question, not 4 nights you chose. A full trip has return flights "
+        "unless the customer said one-way. Your reply is the plan "
+        "plan_itinerary_tool built (day by day, then its cost lines and "
+        "total), never the search results' tables. Once known, search each "
         "part live, build the day-by-day plan with plan_itinerary_tool, give "
         "the trip total from the tools, and offer to change any part.\n\n"
     ),
@@ -780,6 +814,8 @@ async def _turn_events(
                     "filename": out.get("filename") or "itinerary.pdf",
                 }],
             })
+            _keep_pdf(str(out.get("itinerary_id")), str(session["id"]),
+                      str(out.get("filename") or "itinerary.pdf"))
             break
     except Exception as e:  # noqa: BLE001 — never fail a turn over the PDF
         log.warning("pdf_extraction_failed: %s", e)

@@ -33,7 +33,13 @@ export function ItineraryPdf({ item }: { item: OptionItem }) {
     setError(null);
     try {
       const res = await fetch(href);
-      if (!res.ok) throw new Error(`The file is no longer available (${res.status}).`);
+      if (!res.ok) {
+        throw new Error(
+          res.status === 404
+            ? "This PDF is no longer stored. Ask me to generate the itinerary PDF again."
+            : "The PDF could not be downloaded. Please try again.",
+        );
+      }
       const blob = await res.blob();
       const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");

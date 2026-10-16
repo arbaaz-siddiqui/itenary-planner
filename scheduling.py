@@ -434,12 +434,26 @@ def build_itinerary(
                 )
             )
 
+    elif hotel_name:
+        # No flight times: still say where the trip starts. A first day with
+        # nothing on it printed as a bare "Day 1" heading in the PDF. Untimed,
+        # because no arrival time was given to time it by.
+        days[0].label = "Arrival"
+        days[0].items.append(
+            ScheduledItem(start="", end="", title=f"Check in at {hotel_name}", kind="hotel")
+        )
+
     # --- Departure day: keep it clear ---
     dep = _to_time(departure_time)
     if dep is not None and total_days > 1:
         days[-1].label = "Departure"
         days[-1].items.append(
             ScheduledItem(start=_fmt(dep), end="", title="Departure flight", kind="flight")
+        )
+    elif hotel_name and total_days > 1:
+        days[-1].label = "Departure"
+        days[-1].items.append(
+            ScheduledItem(start="", end="", title=f"Check out of {hotel_name}", kind="hotel")
         )
 
     # --- Place the tours ---
@@ -538,6 +552,9 @@ def build_itinerary(
         late_arrival = idx == 0 and landed is not None and landed.hour >= 20
 
         def _key(i: ScheduledItem, _late: bool = late_arrival) -> tuple[int, str]:
+            # An untimed hotel check-in opens the day it is on.
+            if i.kind == "hotel" and not i.start and i.title.startswith("Check in"):
+                return (-1, "")
             start = i.start or "99:99"
             # Times before 06:00 on a late-arrival day belong after the evening.
             if _late and start < "06:00":
@@ -554,7 +571,11 @@ def build_itinerary(
     for idx, d in enumerate(days):
         if idx in blocked_days:
             continue
-        if dep is not None and idx == len(days) - 1 and total_days > 1:
+        # The last day of a multi-day trip is the check-out and travel day,
+        # with or without a departure time. Counting it "empty" made a
+        # finished 2-night plan look incomplete, and the model threw the plan
+        # away and replied with option tables.
+        if idx == len(days) - 1 and total_days > 1:
             continue
         if not any(i.kind == "tour" for i in d.items):
             empty.append(d.day_number)
@@ -565,8 +586,10 @@ def build_itinerary(
         "empty_days": empty,
         "planning_note": (
             f"Days {', '.join(map(str, empty))} have no activity. Search for more "
-            f"tours and call this again with a longer list — do NOT present a "
-            f"'free day' as a finished plan unless the customer asked for one."
+            f"tours and call this again with a longer list, unless the customer "
+            f"chose these tours (or how many): then present this plan as it is "
+            f"and offer to add a tour on those days. Never drop a built plan for "
+            f"a list of options, and never call an empty day a planned 'free day'."
             if empty
             else "Every day has at least one activity."
         ),
