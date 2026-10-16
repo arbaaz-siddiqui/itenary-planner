@@ -226,6 +226,10 @@ export const api = {
         `/details?supplier_id=${supplierId}`,
     ),
 
+  /** Every photo of a tour, loaded when its card opens (search carries one). */
+  tourImages: (tourId: number): Promise<{ images: string[] }> =>
+    MOCK_MODE ? Promise.resolve({ images: [] }) : request(`/tours/${tourId}/images`),
+
   /**
    * Stream one assistant turn. Yields StreamEvents in arrival order; the
    * caller decides how to fold them into a message.

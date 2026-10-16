@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, ExternalLink, MapPin, MessageCircle, Plane, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { CardRef } from "@/lib/cardActions";
-import { formatInr, imagesOf, num, obj, objList, str, strList, titleOf } from "@/lib/cards";
+import { formatInr, imagesOf, mergeImages, num, obj, objList, str, strList, titleOf } from "@/lib/cards";
 import type { OptionItem, TourDetailSection } from "@/lib/types";
 import { SafeImage } from "../SafeImage";
 import { HeartButton, RatingPill } from "../cards/parts";
@@ -481,8 +481,8 @@ function TourBody({ o }: { o: OptionItem }) {
               <p className="text-sm text-fg-muted">The inclusions could not be loaded. Ask the agent for them instead.</p>
             </Section>
           )}
-          {sections?.map((s) => (
-            <Section key={s.title} title={s.title}>
+          {sections?.map((s, i) => (
+            <Section key={`${s.title}-${i}`} title={s.title}>
               {s.items.length ? <Bullets items={s.items} /> : <p className="text-sm text-fg">{s.summary}</p>}
             </Section>
           ))}
@@ -725,6 +725,25 @@ const BOOK_LABEL: Record<CardRef["kind"], string> = {
  * The detail view for any card. Data comes from the card itself (the fast
  * path); tours additionally load their inclusions and policies on open.
  */
+/** A tour search carries one photo per tour; the rest are loaded when its
+ *  card opens. Until they arrive (or if they never do) the card's photo shows. */
+function useTourGallery(card: CardRef | null): string[] {
+  const tourId = card?.kind === "tour" ? num(card.item, "tour_id") : null;
+  const [loaded, setLoaded] = useState<{ id: number; images: string[] } | null>(null);
+  useEffect(() => {
+    if (tourId == null) return;
+    let live = true;
+    api
+      .tourImages(tourId)
+      .then((r) => live && setLoaded({ id: tourId, images: r.images ?? [] }))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [tourId]);
+  return loaded && loaded.id === tourId ? loaded.images : [];
+}
+
 export function DetailPanel({
   card,
   onClose,
@@ -737,6 +756,7 @@ export function DetailPanel({
   onAsk: (card: CardRef) => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const gallery = useTourGallery(card);
 
   useEffect(() => {
     if (!card) return;
@@ -751,7 +771,7 @@ export function DetailPanel({
   const Body = BODY[card.kind];
   const title = titleOf(o, card.kind);
   const { price, label } = headline(o, card.kind);
-  const images = card.kind === "flight" || card.kind === "visa" ? [] : imagesOf(o);
+  const images = card.kind === "flight" || card.kind === "visa" ? [] : mergeImages(imagesOf(o), gallery);
 
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={title}>
