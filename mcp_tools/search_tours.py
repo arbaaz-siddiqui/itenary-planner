@@ -282,6 +282,8 @@ def _impl(
     transfer_type: str = "",
     assume_missing: bool = False,
     child_ages: list[int] | None = None,
+    enrich: bool = True,
+    theme: str = "",
 ) -> dict[str, Any]:
     """Search tours/activities. Calls both /toursearchlist and /toursearchlistrate.
 
@@ -317,6 +319,11 @@ def _impl(
             customer asks for "shared and private tours" — WITHOUT it they only
             see whatever happens to be on page one, which made the agent report
             "only 3 tours have transfers" when there are 86.
+        theme: the KIND of tour the customer wants: "adventure", "romantic",
+            "family", "culture", "water" or "food". Only tours whose supplier
+            category belongs to that theme come back, so a sensory show (AYA
+            Universe) is never offered as an adventure. Pass it whenever the
+            customer names a kind of tour instead of a tour.
     """
     _ = force_refresh  # consumed by the cache layer; ignored here
 
@@ -416,6 +423,15 @@ def _impl(
         elif tf in {"ticket_only", "ticket", "without_transfer", "no_transfer"}:
             pool = [o for o in pool if not _has_transfer(o) and not _is_private_product(o)]
 
+        # A theme is matched on the supplier's category, never on how a name
+        # sounds: asked for adventure, the agent listed AYA Universe (a light
+        # and sound show) and only admitted it after the customer pushed back.
+        theme_key = (theme or "").strip().lower()
+        themes = tour_themes()
+        if theme_key and theme_key in themes:
+            wanted = set(themes[theme_key])
+            pool = [o for o in pool if (getattr(o, "category", "") or "").strip().lower() in wanted]
+
         # A private-first ordering is deliberate and must not be re-sorted away.
         ranked = pool if tf in {"private", "private_only"} else _recommended_first(pool)
 
@@ -436,13 +452,16 @@ def _impl(
         # the sum of both deadlines (~19s on a desert-safari page).
         import concurrent.futures as _cf
 
-        with _cf.ThreadPoolExecutor(max_workers=2) as ex:
-            slots = ex.submit(_attach_timeslots, options, travel_date, adults)
-            prices = ex.submit(
-                _attach_transfer_prices, options, travel_date, adults, child_ages
-            )
-            slots.result()
-            prices.result()
+        # `enrich=False` is for code that needs the catalogue itself (a plan's
+        # tour index): enriching 400 rows sent ~500 rate calls per plan.
+        if enrich:
+            with _cf.ThreadPoolExecutor(max_workers=2) as ex:
+                slots = ex.submit(_attach_timeslots, options, travel_date, adults)
+                prices = ex.submit(
+                    _attach_transfer_prices, options, travel_date, adults, child_ages
+                )
+                slots.result()
+                prices.result()
 
         # Presentation-ready fields so the agent RELAYS these rather than
         # deriving (or omitting) them. The client requires sharing/private and
@@ -459,7 +478,8 @@ def _impl(
             # An airport pickup is the transfer itself: "Ticket only, no
             # transfer included" read as if the car were missing.
             d["sharing_display"] = (
-                "Priced per vehicle" if getattr(o, "sold_per_vehicle", False) else o.sharing_display
+                ("Priced per vehicle" if _is_transfer_tour(o) else "Priced per unit (one booking)")
+                if getattr(o, "sold_per_vehicle", False) else o.sharing_display
             )
             # Real per-transfer-type prices when the supplier has them.
             if getattr(o, "transfer_prices", None):
@@ -624,6 +644,14 @@ def _impl(
                 )
             ),
             "query": query or None,
+            **(
+                {"theme": theme_key, "theme_note": (
+                    f"Every tour here is a {theme_key} tour by its supplier category. "
+                    "Recommend only from these; never add a tour from another search "
+                    "under this heading."
+                )}
+                if theme_key in themes else {}
+            ),
             "search_params": {
                 "destination": destination_city,
                 "travel_date": travel_date,
@@ -636,6 +664,28 @@ def _impl(
     except Exception as e:
         logger.exception("search_tours unexpected error")
         return {"error": True, "message": str(e), "error_type": type(e).__name__}
+
+
+def _is_transfer_tour(o: Any) -> bool:
+    """An airport pickup or drop-off (sold per car), not an activity whose
+    unit is a kayak or a boat."""
+    text = f"{getattr(o, 'name', '') or ''} {getattr(o, 'category', '') or ''}".lower()
+    return any(w in text for w in ("airport", "transfer", "pickup", "pick up", "drop"))
+
+
+@functools.lru_cache(maxsize=1)
+def tour_themes() -> dict[str, list[str]]:
+    """Theme -> supplier tour categories (reference_data/tour_themes.json)."""
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "reference_data" / "tour_themes.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        logger.warning("tour themes unreadable: %s", path)
+        return {}
+    return {k: [c.lower() for c in v] for k, v in raw.items() if not k.startswith("_")}
 
 
 from mcp_tools.result_cache import cache_impl

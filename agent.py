@@ -1228,7 +1228,11 @@ def _customer_words(agent: Any, config: dict[str, Any], user_message: str) -> st
                 said.append(_customer_part(text))
     except Exception:  # noqa: BLE001 -- no history is a fresh conversation
         pass
-    said.append(user_message)
+    # The API prepends [system] blocks (Plan mode, remembered facts) to the
+    # message; they are not the customer's words. Kept in, Plan mode's own
+    # "no flights, visa or meals they did not ask for" read as the customer
+    # saying "no visa", and every planned trip lost its visa.
+    said.append(_customer_part(user_message))
     return "\n".join(said)
 
 
@@ -1253,7 +1257,8 @@ def invoke_and_log(
     # city from a real one -- all of them, not just this message.
     set_current_thread(thread_id)
     set_conversation_text(
-        _customer_words(agent, {"configurable": {"thread_id": thread_id}}, user_message))
+        _customer_words(agent, {"configurable": {"thread_id": thread_id}}, user_message),
+        latest=_customer_part(user_message))
 
     category = detect_prompt_injection(user_message)
     if category:
@@ -1346,7 +1351,13 @@ def _ensure_visa_party_total(response: dict[str, Any]) -> None:
     """
     turn = _this_turn((response or {}).get("messages") or [])
     first: dict[str, Any] | None = None
-    for call in extract_tool_calls({"messages": turn}):
+    calls = extract_tool_calls({"messages": turn})
+    # A plan built this turn carries the visa the customer chose inside its
+    # own total; adding the cheapest visa's total under it read as a second
+    # price ("Total, 30 Days Single Entry" under a multiple-entry plan).
+    if any("plan_itinerary" in str(c.get("tool_name") or "") for c in calls):
+        return
+    for call in calls:
         if str(call.get("tool_name") or "") != "get_visa_info":
             continue
         out = _coerce_to_dict(call.get("output"))
@@ -1788,7 +1799,8 @@ def stream_and_log(
     set_current_thread(thread_id)
 
     set_conversation_text(
-        _customer_words(agent, {"configurable": {"thread_id": thread_id}}, user_message))
+        _customer_words(agent, {"configurable": {"thread_id": thread_id}}, user_message),
+        latest=_customer_part(user_message))
 
     if detect_prompt_injection(user_message):
         from langchain_core.messages import AIMessage, HumanMessage

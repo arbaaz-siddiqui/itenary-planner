@@ -116,7 +116,11 @@ export function TourCard({ card, eager }: CardProps) {
   const withTransfer = perPerson != null && !/without/i.test(str(cheapest, "transfer_type") ?? "");
   // Airport pickup and drop-off are sold per vehicle, not per person.
   const perVehicle = o.sold_per_vehicle === true || prices.some((p) => str(p, "priced_per") === "unit");
-  const priceLabel = perVehicle ? "Per vehicle" : withTransfer ? "From, per person with transfer" : "From, per person";
+  // The supplier's "unit" is the car for an airport transfer but the kayak or
+  // boat for an activity; "Per vehicle" on a kayak read as a car hire.
+  const isTransfer = /airport|transfer|pick ?up|drop/i.test(`${str(o, "name") ?? ""} ${str(o, "category") ?? ""}`);
+  const unitLabel = isTransfer ? "Per vehicle" : "Per unit";
+  const priceLabel = perVehicle ? unitLabel : withTransfer ? "From, per person with transfer" : "From, per person";
   const cancel = str(o, "cancellation") ?? str(o, "cancellation_display");
   const free = cancel ? /free/i.test(cancel) : false;
   return (
@@ -151,9 +155,18 @@ export function HotelCard({ card, eager }: CardProps) {
       <div className="flex flex-1 flex-col gap-2.5 p-4">
         <div>
           <h4 className="line-clamp-2 text-base leading-snug font-semibold text-fg">{titleOf(o, "hotel")}</h4>
-          {stars > 0 && (
-            <p className="mt-0.5 text-sm text-rating" aria-label={`${stars} star hotel`}>
-              {"★".repeat(stars)}
+          {(stars > 0 || str(o, "property_type")) && (
+            <p className="mt-0.5 flex items-center gap-2 text-sm">
+              {stars > 0 && (
+                <span className="text-rating" aria-label={`${stars} star`}>
+                  {"★".repeat(stars)}
+                </span>
+              )}
+              {str(o, "property_type") && (
+                <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium text-fg-muted">
+                  {(str(o, "property_type") ?? "").replace(/\/.*$/, "")}
+                </span>
+              )}
             </p>
           )}
         </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Download, FileText, Loader2 } from "lucide-react";
 import type { OptionItem } from "@/lib/types";
 
 const str = (o: OptionItem, k: string): string | null => {
@@ -57,24 +58,24 @@ export function ItineraryPdf({ item }: { item: OptionItem }) {
   };
 
   return (
-    <section className="mt-3">
+    <section className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-brand-blue/30 bg-gradient-to-r from-brand-blue/15 via-brand-blue/5 to-brand-red/10 p-3 pr-4">
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-blue/20 text-brand-blue" aria-hidden>
+        <FileText size={20} strokeWidth={1.9} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-fg">Your itinerary PDF</p>
+        <p className="truncate text-xs text-fg-muted">{filename}</p>
+      </div>
       <button
         type="button"
         onClick={save}
         disabled={busy}
-        className="inline-flex items-center gap-2 rounded-lg border border-border
-                   bg-surface px-3 py-2 text-sm font-medium hover:bg-surface-2
-                   disabled:opacity-60"
+        className="press inline-flex items-center gap-2 rounded-full bg-brand-blue px-4 py-2 text-sm font-semibold text-white shadow-[0_8px_22px_-10px_rgba(43,127,200,0.9)] transition-colors hover:bg-brand-blue-dark disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue"
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <path d="M7 10l5 5 5-5" />
-          <path d="M12 15V3" />
-        </svg>
-        {busy ? "Preparing…" : "Download itinerary PDF"}
+        {busy ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <Download size={16} aria-hidden />}
+        {busy ? "Preparing" : "Download PDF"}
       </button>
-      {error && <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-500">{error}</p>}
+      {error && <p className="basis-full text-xs text-amber-600 dark:text-amber-500">{error}</p>}
     </section>
   );
 }

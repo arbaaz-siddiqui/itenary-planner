@@ -23,6 +23,7 @@ describe("formatting and identity", () => {
   it("formats rupees with Indian grouping and paise only when present", () => {
     expect(formatInr(13290.34)).toBe("₹13,290.34");
     expect(formatInr(130790)).toBe("₹1,30,790");
+    expect(formatInr(5606.2)).toBe("₹5,606.20");
     expect(formatInr(null)).toBeNull();
   });
 

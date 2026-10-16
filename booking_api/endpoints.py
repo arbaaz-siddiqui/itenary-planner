@@ -951,6 +951,72 @@ def call_hotel_static_by_city(
 
 
 @lru_cache(maxsize=8)
+def city_hotel_catalogue(city_id: int) -> tuple[tuple[int, float, str], ...]:
+    """Every property the supplier sells in a city: (hotel_id, stars, category).
+
+    From GetStaticDataByCity (4,510 Dubai properties: Apartment 3,481, Hotel
+    625, Aparthotel 167, Villa 72, ...). `category` is the supplier's own
+    property type, the one gujjutours.com filters on. Cached for the process
+    lifetime; () on failure.
+    """
+    try:
+        raw = call_hotel_static_by_city(city_id=city_id, lookup_type="city")
+    except Exception:
+        return ()
+    items = None
+    if isinstance(raw, dict):
+        items = raw.get("Hotels") or raw.get("raw") or raw.get("result")
+    if not isinstance(items, list):
+        items = raw if isinstance(raw, list) else []
+    out: list[tuple[int, float, str]] = []
+    for h in items:
+        if not isinstance(h, dict):
+            continue
+        try:
+            hid = int(h.get("HotelId") or h.get("hotelId"))
+            star = float(h.get("StarRating") or 0)
+        except (ValueError, TypeError):
+            continue
+        out.append((hid, star, str(h.get("Category") or "").strip()))
+    return tuple(out)
+
+
+# The availability call takes at most 200 hotel IDs ("Max HotelIds limit is
+# 200"); gujjutours.com prices a city the same way, 200 IDs per batch.
+HOTEL_IDS_PER_CALL = 200
+
+
+def call_hotel_availability_many(*, hotel_ids: list[int], **kwargs: Any) -> dict[str, Any]:
+    """`call_hotel_availability` over any number of hotels, 200 per call, in
+    parallel, merged into one response. Pricing the whole of Dubai is 23 calls
+    and ~6.5 s; a 40-hotel batch is what made "show me cheaper hotels" miss a
+    hotel 59% cheaper than our "lowest"."""
+    import concurrent.futures as cf
+
+    chunks = [hotel_ids[i:i + HOTEL_IDS_PER_CALL] for i in range(0, len(hotel_ids), HOTEL_IDS_PER_CALL)]
+    if len(chunks) <= 1:
+        return call_hotel_availability(hotel_ids=hotel_ids, **kwargs)
+    merged: list[Any] = []
+    currency = ""
+    errors: list[Exception] = []
+    with cf.ThreadPoolExecutor(max_workers=min(24, len(chunks))) as pool:
+        futures = [pool.submit(call_hotel_availability, hotel_ids=c, **kwargs) for c in chunks]
+        for f in futures:
+            try:
+                raw = f.result()
+            except Exception as e:  # noqa: BLE001 - one failed batch must not sink the rest
+                errors.append(e)
+                continue
+            rs = (raw or {}).get("AvailabilityRS") or {} if isinstance(raw, dict) else {}
+            currency = currency or str(rs.get("Currency") or "")
+            if isinstance(rs.get("HotelResult"), list):
+                merged.extend(rs["HotelResult"])
+    if errors and not merged:
+        raise errors[0]
+    return {"AvailabilityRS": {"Currency": currency or "INR", "HotelResult": merged}}
+
+
+@lru_cache(maxsize=8)
 def discover_city_hotel_ids(city_id: int) -> tuple[tuple[int, float], ...]:
     """Live (hotel_id, star_rating) list for a city, from GetStaticDataByCity.
 

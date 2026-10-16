@@ -1,0 +1,19 @@
+{
+  "_README": "Where an activity happens, so a meal can be planned near it. The supplier's tour records carry no coordinates (latitude/longitude are empty), so each entry maps words in a tour's name to the Dubai area it takes place in (an `area` from dubai_areas.json, or its own lat/lng when the place is outside them). First match wins, so the more specific phrases come first. `remote` marks places with food on site and nothing of ours nearby (desert camps, theme parks).",
+  "attractions": [
+    {"match": ["dhow cruise dubai marina", "marina dhow", "dhow cruise marina", "yacht", "ain dubai", "bluewaters", "skydive dubai"], "area": "Dubai Marina"},
+    {"match": ["dhow cruise creek", "creek dhow", "dhow cruise deira", "gold souk", "spice souk", "deira"], "area": "Deira"},
+    {"match": ["burj khalifa", "at the top", "dubai mall", "dubai aquarium", "underwater zoo", "dubai fountain", "fountain show", "sky views", "dubai opera"], "area": "Downtown Dubai"},
+    {"match": ["museum of the future", "emirates towers"], "area": "DIFC"},
+    {"match": ["dubai frame", "zabeel park"], "area": "Al Jafiliya"},
+    {"match": ["aya universe", "wafi", "wonderland"], "area": "Oud Metha"},
+    {"match": ["al fahidi", "al shindagha", "dubai museum", "bastakiya", "abra ride", "city tour"], "area": "Bur Dubai"},
+    {"match": ["miracle garden", "butterfly garden", "mall of the emirates", "ski dubai"], "area": "Al Barsha"},
+    {"match": ["atlantis", "aquaventure", "lost chambers", "the palm", "view at the palm", "palm jumeirah"], "area": "Palm Jumeirah"},
+    {"match": ["jumeirah mosque", "la mer", "kite beach", "city walk"], "area": "Jumeirah"},
+    {"match": ["global village", "img worlds", "dubailand"], "lat": 25.0711, "lng": 55.3087, "remote": true},
+    {"match": ["desert safari", "dune bashing", "quad bike", "camel ride", "hot air balloon"], "lat": 24.9800, "lng": 55.6200, "remote": true},
+    {"match": ["motiongate", "legoland", "bollywood parks", "dubai parks", "expo city"], "lat": 24.9200, "lng": 55.0050, "remote": true},
+    {"match": ["abu dhabi", "ferrari world", "yas island", "louvre abu dhabi", "sheikh zayed grand mosque"], "lat": 24.4539, "lng": 54.3773, "remote": true}
+  ]
+}

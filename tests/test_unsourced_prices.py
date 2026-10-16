@@ -149,3 +149,16 @@ def test_repeated_request_pointing_to_table_above_reruns():
 def test_new_question_answered_from_earlier_results_is_fine():
     history, turn = _history("IndiGo ₹32,242.87 is the cheapest of those.")
     assert _unsourced_prices(history, turn) == []
+
+
+def test_system_blocks_in_the_message_are_not_the_customers_words():
+    from agent import _customer_words
+
+    class NoHistory:
+        def get_state(self, config):
+            raise RuntimeError("fresh")
+
+    plan_mode = ("[system] Plan mode: plan exactly those parts and nothing else: no flights, "
+                 "visa or meals they did not ask for.\n\nplan 6 to 10 Nov for 2 adults")
+    said = _customer_words(NoHistory(), {}, plan_mode)
+    assert "visa" not in said and said.endswith("plan 6 to 10 Nov for 2 adults")

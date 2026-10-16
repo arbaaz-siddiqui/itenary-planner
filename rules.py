@@ -1045,8 +1045,26 @@ _FIELD_PROMPTS: dict[str, str] = {
 _CONVERSATION_TEXT: ContextVar[str] = ContextVar("conversation_text", default="")
 
 
-def set_conversation_text(text: str) -> None:
+# The customer's message for THIS turn alone: "replace AYA Universe" removes a
+# tour now, while the same name earlier in the chat was a request to add it.
+_LATEST_TEXT: ContextVar[str] = ContextVar("latest_customer_text", default="")
+
+
+def set_conversation_text(text: str, latest: str = "") -> None:
     _CONVERSATION_TEXT.set((text or "").lower())
+    _LATEST_TEXT.set((latest or "").lower())
+
+
+def customer_named_now(name: str) -> bool:
+    """True when this turn's message names `name` (its words of 3+ letters,
+    ignoring "dubai", "by", "tickets", "gujjutours" and the like)."""
+    said = _LATEST_TEXT.get()
+    if not said or not name:
+        return False
+    filler = {"dubai", "gujjutours", "ticket", "tickets", "tour", "tours", "with", "the",
+              "and", "from", "entry", "admission", "experience", "transfer", "transfers"}
+    words = [w for w in re.findall(r"[a-z0-9]+", name.lower()) if len(w) >= 3 and w not in filler]
+    return bool(words) and all(re.search(rf"\b{re.escape(w)}\b", said) for w in words)
 
 
 # Which conversation (LangGraph thread) the current turn belongs to, set once
@@ -1355,3 +1373,16 @@ def customer_excluded(part: str) -> bool:
         return False
     pattern = _EXCLUDES_TEMPLATE.replace("{part}", re.escape(part.lower()))
     return bool(re.search(pattern, said.lower()))
+
+
+# Set by the web chat API: its UI draws a built plan as an itinerary card, so
+# the reply should summarise it rather than write the day-by-day out again.
+_ITINERARY_CARD: ContextVar[bool] = ContextVar("itinerary_card", default=False)
+
+
+def set_itinerary_card(on: bool) -> None:
+    _ITINERARY_CARD.set(bool(on))
+
+
+def itinerary_card_shown() -> bool:
+    return _ITINERARY_CARD.get()

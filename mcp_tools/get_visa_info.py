@@ -91,6 +91,15 @@ def _impl(
                 "Non-refundable." if o.refundable is False else ""
             )
             option_dicts.append(d)
+        # What this conversation was quoted, so a plan can only carry a visa
+        # price that was offered (see quote_registry).
+        from mcp_tools.quote_registry import remember
+
+        remember("visa", [d.get("price_per_person_inr") for d in option_dicts])
+        from mcp_tools.quote_registry import remember_label
+
+        for d in option_dicts:
+            remember_label("visa", d.get("price_per_person_inr"), str(d.get("visa_type") or ""))
         return {
             "options": option_dicts,
             "total_results": len(options),

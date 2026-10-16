@@ -119,14 +119,14 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
 | Kind | Tool name(s) | Notes |
 |---|---|---|
 | Flights | `search_flights`, `get_flight_details` | max 9 passengers (supplier rejects more); details need `conversationId` |
-| Hotels | `search_hotels` (`area=` filter; results carry `stars` from each hotel's static record and `area`/`district` resolved from its address via `reference_data/dubai_areas.json`); static content: `lookup_hotel_city`, `list_city_hotels`, `get_hotel_info`, `get_hotel_description`, `get_hotel_reviews` | static content uses the hotels-only token; 9 rooms / 30 nights / 2 children (age 1-12) max |
-| Tours | `search_tours`, `get_tour_details`, `get_tour_timeslots`, `get_tour_options` (agent-only) | party totals per transfer type; `tour_pricing.py` |
+| Hotels | `search_hotels` (prices EVERY property in the city: `booking_api.city_hotel_catalogue` (GetStaticDataByCity, 4,510 Dubai IDs with `Category` + stars) filtered by stars (strict, unrated left out) and `property_type` (hotel, apartment, aparthotel, hostel, villa, resort), priced 200 IDs per call in parallel by `call_hotel_availability_many` (~6.5 s for the whole city), cheapest first; `refundable_only` keeps hotels whose shown (cheapest) rate has free cancellation, as the website's filter does; `area=` filter; results carry `property_type`, `stars` from each hotel's static record and `area`/`district` resolved from its address via `reference_data/dubai_areas.json`; the airport-transfer `next_step` only when the customer asked for a transfer); static content: `lookup_hotel_city`, `list_city_hotels`, `get_hotel_info`, `get_hotel_description`, `get_hotel_reviews` | static content uses the hotels-only token; 9 rooms / 30 nights / 2 children (age 1-12) max |
+| Tours | `search_tours` (`theme=` adventure / romantic / family / culture / water / food, matched on the supplier's tour category via `reference_data/tour_themes.json`; `enrich=False` skips the slot and transfer fan-out), `get_tour_details`, `get_tour_timeslots`, `get_tour_options` (agent-only) | party totals per transfer type; `tour_pricing.py` |
 | Transfers | `search_airport_transfer_dubai` (module `search_transfers.py`), `get_transfer_details` | hotel name alone resolves coordinates |
 | Restaurants | `search_restaurants`, `get_restaurant_details` | only ~9 Dubai restaurants, all veg; `restaurant_catalog.py` |
-| Visa | `get_visa_info`, `list_visa_countries` | Indian nationality uses supplier id 245. Returns `refund_policy`, `track_times` (website wording), `party_totals`, and a `timeline` (working days to travel, which track fits) |
+| Visa | `get_visa_info`, `list_visa_countries` | Indian nationality uses supplier id 245. Every quoted price and its visa name go to `quote_registry` (`remember`, `remember_label`). Returns `refund_policy`, `track_times` (website wording), `party_totals`, and a `timeline` (working days to travel, which track fits) |
 | Packages | `list_packages`, `get_package_details` | live price built like the website (`package_pricing.py`, see §8); `list_packages` prices the first 8 matching the nights asked |
 | Lookup / FX | `lookup_entity` (public autocomplete), `get_exchange_rate` | |
-| Package maths | `plan_itinerary_tool` (needs `adults`; tours carry `date`; `flight_fare_ref`; `fill_days` opt-in; returns `package_lines`), `cancellation_breakdown_tool` (refund full/none/partial) | |
+| Package maths | `plan_itinerary_tool` (needs `adults`; tours carry `date`; `flight_fare_ref`; `fill_days` fills each day with priced tours; adds airport pickup/drop-off, visa and meals; returns `package_lines`; pricing helpers in `mcp_tools/plan_pricing.py`), `cancellation_breakdown_tool` (refund full/none/partial) | |
 | Helpers | `result_cache.py`, `ui_payload.py`, `tour_pricing.py`, `quote_registry.py` (prices quoted per conversation; a transfer total must have been quoted) | |
 
 `surfaces/mcp_server.py` does not import `lookup_entity`, `get_tour_timeslots` or `list_visa_countries`.
@@ -189,7 +189,7 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
 | GET | `/tours/{tour_id}/images` | every photo of a tour for the panel gallery (`mcp_tools/tour_gallery.py`, cached 6 h) |
 | POST | `/chat/stream` | SSE turn: `{session_id, message, mode: "ask"|"plan", regenerate}` |
 
-**SSE events** (`_turn_events`): `start`; `token {text}`; `tool {id,name,input,status:"running"}` then `{id,name,output:{count|error},status:"done"}`; `error {message}`; `options {kind,items}` (kind is plural, or `suggestions` / `itinerary_pdf`); `done {message_id,content}`.
+**SSE events** (`_turn_events`): `start`; `token {text}`; `tool {id,name,input,status:"running"}` then `{id,name,output:{count|error},status:"done"}`; `error {message}`; `options {kind,items}` (kind is plural, or `suggestions` / `itinerary_pdf` / `itinerary`: the planned trip, sent first); `done {message_id,content}`.
 
 **Turn mechanics**
 
@@ -228,7 +228,7 @@ The browser keeps no account data. `localStorage` holds only the theme as a firs
 - Visa: `convert_supplier_price(price)` = price / buyingROE, service fee included, kept to 2 places (the website shows ₹7,753.36); Indian nationality is supplier id 245.
 - **Field names by kind** (the UI reads these):
   - Flights: `price_inr` (whole party), `price_per_adult_inr`, `base_fare_inr`, `total_tax_inr`.
-  - Hotels: `price_inr` (all rooms, whole stay), `per_night_inr`; rooms carry `price_inr`, `per_night_inr`, `price_display`.
+  - Hotels: `price_inr` (all rooms, whole stay), `per_night_inr`, `property_type`; rooms carry `price_inr`, `per_night_inr`, `price_display`.
   - Tours: `price_per_adult_inr`; `party_total_display` per option and `party_totals_markdown` for the reply; variants have `prices` / `transfer_prices` with `total_inr`, `total_display`, `per_person_display`, `priced_for_pax`.
   - Transfers: `price_inr` (vehicle total), `per_person_inr` for shared.
   - Visa: `price_per_person_inr`, `child_price_inr`.
@@ -272,7 +272,7 @@ Next.js 15.5, React 19.1, Tailwind v4 (`@tailwindcss/postcss`, no `tailwind.conf
 - `Carousel.tsx`: snap strip with arrows (from `sm`), hidden scrollbar.
 - `detail/DetailPanel.tsx`: right slide-over (full width on phones, 480 px from `sm`), gallery with arrows, facts, bill-style price breakdown, "Ask the agent" + Book.
 - `SettingsDialog.tsx`: tabs Profile, Travel (preferences), Appearance (dark/light/system), Chats (export .txt, clear all); bottom sheet on phones.
-- `NameDialog.tsx` (one-time name prompt for older accounts), `SearchDialog.tsx`, `Select.tsx` (custom listbox; never use a native `<select>`), `TravelLoader.tsx`, `SafeImage.tsx` (fallback placeholder; rewrites tenant media to the CloudFront CDN), `BrandLogo.tsx`, `ItineraryPdf.tsx`.
+- `NameDialog.tsx` (one-time name prompt for older accounts), `SearchDialog.tsx`, `Select.tsx` (custom listbox; never use a native `<select>`), `TravelLoader.tsx`, `SafeImage.tsx` (fallback placeholder; rewrites tenant media to the CloudFront CDN), `BrandLogo.tsx`, `ItineraryPdf.tsx` (branded download card), `ItineraryView.tsx` (the Plan-mode day-by-day card with prices per step and the cost lines; logic in `lib/itinerary.ts`; the other cards fold under it).
 - `auth/AuthShell.tsx` (sign-in/up frame), `auth/Field.tsx` (`Field`, `SubmitButton`, `FormError`, `AuthChecking`).
 
 ### Library (`src/lib`)
@@ -357,6 +357,7 @@ Rules for agents:
 3. **Never merge or push to a deployment branch (`chat/nextjs/development`, `chat/development`, `voice/development`, `whatsapp/development`) unless the user explicitly says so in the current conversation.** A push there goes live. When the user does ask, remind them to check Railway env vars first (e.g. the current `BOOKING_TOKEN` on chat-api).
 4. Never force-push shared branches; never rewrite release history.
 5. Commit messages: conventional prefixes (`fix(web):`, `feat(tours):`, `merge:`), a short body explaining why.
+6. **Docs land with the code, never after.** Before any commit, update every doc the change touches: this file (facts, tool params, gotchas), the client release notes (`docs/Release-Notes-2026.10.docx`) and the module's client verification report (`docs/*-Verification-Report.docx`) when client-visible behaviour changed. A commit whose docs are stale is not ready.
 
 ---
 
@@ -381,7 +382,8 @@ Rules for agents:
 - `docs/DEPLOY-railway.md`: Railway services, branch mapping, rollback.
 - `docs/RELEASE-2026.10-PLAN.md`: degradation ladder and behaviour rules.
 - `docs/PLAN-nextjs-ui-and-db.md`, `docs/adr-001-time-aware-itinerary.md`, `docs/FIXES-v3.md`, `docs/ISSUES-and-CLIENT-RESPONSE.md`, `docs/voice_*`, `docs/call_steps.md`.
-- Client verification reports (`docs/*-Verification-Report.docx`, `docs/*-qa/`). New client reports are DOCX only.
+- Client verification reports (`docs/*-Verification-Report.docx`, `docs/*-qa/`), including `docs/Website-Comparison-Fix-Verification-Report.docx` (cheaper hotels, apartments, refundable hotels, adventure tours). New client reports are DOCX only.
+- Client release notes: `docs/Release-Notes-2026.10.docx` (every module in the release; update it with each client-visible change).
 
 ---
 
@@ -397,10 +399,16 @@ Rules for agents:
 - Flight results can contain the same flight from two suppliers; the UI shows one card per airline + flight numbers + times + fare.
 - Tour photos: `GET /tours/{id}/images` → B2C `/api/tours/medias` (search gives one photo). Global Village came back from autocomplete as an unsellable Klook listing; `get_tour_options` swaps an all-unpriced tour for the website's priced listing of the same name.
 - `plan_itinerary_tool`: no visa when the customer said so (`rules.customer_excluded`); flight times are dropped unless a flight is in the package or the customer stated them; the plan is cached for the PDF AFTER pricing, and the PDF takes its prices and total from that plan. The last day of a trip is a travel day (never an "empty day"); activities without slots start at their time of day (dinner/night 19:30, Global Village 16:00, safari/sunset 15:00).
+- Plan mode full days (`scheduling.py`, `mcp_tools/plan_pricing.py`): arrival = airport pickup, hotel, 120 min rest, then up to 2 activities; full days aim at 540 min of activities with breakfast at the hotel, lunch and dinner placed in the gaps; departure = check-out, at most one activity, drop-off leaving 4 h before the flight. Dinner is "included" when a tour serves it (`serves_dinner`), else a restaurant within 6 km of the last place that is open then (`meal_venue`, places from `reference_data/dubai_attractions.json`), else the hotel. Airport legs are priced from the per-vehicle airport tours by the hotel's zone (smallest vehicle that seats the party). Tours are priced once per option chosen (`tour_price`, cached); the catalogue search runs with `search_tours(enrich=False)` to skip the timeslot fan-out. `usable_slots` reads both `start` and `time` keys.
+- `agent._customer_words` reads only the customer's part of each message: the Plan mode [system] block says "no flights, visa or meals they did not ask for", and read as customer words it removed the visa from every plan.
+- Re-planning (Plan mode changes): `plan_itinerary_tool` takes a tour's start times from the supplier (`_tour_slots`), never from the caller (the model sent each tour's last planned time as its only slot and pinned Dubai Frame into a full day); a tour whose own date is full moves to another day instead of being dropped; the day fill offers the last plan's tours first (stable days) and skips one this turn's message names and the caller left out (`rules.customer_named_now`, from `set_conversation_text(..., latest=)`); fillers need a published duration. A visa price must be one `get_visa_info` quoted in the chat (`quote_registry.was_quoted`), else the live fare is looked up (the model sent Rs 3,500; the fare is Rs 7,752.29). The visa line is named by `quote_registry.label_for`. A hotel's standard check-in later than the arrival does not push the rest. Tours the plan could not place come back in `excluded` and show on the card as notes. `_ensure_visa_party_total` stays out of turns that built a plan.
+- Plan cache across restarts: `_LAST_PLANS` is in memory, so the chat API seeds it from the latest saved itinerary card (`api.main._seed_plan_from_history` → `agent_tools.seed_plan`) before each turn. When the PDF is for the same trip as the plan, the plan's days and lines are used, not the model's.
+- `agent_tools` has a module `logger` (the `except` branches that logged used to raise NameError).
+- Web: `formatInr` shows paisa as two digits (₹5,606.20, never ₹5,606.2); whole amounts stay without decimals. Hotel cards show the property type next to the stars.
 - "Build a package" form (`web/src/components/PackageBuilder.tsx`, logic in `lib/packageBuilder.ts`) on the Packages home screen sends one plain request in Plan mode; Plan mode plans only the parts listed.
 - Cabin is normalised (`normalize_cabin`): the supplier returns zero fares, silently, for any cabin that is not a bare code.
 - City names tolerate typos ("Ahemdabad"): `resolve_city` falls back to a close match for names of 6+ letters, and `rules.customer_said` accepts the corrected spelling. Without both, a misspelt origin could never be searched.
 - A reply with no tool call this turn may only quote ₹ amounts that some tool (or the customer) produced in the thread; a repeated request answered from memory ("I have already pulled those") is re-searched (`agent._research_unsourced`).
 - Tour search gives one photo per tour and no supplier API we hold returns the gallery; `booking_api.endpoints.call_tour_page` reads `tourImages` from the website's tour page (resolves by id, any slug) when a card is opened.
 - Flight options carry `airline_logos` (CDN `/uploads` + the segment's `airlinelogoPath`, UI-only). While streaming, a half-written markdown table is held back and shown as the loader (`web/src/lib/pendingTable.ts`).
-- The website adds a hotel markup that varies by hotel (4.0% to 11.4% seen); the chatbot quotes the supplier rate until the client confirms the rule. The website's visa cards (3-4 working days, Express 1 working day) disagree with its own visa article (2–4 days, 24–48 hours); the chatbot follows the article.
+- The website adds a hotel markup that varies by hotel (4.0% to 11.4% seen; 8-27%, median ~11.7%, across all of Dubai on 6-10 Nov 2026); the chatbot quotes the supplier rate until the client confirms the rule. The website's own search is public: `POST www.gujjutours.com/api/x-hotels/search-stream` (NDJSON, needs the city `locationId` from `/api/x-hotels/hotel-lookup`), price = `StartPrice` (AED) x sellingROE; its star buttons default to 3-5 and its Refundable filter judges the cheapest rate only. The website's visa cards (3-4 working days, Express 1 working day) disagree with its own visa article (2–4 days, 24–48 hours); the chatbot follows the article.

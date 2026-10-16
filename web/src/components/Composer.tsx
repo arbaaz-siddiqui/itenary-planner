@@ -120,7 +120,7 @@ export const Composer = forwardRef<
               : "Ask about flights, hotels, tours, visas…"
         }
         aria-label="Message"
-        className={`block w-full resize-none bg-transparent px-4 text-fg outline-none placeholder:text-fg-muted disabled:opacity-50 ${
+        className={`no-scrollbar block w-full resize-none bg-transparent px-4 text-fg outline-none placeholder:truncate placeholder:text-fg-muted disabled:opacity-50 ${
           hero ? "pt-4 text-base" : "pt-3 text-[15px]"
         }`}
       />
