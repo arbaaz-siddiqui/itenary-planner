@@ -936,3 +936,95 @@ def test_time_of_day_floors():
     assert time_of_day_floor({"name": "Global Village Dubai Tickets"}) == time(16, 0)
     assert time_of_day_floor({"name": "Dubai Desert Safari by Gujjutours"}) == time(15, 0)
     assert time_of_day_floor({"name": "Burj Khalifa Tickets"}) is None
+
+
+def test_trip_without_flight_times_still_opens_and_closes_at_the_hotel():
+    from scheduling import build_itinerary
+
+    plan = build_itinerary(start_date="2026-11-10", nights=2, hotel_name="Social Hotel",
+                           tours=[{"name": "Dubai Frame Tickets", "duration": "2 Hours"}])
+    first, last = plan["days"][0], plan["days"][-1]
+    assert first["items"][0]["title"] == "Check in at Social Hotel"
+    assert last["items"][-1]["title"] == "Check out of Social Hotel"
+    # The check-out day is a travel day, not an empty day to fill.
+    assert 3 not in plan["empty_days"]
+
+
+class TestPdfPricesComeFromThePlan:
+    """The PDF took the model's figures: a visa the customer had excluded
+    (Rs 15,504.58) appeared in it and in its total."""
+
+    def test_pdf_uses_the_plan_lines_and_drops_an_invented_visa(self, monkeypatch) -> None:
+        import agent_tools
+        import itinerary_store
+        from agent_tools import generate_itinerary_pdf_tool, plan_itinerary_tool
+
+        captured: dict = {}
+
+        def fake_save(doc):
+            captured.update(doc if isinstance(doc, dict) else doc.model_dump())
+            return "abc123", itinerary_store._dir() / "abc123.pdf"
+
+        monkeypatch.setattr(itinerary_store, "save_itinerary_pdf", fake_save)
+        from rules import set_conversation_text
+
+        set_conversation_text("Plan 2 nights in Dubai for 2 adults, hotel and a tour, no visa")
+        plan = plan_itinerary_tool.invoke({
+            "start_date": _SOON, "nights": 2, "adults": 2, "hotel_name": "Social Hotel",
+            "hotel_total_inr": 11281.23,
+            "tours": [{"name": "Dubai Frame Tickets", "price_per_adult_inr": 1239.27, "duration": "2 Hours"}],
+        })
+        generate_itinerary_pdf_tool.invoke({
+            "destination": "Dubai", "start_date": _SOON, "nights": 2,
+            "components": [{"label": "Visa (30-Day)", "amount_inr": 15504.58},
+                           {"label": "Hotel", "amount_inr": 1}],
+            "visa": {"visa_type": "30 Days"}, "total_inr": 30444.61,
+            "inclusions": ["Social Hotel", "30-Day Tourist Visa"],
+        })
+        assert captured["total_inr"] == plan["total_inr"]
+        labels = [c["label"] for c in captured["components"]]
+        assert not any("Visa" in x for x in labels)
+        assert captured["visa"] is None
+        assert all("visa" not in i.lower() for i in captured["inclusions"])
+        assert agent_tools._last_plan().get("total_inr") == plan["total_inr"]
+
+
+def test_customer_excluded_reads_the_customers_words():
+    from rules import customer_excluded, set_conversation_text
+
+    for said, excluded in [
+        ("Include a hotel. Do not add flights, meals or visa.", True),
+        ("we already have our visas", True),
+        ("no flights, just hotel. visa needed", False),
+        ("I need a visa and a hotel", False),
+    ]:
+        set_conversation_text(said)
+        assert customer_excluded("visa") is excluded, said
+
+
+def test_flight_times_without_a_flight_are_not_scheduled():
+    from agent_tools import plan_itinerary_tool
+    from rules import set_conversation_text
+
+    set_conversation_text("Plan 2 nights in Dubai for 2 adults, hotel and a tour, no flights")
+    plan = plan_itinerary_tool.invoke({
+        "start_date": _SOON, "nights": 2, "adults": 2, "hotel_name": "Social Hotel",
+        "hotel_total_inr": 11281.23, "arrival_time": "12:00", "departure_time": "10:00",
+        "tours": [{"name": "Dubai Frame Tickets", "price_per_adult_inr": 1239.27, "duration": "2 Hours"}],
+    })
+    titles = [i["title"] for d in plan["days"] for i in d["items"]]
+    assert "Arrive in Dubai" not in titles and "Departure flight" not in titles
+    assert "Check in at Social Hotel" in titles
+
+
+def test_flight_times_the_customer_gave_are_kept():
+    from agent_tools import plan_itinerary_tool
+    from rules import set_conversation_text
+
+    set_conversation_text("We land at 12:00, plan 2 nights in Dubai for 2 adults")
+    plan = plan_itinerary_tool.invoke({
+        "start_date": _SOON, "nights": 2, "adults": 2, "hotel_name": "Social Hotel",
+        "hotel_total_inr": 11281.23, "arrival_time": "12:00",
+        "tours": [{"name": "Dubai Frame Tickets", "price_per_adult_inr": 1239.27, "duration": "2 Hours"}],
+    })
+    assert "Arrive in Dubai" in [i["title"] for i in plan["days"][0]["items"]]

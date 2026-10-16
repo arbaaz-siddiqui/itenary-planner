@@ -200,7 +200,7 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
 - Cookies: `samesite=none; secure` when `COOKIE_SECURE` is set, or unset and `CORS_ORIGINS` contains https; otherwise `lax`. `CORS_ORIGINS` must list exact origins (e.g. `http://localhost:3000`), never `*`.
 - Boot logs (does not raise) a missing `SESSION_SECRET` or a failed migration, so `/health` stays green: check logs or `/health/db`.
 
-**Migrations** (`migrations/`, idempotent SQL, no version table): `001_init` (users, chat_sessions, chat_messages, user_memory), `002_message_options`, `003_accounts` (names, session_epoch), `004_turns`, `005_artifacts_and_trip_state` (column `trip_window`; `window` is reserved), `006_message_feedback`, `007_user_saved_pins_settings` (`chat_sessions.pinned`, `saved_cards`, `users.ui_settings`). Add new ones as `008_*.sql`, written to be re-runnable.
+**Migrations** (`migrations/`, idempotent SQL, no version table): `001_init` (users, chat_sessions, chat_messages, user_memory), `002_message_options`, `003_accounts` (names, session_epoch), `004_turns`, `005_artifacts_and_trip_state` (column `trip_window`; `window` is reserved), `006_message_feedback`, `007_user_saved_pins_settings` (`chat_sessions.pinned`, `saved_cards`, `users.ui_settings`), `008_itinerary_pdfs` (PDF bytes per chat). Add new ones as `009_*.sql`, written to be re-runnable.
 
 **Data ownership (no leaks).** Every query that touches account data puts `user_id` in its WHERE clause (or joins through `chat_sessions.user_id`), so a missing check returns nothing rather than someone else's row; by-id endpoints return 404 for another account's ids. Where data lives:
 
@@ -213,7 +213,7 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
 | Saved (hearted) cards | `saved_cards` |
 | Theme, sidebar collapsed | `users.ui_settings` |
 | Agent working state | LangGraph checkpoint tables, keyed by the session's unique `thread_id` |
-| Itinerary PDFs | files under `ITINERARY_DIR`, served at `/itinerary/{id}.pdf` by unguessable id (public by design) |
+| Itinerary PDFs | files under `ITINERARY_DIR` plus a copy in `itinerary_pdfs` (saved when the turn that built them is saved; the API disk is wiped on every Railway deploy), served at `/itinerary/{id}.pdf` by unguessable id (public by design), disk first then the database |
 
 The browser keeps no account data. `localStorage` holds only the theme as a first-paint cache (`theme-pref`) and the last open chat id (used only if it is in the signed-in account's own list). Never add account data to `localStorage`; add a column or table and an owner-scoped endpoint. In-process state that tools keep between calls must be keyed by conversation (`rules.current_thread()`), never module-global: `agent_tools._LAST_PLANS` is the example.
 
@@ -396,6 +396,7 @@ Rules for agents:
 - Restaurant data has no availability; only ~9 Dubai restaurants, all vegetarian.
 - Flight results can contain the same flight from two suppliers; the UI shows one card per airline + flight numbers + times + fare.
 - Tour photos: `GET /tours/{id}/images` → B2C `/api/tours/medias` (search gives one photo). Global Village came back from autocomplete as an unsellable Klook listing; `get_tour_options` swaps an all-unpriced tour for the website's priced listing of the same name.
+- `plan_itinerary_tool`: no visa when the customer said so (`rules.customer_excluded`); flight times are dropped unless a flight is in the package or the customer stated them; the plan is cached for the PDF AFTER pricing, and the PDF takes its prices and total from that plan. The last day of a trip is a travel day (never an "empty day"); activities without slots start at their time of day (dinner/night 19:30, Global Village 16:00, safari/sunset 15:00).
 - "Build a package" form (`web/src/components/PackageBuilder.tsx`, logic in `lib/packageBuilder.ts`) on the Packages home screen sends one plain request in Plan mode; Plan mode plans only the parts listed.
 - Cabin is normalised (`normalize_cabin`): the supplier returns zero fares, silently, for any cabin that is not a bare code.
 - City names tolerate typos ("Ahemdabad"): `resolve_city` falls back to a close match for names of 6+ letters, and `rules.customer_said` accepts the corrected spelling. Without both, a misspelt origin could never be searched.

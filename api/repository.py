@@ -324,3 +324,22 @@ def merge_ui_settings(user_id: str, settings: dict[str, Any]) -> dict[str, Any]:
             (json.dumps(settings), user_id),
         ).fetchone()
     return row[0] if row else {}
+
+
+# ------------------------------------------------------------ itinerary PDFs
+def save_itinerary_pdf(itinerary_id: str, session_id: str, filename: str, pdf: bytes) -> None:
+    """Keep a generated PDF so it outlives the API's disk (redeploys)."""
+    with get_pool().connection() as conn:
+        conn.execute(
+            "INSERT INTO itinerary_pdfs (id, session_id, filename, pdf) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (id) DO NOTHING",
+            (itinerary_id, session_id, filename, pdf),
+        )
+
+
+def get_itinerary_pdf(itinerary_id: str) -> tuple[str, bytes] | None:
+    """(filename, bytes) of a stored PDF, by its unguessable id."""
+    with get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT filename, pdf FROM itinerary_pdfs WHERE id = %s", (itinerary_id,))
+        row = cur.fetchone()
+    return (str(row[0]), bytes(row[1])) if row else None
