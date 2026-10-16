@@ -17,6 +17,7 @@ import { Composer, type ComposerHandle, type ComposerMode } from "@/components/C
 import { HomeHero } from "@/components/HomeHero";
 import { SearchDialog } from "@/components/SearchDialog";
 import { SettingsDialog } from "@/components/SettingsDialog";
+import { PackageBuilder } from "@/components/PackageBuilder";
 import { NameDialog } from "@/components/NameDialog";
 import { DetailPanel } from "@/components/detail/DetailPanel";
 import { CardActionsProvider, type CardActions, type CardRef } from "@/lib/cardActions";
@@ -50,6 +51,7 @@ export default function ChatPage() {
   const pinned = useMemo(() => new Set(sessions.filter((s) => s.pinned).map((s) => s.id)), [sessions]);
   const [service, setService] = useState<ServiceId | null>(null);
   const [mode, setMode] = useState<ComposerMode>("ask");
+  const [builderOpen, setBuilderOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const theme = useTheme();
@@ -458,7 +460,7 @@ export default function ChatPage() {
 
   // --- the streaming turn ---
 
-  async function send(typed: string, opts: { regenerate?: boolean } = {}) {
+  async function send(typed: string, opts: { regenerate?: boolean; mode?: ComposerMode } = {}) {
     // A service picked in the sidebar names the intent for the agent, once.
     const svc = opts.regenerate ? null : serviceById(service);
     const text =
@@ -541,7 +543,7 @@ export default function ChatPage() {
     };
 
     try {
-      for await (const ev of api.stream(sessionId, text, ctrl.signal, mode, Boolean(opts.regenerate))) {
+      for await (const ev of api.stream(sessionId, text, ctrl.signal, opts.mode ?? mode, Boolean(opts.regenerate))) {
         // Every event feeds the reducer and re-arms the idle timer, including
         // the ones that produce no segment.
         stream.push(ev);
@@ -769,7 +771,7 @@ export default function ChatPage() {
                 <div className="skeleton h-4 w-2/3 rounded" />
               </div>
             ) : home ? (
-              <HomeHero name={name} service={service} onPick={(p) => send(p)}>
+              <HomeHero name={name} service={service} onPick={(p) => send(p)} onBuildPackage={() => setBuilderOpen(true)}>
                 {composer("hero")}
               </HomeHero>
             ) : (
@@ -801,6 +803,17 @@ export default function ChatPage() {
         onSaved={setUser}
         onLater={() => setNameLater(true)}
         onSignedOut={signOutAndRedirect}
+      />
+      <PackageBuilder
+        open={builderOpen}
+        onClose={() => setBuilderOpen(false)}
+        onSubmit={(request) => {
+          setBuilderOpen(false);
+          // A built package is a full priced trip: Plan mode, as the
+          // composer's Plan option would send it.
+          setMode("plan");
+          void send(request, { mode: "plan" });
+        }}
       />
       <SettingsDialog
         open={settingsOpen}

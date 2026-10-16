@@ -483,11 +483,15 @@ async def chat_stream(
 _MODE_CONTEXT = {
     "plan": (
         "[system] Plan mode: the customer wants a complete trip planned, not a "
-        "single answer. If the destination, travel dates, departure city or "
-        "party (adults, children and their ages) is missing, ask for all the "
-        "missing ones in ONE short question. Once known, search live flights, "
-        "a hotel and tours, build the day-by-day plan with plan_itinerary_tool, "
-        "give the trip total from the tools, and offer to change any part.\n\n"
+        "single answer. If the customer lists what to include (\"Include ...\", "
+        "\"Do not add ...\"), plan exactly those parts and nothing else: no "
+        "flights, visa or meals they did not ask for, and no departure city "
+        "unless flights are included. Otherwise plan flights, a hotel and "
+        "tours. If the destination, travel dates, party (adults, children and "
+        "their ages) or, for flights, the departure city is missing, ask for "
+        "all the missing ones in ONE short question. Once known, search each "
+        "part live, build the day-by-day plan with plan_itinerary_tool, give "
+        "the trip total from the tools, and offer to change any part.\n\n"
     ),
 }
 

@@ -1327,21 +1327,27 @@ def call_tour_options(*, tour_id: int, travel_date: str, lang: str = "en") -> di
 
 
 def _tour_pax_details(
-    adults: int, child_ages: Sequence[int], units: int = 0
+    adults: int, child_ages: Sequence[int], units: int = 0, extra_units: int = 0,
+    adult_age: str = "",
 ) -> list[dict[str, str]]:
     """The optionRate party: adults, then children with their ages.
 
     An option sold per unit (a quad bike, a private majlis) is priced by unit
     count instead; the supplier answers 500 to an adult count on those.
+    `extra_units` adds a unit line AFTER the adults, for an option priced per
+    person plus per vehicle (its `restrictedRateType` lists "Unit"): the
+    website sends both for the desert safari dune buggy option.
     """
     if units:
         return [{"label": "unit", "value": str(units), "age": ""}]
-    pax = [{"label": "adult", "value": str(adults), "age": ""}]
+    pax = [{"label": "adult", "value": str(adults), "age": adult_age}]
     ages = [int(a) for a in child_ages or ()]
     if ages:
         pax.append(
             {"label": "child", "value": str(len(ages)), "age": ",".join(map(str, ages))}
         )
+    if extra_units:
+        pax.append({"label": "unit", "value": str(extra_units), "age": ""})
     return pax
 
 
@@ -1357,6 +1363,9 @@ def call_tour_option_rate(
     child_ages: Sequence[int] = (),
     units: int = 0,
     vehicle_id: int = 0,
+    extra_units: int = 0,
+    time_slot_id: str = "",
+    start_time: str = "",
 ) -> dict[str, Any]:
     """Rate for one tour option, INCLUDING the per-transfer-type prices.
 
@@ -1378,13 +1387,17 @@ def call_tour_option_rate(
         "travelDate": travel_date,
         "optionId": str(option_id),
         "transferId": transfer_id,
-        "StartTime": "",
+        "StartTime": start_time,
         "guideId": 0,
         "lang": lang,
-        "paxDetails": _tour_pax_details(adults, child_ages, units),
+        "paxDetails": _tour_pax_details(adults, child_ages, units, extra_units),
         "supplierId": supplier_id,
-        "timeSlotId": "",
+        "timeSlotId": time_slot_id,
         "vehicleId": vehicle_id,
+        # Live rate, as the website asks. Left out, the supplier answers from
+        # its rate cache: Desert Safari 30647 private came back AED 474.10
+        # against the website's live 914.10.
+        "isCache": False,
     }
     try:
         return get_b2c_client().post(
@@ -1396,27 +1409,100 @@ def call_tour_option_rate(
         ) from e
 
 
-# The tour's photo gallery. No supplier API we hold returns it: Tourdetails
-# (B2B) and /api/tours/details (B2C) both carry a single imagePath. The
-# client's own website renders `tourImages` (every photo, in display order)
-# into its tour page, which resolves by tour id whatever the slug. Verified
-# 2026-10-16: Desert Safari 53632 has 6 photos, tour 28488 has 15.
-TOUR_PAGE_PATH = "/en/tours/dubai/tour/tour-{tour_id}"
+TOUR_MEDIAS_PATH = "/api/tours/medias"
 
 
-def call_tour_page(*, tour_id: int) -> str:
-    """The public tour page's HTML, for its embedded photo list."""
+def call_tour_medias(*, tour_id: int, lang: str = "en") -> dict[str, Any]:
+    """Every photo of a tour (B2C host), as the website's gallery loads them.
+
+    `result[*]` carries `imagePath` and `displayOrder`. Tour search and both
+    details endpoints return a single imagePath; this is the full list.
+    Verified 2026-10-16: Global Village 46045 has 8, Desert Safari 53632 has 6.
+    """
+    try:
+        return get_b2c_client().get(
+            TOUR_MEDIAS_PATH, params={"tourId": int(tour_id), "lang": lang},
+            headers=base_headers(),
+        )
+    except Exception as e:
+        raise BookingApiError(f"Tour medias call failed: {e}", endpoint=TOUR_MEDIAS_PATH) from e
+
+
+# =============================================================================
+# Package composition and live price, the way gujjutours.com builds them
+# =============================================================================
+# No package API we hold returns a package's parts or price: packagerate
+# answers empty lists and packagestaticdata carries only day titles. The
+# website's package page embeds the parts (`itineraryServices`: tour, option
+# and transfer per day; `packageHotels`: the hotels in priority order) and
+# prices them live in the browser: the hotel through packagehotelv1, each
+# service through optionRate. Verified 2026-10-16 on "Dubai Budget Escape 3
+# Nights" (id 2): reproducing those calls gives the website's Rs 31,455.11.
+PACKAGE_PAGE_PATH = "/en/holidays/{country}-{country_id}/{city}-{city_id}/{name}-{package_id}"
+PACKAGE_HOTELS_PATH = "/api/package/packagehotelv1"
+
+
+def call_package_page(*, path: str) -> str:
+    """A package's public page HTML (its parts are embedded in it)."""
     import requests
 
     from settings import get_booking_api_settings, get_http_settings
 
-    url = get_booking_api_settings().b2c_base_url.rstrip("/") + TOUR_PAGE_PATH.format(
-        tour_id=int(tour_id)
-    )
+    url = get_booking_api_settings().b2c_base_url.rstrip("/") + path
     try:
         resp = requests.get(url, timeout=get_http_settings().timeout_secs,
                             headers={"Accept": "text/html"})
         resp.raise_for_status()
         return resp.text
     except Exception as e:
-        raise BookingApiError(f"Tour page fetch failed: {e}", endpoint=TOUR_PAGE_PATH) from e
+        raise BookingApiError(f"Package page fetch failed: {e}", endpoint=PACKAGE_PAGE_PATH) from e
+
+
+def call_package_hotels(
+    *,
+    city_id: int,
+    country_id: int,
+    check_in: str,
+    check_out: str,
+    hotel_ids: Sequence[int],
+    rooms: Sequence[dict[str, Any]],
+    nationality: str = "India",
+) -> dict[str, Any]:
+    """Live room rates for a package's hotels (B2C host), as the website asks.
+
+    Dates are ISO in, mm-dd-yyyy out (the endpoint's format). `rooms` is one
+    dict per room: {"adults": n, "child_ages": [..]}. Prices come back in
+    `data[*].AvailabilityRS` with Currency AED, one total for the whole stay.
+    """
+    def mdy(iso: str) -> str:
+        y, m, d = iso.split("-")
+        return f"{m}-{d}-{y}"
+
+    body = {
+        "cityId": str(city_id),
+        "checkInDate": mdy(check_in),
+        "checkOutDate": mdy(check_out),
+        "nationality": nationality,
+        "currency": "INR",
+        "lang": "en",
+        "rooms": [
+            {"RoomNo": i + 1, "NoofAdults": int(r.get("adults") or 0),
+             "NoOfChild": len(r.get("child_ages") or []), "Units": 1,
+             "ChildAge": [int(a) for a in r.get("child_ages") or []]}
+            for i, r in enumerate(rooms)
+        ],
+        "hotelIds": [int(h) for h in hotel_ids],
+        "IsPackage": True,
+        "CountryID": int(country_id),
+        "SupplierId": "5,4",
+        "Filters": {"IsRecommendedOnly": "0", "IsShowRooms": "1", "IsOnlyAvailable": "1",
+                    "StarRating": {"Max": 5, "Min": 1}},
+        "AdvancedOptions": {"Currency": "INR", "SearchByOneID": False,
+                            "CustomerIpAddress": "127.0.0.1", "HotelName": ""},
+        "IsSearch": 1,
+        "IsMobile": 1,
+    }
+    try:
+        return get_b2c_client().post(PACKAGE_HOTELS_PATH, json=body, headers=base_headers())
+    except Exception as e:
+        raise BookingApiError(f"Package hotels call failed: {e}", endpoint=PACKAGE_HOTELS_PATH) from e

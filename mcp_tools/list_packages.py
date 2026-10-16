@@ -11,7 +11,7 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-from booking_api import call_list_packages, call_package_rates
+from booking_api import call_list_packages
 from core import TripPlannerError, nights_between
 from rules import missing_search_fields, needs_input_error
 from mcp_tools.server import mcp
@@ -19,6 +19,57 @@ from parsers import parse_package_response
 from reference_data_loader import resolve_city
 
 logger = logging.getLogger(__name__)
+
+# How many packages a list prices live (each is one page read plus one hotel
+# and ~5 tour rate calls, run in parallel).
+PRICE_TOP = 8
+
+
+def _safe_nights(option: dict[str, Any]) -> int:
+    try:
+        return int(option.get("nights") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _price_options(options: list[dict[str, Any]], *, city: dict[str, Any], check_in: str,
+                   adults: int, child_ages: list[int], rooms: int, nationality: str) -> None:
+    """Attach the live price and parts to each option, in place."""
+    import concurrent.futures as cf
+
+    from mcp_tools.package_pricing import price_package
+
+    def one(o: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        own = resolve_city(str(o.get("city") or "")) or city
+        try:
+            return o, price_package(
+                package_id=int(o["package_id"]), name=str(o.get("name") or ""),
+                country=str(o.get("country") or own.get("country_name") or ""),
+                country_id=int(own["country_id"]), city=str(own["name"]),
+                city_id=int(own["city_id"]), check_in=check_in, nights=_safe_nights(o),
+                adults=adults, child_ages=child_ages, rooms=rooms, nationality=nationality,
+            )
+        except Exception as e:  # noqa: BLE001 -- an unpriced row stays in the list
+            logger.warning("package price failed id=%s: %s", o.get("package_id"), e)
+            return o, None
+
+    with cf.ThreadPoolExecutor(max_workers=4) as pool:
+        for o, priced in pool.map(one, options):
+            if not priced:
+                continue
+            o.update({
+                "price_inr": priced["price_inr"],
+                "price_display": priced["price_display"],
+                "price_per_person_inr": priced["price_per_person_inr"],
+                "price_per_person_display": priced["price_per_person_display"],
+                "pricing_available": priced["pricing_available"],
+                "pricing_note": priced["pricing_note"],
+                "hotel_name": (priced["hotel"] or {}).get("name"),
+                "hotel": priced["hotel"],
+                "package_lines": priced["lines"],
+                "check_in": priced["check_in"],
+                "check_out": priced["check_out"],
+            })
 
 
 def _impl(
@@ -30,6 +81,8 @@ def _impl(
     nationality: str = "India",
     fetch_rates: bool = True,
     max_results: int = 25,
+    child_ages: list[int] | None = None,
+    rooms: int = 1,
 ) -> dict[str, Any]:
     """List packages for the destination.
 
@@ -43,6 +96,8 @@ def _impl(
         fetch_rates: If True, also fetch rates for each listed package.
             Set False if you only need package metadata (faster).
         max_results: Cap on options returned.
+        child_ages: one age per child, e.g. [5, 8] (prices the hotel rooms).
+        rooms: how many hotel rooms the party needs.
     """
     try:
         city = resolve_city(destination_city)
@@ -118,62 +173,37 @@ def _impl(
                     except (ValueError, TypeError):
                         continue
 
-        # Rates: new API takes ONE packageId per call. Loop with a cap.
-        rate_results: list[dict[str, Any]] = []
-        if fetch_rates:
-            for pid in package_ids[:max_results]:
-                try:
-                    rate_raw = call_package_rates(
-                        package_id=pid,
-                        country_id=int(city["country_id"]),
-                        city_id=int(city.get("city_id") or 0),
-                        check_in=check_in,
-                        check_out=check_out,
-                        nights=nights,
-                        adults=adults,
-                        children=children,
-                        nationality=nationality,
-                        residency=nationality,
-                    )
-                    rate_results.append({"packageId": pid, **rate_raw})
-                except TripPlannerError as e:
-                    logger.warning("package rate failed for %s: %s", pid, e)
-                    continue
-
-        # The parser will join list + rates.
-        options = parse_package_response(
-            list_raw,
-            {"result": rate_results},
-            max_results=max_results,
-        )
-        # Package pricing is being settled with the supplier, so it must not
-        # reach the customer at all. A price_inr of 0 left in the row renders as
-        # "Rs 0" / "Free" the moment the model touches it.
-        _PRICE_KEYS = (
-            "price_inr", "price_original", "currency_original",
-            "pricing_available", "price_display", "booking_status",
-        )
+        # The supplier's packagerate answers empty lists for every package, so
+        # it is not called; prices come from the package's own parts, priced
+        # the way the website prices them (mcp_tools.package_pricing).
+        options = parse_package_response(list_raw, {"result": []}, max_results=max_results)
         for _o in options:
-            for _k in _PRICE_KEYS:
+            for _k in ("price_inr", "price_original", "currency_original",
+                       "pricing_available", "price_display", "booking_status"):
                 _o.pop(_k, None)
+
+        # Packages with the nights asked for come first, and those are priced.
+        options.sort(key=lambda o: _safe_nights(o) != nights)
+        if fetch_rates:
+            _price_options(options[:PRICE_TOP], city=city, check_in=check_in,
+                           adults=adults, child_ages=list(child_ages or []),
+                           rooms=rooms, nationality=nationality)
 
         return {
             "options": options,
             "total_results": len(options),
             "agent_instructions": (
-                "Do NOT show any price, price column, or 'On Request' pricing "
-                "line for packages — pricing is being confirmed separately and "
-                "must not appear. Present them as a table of what each package "
-                "IS: Package | Type | Tags | Nights | Includes | Max pax | "
-                "Cancellation. Use `package_type` (the supplier's own Dynamic "
-                "Package / Land Package label — never call the list "
-                "static-only), `tags` (Budget, Honeymoon, Jain, Senior Citizen, "
-                "Luxury, Family, Adventure...), `nights`, `includes` (hotel / "
-                "tours / transfers / flights / meals / visa), `max_pax`, and "
-                "`is_free_cancellation`. If the customer asks what a package "
-                "costs, say the quote is being confirmed and offer to build the "
-                "trip from search_flights + search_hotels + search_tours, which "
-                "are priced. Never invent or estimate a package price. "
+                "Packages carry a live price when `pricing_available` is true: "
+                "`price_display` is the TOTAL for the party and stay, "
+                "`price_per_person_display` the per-person figure, priced the "
+                "way gujjutours.com prices the package (hotel for the stay plus "
+                "each tour and transfer in it; `package_lines` lists them). "
+                "Quote those figures as they are; never add, scale or estimate "
+                "them. A package without a price was not priced in this list: "
+                "call get_package_details with the same dates and party for its "
+                "price and parts. Show a table: Package | Nights | Hotel | "
+                "Includes | Total for the party. Use `package_type`, `tags`, "
+                "`includes` and `is_free_cancellation` as facts."
             ),
             "search_params": {
                 "destination": destination_city,

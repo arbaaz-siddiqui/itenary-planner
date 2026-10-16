@@ -1,5 +1,6 @@
 "use client";
 
+import { SlidersHorizontal } from "lucide-react";
 import { QUICK_STARTS, serviceById, type ServiceId } from "@/lib/services";
 
 // On the gradient, controls sit on a dark (or, in light theme, white) veil
@@ -17,11 +18,14 @@ export function HomeHero({
   name,
   service,
   onPick,
+  onBuildPackage,
   children,
 }: {
   name: string;
   service: ServiceId | null;
   onPick: (prompt: string) => void;
+  /** Opens the "Build a package" form; offered on the Packages screen. */
+  onBuildPackage?: () => void;
   children: React.ReactNode;
 }) {
   const svc = serviceById(service);
@@ -57,6 +61,16 @@ export function HomeHero({
             style={{ "--rise-delay": "180ms" } as React.CSSProperties}
             aria-label="Suggestions"
           >
+            {service === "packages" && onBuildPackage && (
+              <button
+                type="button"
+                onClick={onBuildPackage}
+                className="press inline-flex items-center gap-2 rounded-full bg-brand-blue px-3.5 py-1.5 text-[13px] font-medium text-white shadow-sm hover:bg-brand-blue-dark sm:py-2 sm:text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              >
+                <SlidersHorizontal size={15} strokeWidth={1.9} aria-hidden />
+                Build my own package
+              </button>
+            )}
             {chips.map(({ text, Icon }) => (
               <button
                 key={text}

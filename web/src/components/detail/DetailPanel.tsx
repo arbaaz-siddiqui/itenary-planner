@@ -492,6 +492,70 @@ function TourBody({ o }: { o: OptionItem }) {
   );
 }
 
+/** The package's parts as the website lists them: the hotel for the stay,
+ *  then each day's tours and transfers, every one with its live price. */
+function PackageParts({ o }: { o: OptionItem }) {
+  const lines = objList(o, "package_lines");
+  if (!lines.length) return null;
+  const hotel = lines.find((l) => str(l, "kind") === "hotel");
+  const days = new Map<number, OptionItem[]>();
+  for (const l of lines) {
+    if (str(l, "kind") === "hotel") continue;
+    const d = num(l, "day") ?? 0;
+    days.set(d, [...(days.get(d) ?? []), l]);
+  }
+  const price = (l: OptionItem) =>
+    l.priced === false ? <span className="text-fg-muted">Not priced</span> : formatInr(num(l, "price_inr"));
+  return (
+    <Section title="Your package">
+      <ul className="divide-y divide-border rounded-xl border border-border text-sm">
+        {hotel && (
+          <li className="flex items-start justify-between gap-3 p-3">
+            <div className="min-w-0">
+              <p className="font-medium text-fg">{str(hotel, "name")}</p>
+              <p className="text-xs text-fg-muted">
+                {[num(hotel, "nights") ? `${num(hotel, "nights")} nights` : null, str(hotel, "room"), str(hotel, "meal")]
+                  .filter(Boolean)
+                  .join(", ")}
+              </p>
+            </div>
+            <span className="shrink-0 tabular-nums text-fg">{price(hotel)}</span>
+          </li>
+        )}
+        {[...days.entries()]
+          .sort(([a], [b]) => a - b)
+          .map(([day, items]) => (
+            <li key={day} className="p-3">
+              <p className="mb-1.5 text-xs font-semibold text-fg-muted">Day {day}</p>
+              <ul className="space-y-2">
+                {items.map((l, i) => (
+                  <li key={i} className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-fg">{str(l, "name")}</p>
+                      <p className="text-xs text-fg-muted">
+                        {[str(l, "option"), str(l, "transfer"), l.optional === true ? "Optional" : null]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </p>
+                    </div>
+                    <span className="shrink-0 tabular-nums text-fg">{price(l)}</span>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        {num(o, "price_inr") != null && (
+          <li className="flex items-center justify-between gap-3 bg-surface-2/40 p-3 font-semibold text-fg">
+            <span>Total</span>
+            <span className="tabular-nums">{formatInr(num(o, "price_inr"))}</span>
+          </li>
+        )}
+      </ul>
+      {str(o, "pricing_note") && <p className="mt-2 text-xs leading-relaxed text-fg-muted">{str(o, "pricing_note")}</p>}
+    </Section>
+  );
+}
+
 function PackageBody({ o }: { o: OptionItem }) {
   const includes = strList(o, "includes").length ? strList(o, "includes") : strList(o, "inclusions");
   const day = (iso: string | null) => (iso ? iso.slice(0, 10) : null);
@@ -502,6 +566,7 @@ function PackageBody({ o }: { o: OptionItem }) {
           <p className="text-sm leading-relaxed text-fg">{str(o, "description")}</p>
         </Section>
       )}
+      <PackageParts o={o} />
       {includes.length > 0 && (
         <Section title="Included">
           <Bullets items={includes} />
@@ -510,6 +575,7 @@ function PackageBody({ o }: { o: OptionItem }) {
       <Section title="Details">
         <Facts
           rows={[
+            ["Dates", str(o, "check_in") && str(o, "check_out") ? `${str(o, "check_in")} to ${str(o, "check_out")}` : null],
             ["Destination", [str(o, "city"), str(o, "country")].filter(Boolean).join(", ") || null],
             ["Duration", num(o, "nights") ? `${num(o, "nights")} nights` : str(o, "duration")],
             ["Type", str(o, "package_type_display")],
@@ -623,7 +689,8 @@ function headline(o: OptionItem, kind: CardRef["kind"]): { price: string | null;
     case "visa":
       return { price: formatInr(num(o, "price_per_person_inr")), label: "Per person" };
     case "package":
-      return { price: formatInr(num(o, "price_inr")), label: "From" };
+      // A live package price is the exact total for the party, not a "from".
+      return { price: formatInr(num(o, "price_inr")), label: num(o, "price_per_person_inr") ? "Total for your group" : "From" };
     default: {
       const totals = (objList(o, "prices").length ? objList(o, "prices") : objList(o, "transfer_prices"))
         .map((p) => num(p, "total_inr") ?? num(p, "price_inr"))

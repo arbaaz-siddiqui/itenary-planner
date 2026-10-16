@@ -544,6 +544,9 @@ class TourOption(BaseModel):
     price_original: float = 0.0
     currency_original: str = "INR"
     final_rate_original: float = 0.0
+    # Priced per vehicle, not per person (rate type 11 "Unit": the
+    # website's airport pickup and drop-off tours).
+    sold_per_vehicle: bool = False
     discount_type: str = ""
     discount_value: float = 0.0
     duration: str = ""
