@@ -636,6 +636,87 @@ def _replace_invented_results(response: dict[str, Any]) -> None:
     )
 
 
+_RUPEE_AMOUNT = re.compile(r"₹\s?(\d[\d,]*(?:\.\d+)?)")
+_ANY_NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+_RESEARCH_MARKER = (
+    "[system] Your last reply answered from memory instead of a search. Prices "
+    "are live and must never be retyped or pointed back to. Call the search "
+    "tool again now with the customer's details (a repeat search is fast) and "
+    "answer only from its result, with no comment about searching again."
+)
+# "I have already pulled those", "see the table above".
+_POINTS_BACK = re.compile(r"\b(already|above|earlier|previous(ly)?)\b", re.IGNORECASE)
+
+
+def _tool_numbers(messages: list[Any]) -> set[int]:
+    """Every number a tool returned or the customer typed in this thread, in
+    whole rupees. The customer's own figures ("budget Rs 50,000") may be echoed."""
+    seen: set[int] = set()
+    for msg in messages:
+        if _message_role(msg) not in {"tool", "human", "user"}:
+            continue
+        content = _message_content(msg)
+        text = content if isinstance(content, str) else json.dumps(content, default=str)
+        for raw in _ANY_NUMBER.findall(text or ""):
+            try:
+                seen.add(round(float(raw.replace(",", ""))))
+            except ValueError:
+                continue
+    return seen
+
+
+def _repeats_earlier_request(history: list[Any]) -> bool:
+    """True when the customer's latest message is one they already sent."""
+    said = [
+        " ".join(_customer_part(str(_message_content(m) or "")).lower().split())
+        for m in history
+        if _message_role(m) in {"human", "user"}
+    ]
+    said = [s for s in said if s]
+    return len(said) >= 2 and said[-1] in said[:-1]
+
+
+def _unsourced_prices(history: list[Any], turn: list[Any]) -> list[str]:
+    """Rupee amounts in a tool-less reply that no tool result ever contained.
+
+    Asked for the same flights a second time, the model skipped the search,
+    said "I have already found some flight options" and retyped a table from
+    memory: Flydubai Rs 56,494.41 and IndiGo Rs 61,545.94 (the supplier had
+    quoted Rs 36,380.55 and Rs 32,242.87), then called a third figure the
+    cheapest. Nothing marks such a table as invented, so a price is accepted
+    only when some tool in this conversation returned it.
+    """
+    if extract_tool_calls({"messages": turn}):
+        return []
+    text = _final_reply({"messages": turn})
+    amounts = _RUPEE_AMOUNT.findall(text or "")
+    if (amounts or _POINTS_BACK.search(text or "")) and _repeats_earlier_request(history):
+        # Real prices, but the customer asked for the search again and got
+        # "I have already pulled them" with no cards. Prices are live: run it.
+        return amounts or ["(repeated request)"]
+    if not amounts:
+        return []
+    known = _tool_numbers(history)
+    unsourced: list[str] = []
+    for raw in amounts:
+        try:
+            value = round(float(raw.replace(",", "")))
+        except ValueError:
+            continue
+        if not (known & {value - 1, value, value + 1}):
+            unsourced.append(raw)
+    return unsourced
+
+
+def _thread_messages(agent: Any, config: dict[str, Any]) -> list[Any]:
+    try:
+        state = agent.get_state(config)
+    except Exception:  # noqa: BLE001 — no checkpoint means no history to check
+        return []
+    return list((getattr(state, "values", None) or {}).get("messages") or [])
+
+
 def _failed_calls_so_far(msgs: list[Any]) -> set[tuple[str, str]]:
     """(tool name, arguments) pairs that already returned NeedsCustomerInput.
 
@@ -1227,6 +1308,15 @@ def invoke_and_log(
     )
     response = _recover_empty_turn(agent, response, config,
                                    surface=surface, thread_id=thread_id)
+    all_msgs = list(response.get("messages") or [])
+    retry = _research_unsourced(agent, config, all_msgs, _this_turn(all_msgs),
+                                thread_id=thread_id)
+    if retry is not None:
+        before = _final_reply(retry)
+        _apply_reply_guards(retry)
+        if _final_reply(retry) != before:
+            _save_final_reply(agent, config, retry)
+        response = retry
     _guard_empty_turn(response, surface=surface, thread_id=thread_id)
     return response
 
@@ -1444,6 +1534,37 @@ def _set_final_reply(response: dict[str, Any], text: str) -> None:
                 and not getattr(m, "tool_calls", None) and not is_internal_marker(c)):
             m.content = text
             return
+
+
+def _research_unsourced(agent: Any, config: dict[str, Any], history: list[Any],
+                        turn: list[Any], *, thread_id: str) -> dict[str, Any] | None:
+    """Re-run the search when a tool-less reply quoted prices nobody returned.
+
+    Returns the retry's response, or None when the reply was fine. A retry that
+    still looks nothing up is not shown: the customer is asked to send the
+    request again rather than read a second set of made-up fares.
+    """
+    bad = _unsourced_prices(history, turn)
+    if not bad:
+        return None
+    log = logging.getLogger("agent.turn")
+    log.warning("reply had no search behind it (%s) — re-searching thread=%s",
+                ", ".join(bad[:5]), thread_id)
+    try:
+        retry = agent.invoke({"messages": [{"role": "user", "content": _RESEARCH_MARKER}]},
+                             config)
+    except Exception:  # noqa: BLE001 — fall back to the safe message below
+        retry = None
+    if retry is None or not extract_tool_calls(
+            {"messages": _this_turn(list(retry.get("messages") or []))}):
+        log.warning("re-search made no lookup — not shown thread=%s", thread_id)
+        if retry is None:
+            # Rewritten in place; the caller's own messages now carry it.
+            _set_final_reply({"messages": turn}, _COULD_NOT_FINISH)
+            return {"messages": list(history) or list(turn), "in_place": True}
+        _set_final_reply(retry, _COULD_NOT_FINISH)
+        _save_final_reply(agent, config, retry)
+    return retry
 
 
 def _turn_is_dead(response: dict[str, Any]) -> bool:
@@ -1786,6 +1907,19 @@ def stream_and_log(
                 yield joined
         except Exception:  # noqa: BLE001 — the surface fallback handles it
             pass
+
+    # A reply with no search behind it may only quote prices some tool returned.
+    # The invented one has already streamed; `done` carries the replacement.
+    retry = _research_unsourced(agent, config, _thread_messages(agent, config),
+                                _this_turn(list(holder.messages)), thread_id=thread_id)
+    if retry is not None and retry.get("in_place"):
+        holder.text = _COULD_NOT_FINISH
+    elif retry is not None:
+        fresh = _this_turn(list(retry.get("messages") or []))
+        holder.messages = [*holder.messages, *fresh]
+        reply = _final_reply({"messages": fresh})
+        if reply:
+            holder.text = reply
 
     # Corrections apply here too; the caller sends `holder.text` as the final
     # reply so a corrected answer replaces what streamed.

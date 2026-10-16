@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { parseResultTable } from "@/lib/resultTable";
 import { plainSymbols } from "@/lib/plainSymbols";
+import { holdPendingTable } from "@/lib/pendingTable";
 import { ResultComparison, type OptionLookup } from "./ResultTable";
 import { CardsLoading } from "./cards/CardCarousel";
 
@@ -41,6 +42,8 @@ export const Markdown = memo(function Markdown({
    */
   optionFor?: OptionLookup;
 }) {
+  // A table still being written shows as the loader, not as raw "| a | b |".
+  const { ready, pending } = streaming ? holdPendingTable(children) : { ready: children, pending: false };
   return (
     <div className="md">
       <ReactMarkdown
@@ -80,8 +83,9 @@ export const Markdown = memo(function Markdown({
           ),
         }}
       >
-        {plainSymbols(children)}
+        {plainSymbols(ready)}
       </ReactMarkdown>
+      {pending && <CardsLoading label="Loading results" />}
     </div>
   );
 });

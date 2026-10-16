@@ -451,6 +451,16 @@ def _to_dict(o: Any, searched_pax: int) -> dict[str, Any]:
     outbound = d.get("segments_outbound") or []
     inbound = d.get("segments_return") or []
     total = len(outbound) + len(inbound)
+
+    # One logo per airline flown, in flight order, as the website shows them.
+    from parsers import airline_logo_url
+
+    logos: list[str] = []
+    for s in [*outbound, *inbound]:
+        url = airline_logo_url(str(s.get("airline_logo_path") or ""))
+        if url and url not in logos:
+            logos.append(url)
+    d["airline_logos"] = logos
     checked = list(d.get("baggage_info") or [])
     cabin = list(d.get("cabin_baggage_info") or [])
 

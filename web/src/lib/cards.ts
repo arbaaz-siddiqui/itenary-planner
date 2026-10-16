@@ -91,6 +91,16 @@ export function imagesOf(item: OptionItem): string[] {
   return out;
 }
 
+/** The photos a detail panel shows: the full gallery once loaded (it already
+ *  holds the cover, sometimes under another host), else the card's own. */
+export function mergeImages(cardImages: string[], gallery: string[]): string[] {
+  const out: string[] = [];
+  for (const v of gallery.length ? gallery : cardImages) {
+    if (typeof v === "string" && v.trim() && !out.includes(v)) out.push(v);
+  }
+  return out;
+}
+
 /** The name a card shows, whatever key this kind uses for it. */
 export function titleOf(item: OptionItem, kind: CardKind): string {
   switch (kind) {

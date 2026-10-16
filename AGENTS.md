@@ -186,6 +186,7 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
 | POST | `/chat/messages/{id}/feedback` | `up`/`down`/null → 1/-1/NULL |
 | GET | `/chat/messages/{id}/tool-calls` | the tool calls behind a reply (args, results); owner only |
 | GET | `/tours/{tour_id}/options/{option_id}/details?supplier_id=` | tour option detail for the panel |
+| GET | `/tours/{tour_id}/images` | every photo of a tour for the panel gallery (`mcp_tools/tour_gallery.py`, cached 6 h) |
 | POST | `/chat/stream` | SSE turn: `{session_id, message, mode: "ask"|"plan", regenerate}` |
 
 **SSE events** (`_turn_events`): `start`; `token {text}`; `tool {id,name,input,status:"running"}` then `{id,name,output:{count|error},status:"done"}`; `error {message}`; `options {kind,items}` (kind is plural, or `suggestions` / `itinerary_pdf`); `done {message_id,content}`.
@@ -392,4 +393,8 @@ Rules for agents:
 - Restaurant data has no availability; only ~9 Dubai restaurants, all vegetarian.
 - Flight results can contain the same flight from two suppliers; the UI shows one card per airline + flight numbers + times + fare.
 - Cabin is normalised (`normalize_cabin`): the supplier returns zero fares, silently, for any cabin that is not a bare code.
+- City names tolerate typos ("Ahemdabad"): `resolve_city` falls back to a close match for names of 6+ letters, and `rules.customer_said` accepts the corrected spelling. Without both, a misspelt origin could never be searched.
+- A reply with no tool call this turn may only quote ₹ amounts that some tool (or the customer) produced in the thread; a repeated request answered from memory ("I have already pulled those") is re-searched (`agent._research_unsourced`).
+- Tour search gives one photo per tour and no supplier API we hold returns the gallery; `booking_api.endpoints.call_tour_page` reads `tourImages` from the website's tour page (resolves by id, any slug) when a card is opened.
+- Flight options carry `airline_logos` (CDN `/uploads` + the segment's `airlinelogoPath`, UI-only). While streaming, a half-written markdown table is held back and shown as the loader (`web/src/lib/pendingTable.ts`).
 - The website adds a hotel markup that varies by hotel (4.0% to 11.4% seen); the chatbot quotes the supplier rate until the client confirms the rule. The website's visa cards (3-4 working days, Express 1 working day) disagree with its own visa article (2–4 days, 24–48 hours); the chatbot follows the article.

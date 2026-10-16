@@ -207,12 +207,15 @@ export const ResultComparison = memo(function ResultComparison({
   // stay as text cards.
   // Two results can share a name (two Toyota Hiace transfers at different
   // prices). The row's own price picks the right one; failing that, its
-  // position among rows of that name.
+  // position among rows of that name. Two rows can share the name AND the
+  // price (two Air India fares at Rs 65,195.55 on different flights), so the
+  // position is counted per name and price: the second row takes the second.
   const seen = new Map<string, number>();
   const matched = oneCardPerOption(
     table.rows.map((row) => {
-      const nth = seen.get(row.name) ?? 0;
-      seen.set(row.name, nth + 1);
+      const key = `${row.name}|${row.price?.text ?? ""}`;
+      const nth = seen.get(key) ?? 0;
+      seen.set(key, nth + 1);
       return { row, item: optionFor?.(row.name, { price: row.price?.text ?? null, nth }) ?? null };
     }),
   );

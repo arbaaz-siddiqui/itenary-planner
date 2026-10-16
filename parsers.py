@@ -83,12 +83,27 @@ def parse_tour_option_description(raw: dict[str, Any]) -> list[dict[str, Any]]:
         items = [i for i in items if i]
         if not items:
             # No list: split on block boundaries so a multi-paragraph overview
-            # does not collapse into one run-on line.
-            items = [_strip_html(part) for part in _BLOCK_SPLIT_RE.split(markup)]
-            items = [i for i in items if i]
+            # does not collapse into one run-on line. Some suppliers send
+            # markdown instead ("## What's included\n\n- Admission to ..."),
+            # which showed as "## What's included - Admission to ..." in one
+            # bullet: lines are split, bullet marks removed, and heading lines
+            # dropped (the section title already says what they say).
+            items = []
+            for part in _BLOCK_SPLIT_RE.split(markup):
+                for line in _strip_html(part).splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    items.append(re.sub(r"^[-*•]\s+", "", line))
 
         summary = _strip_html(entry.get("content"))
         if not title or (not items and not summary):
+            continue
+        same = next((s for s in sections if s["title"] == title), None)
+        if same:
+            # The supplier repeats a section title ("Things to note" twice).
+            same["items"].extend(i for i in items if i not in same["items"])
+            same["summary"] = same["summary"] or summary
             continue
         sections.append({"title": title, "summary": summary, "items": items})
     return sections
@@ -770,6 +785,20 @@ _CDN_UPLOADS_MARKERS = ("/TourMedia/", "/HotelMedia/", "/RestaurantMedia/")
 _TENANT_MEDIA = re.compile(r"/[0-9a-f]{8}-[0-9a-f-]{27}/[a-z]+media/", re.IGNORECASE)
 
 
+def airline_logo_url(path: str) -> str:
+    """CDN URL for a segment's `airlinelogoPath` ("/Flightlogos/AI.svg").
+
+    The website loads these from the CDN's /uploads folder; the same path on
+    the API host or the bare CDN answers 404/400. Verified 2026-10-16.
+    """
+    path = (path or "").strip()
+    if not path:
+        return ""
+    if path.startswith("http"):
+        return path
+    return MEDIA_CDN_BASE + "/uploads" + (path if path.startswith("/") else "/" + path)
+
+
 def _cdn_url(path: str) -> str | None:
     """CDN URL for a media path, or None when it is not CDN-served."""
     if path.startswith(_CDN_PREFIXES):
@@ -799,6 +828,33 @@ def hotel_image_urls(hotel_id: Any, count: int = HOTEL_PHOTOS_SHOWN) -> list[str
     if hid <= 0:
         return []
     return [f"{MEDIA_CDN_BASE}/hotel-images/{hid}/{n}.webp" for n in range(1, count + 1)]
+
+
+_TOUR_IMAGES_BLOCK = re.compile(r'"tourImages"\s*:\s*\[(.*?)\]', re.DOTALL)
+_TOUR_IMAGE_ITEM = re.compile(r'\{[^{}]*?"imagePath"\s*:\s*"([^"]+)"[^{}]*?\}')
+_DISPLAY_ORDER = re.compile(r'"displayOrder"\s*:\s*(-?\d+)')
+
+
+def parse_tour_gallery(html: str) -> list[str]:
+    """Every photo of a tour, in the website's display order, as CDN URLs.
+
+    Reads the `tourImages` list the website embeds in its tour page (escaped
+    JSON inside a script). Empty when the page carries none.
+    """
+    text = (html or "").replace('\\"', '"').replace("\\/", "/")
+    block = _TOUR_IMAGES_BLOCK.search(text)
+    if not block:
+        return []
+    items: list[tuple[int, int, str]] = []
+    for i, m in enumerate(_TOUR_IMAGE_ITEM.finditer(block.group(1))):
+        order = _DISPLAY_ORDER.search(m.group(0))
+        items.append((int(order.group(1)) if order else i, i, m.group(1)))
+    urls: list[str] = []
+    for _, _, path in sorted(items):
+        url = _resolve_image_url(path, DEFAULT_IMAGE_BASE_URL)
+        if url and url not in urls:
+            urls.append(url)
+    return urls
 
 
 def _resolve_image_url(image_path: Any, base_url: str) -> str:

@@ -410,6 +410,19 @@ async def get_tool_calls(
     return calls
 
 
+@app.get("/tours/{tour_id}/images")
+async def tour_images(tour_id: int, _user: dict = Depends(auth.current_user)) -> dict[str, Any]:
+    """Every photo of a tour, for the detail panel's gallery.
+
+    Search gives one photo per tour; the rest are read when the card is
+    opened. An empty list (not an error) when none can be read, so the panel
+    keeps the photo it already has.
+    """
+    from mcp_tools.tour_gallery import tour_image_urls
+
+    return {"images": await asyncio.to_thread(tour_image_urls, tour_id)}
+
+
 @app.get("/tours/{tour_id}/options/{option_id}/details")
 async def tour_option_details(
     tour_id: int,

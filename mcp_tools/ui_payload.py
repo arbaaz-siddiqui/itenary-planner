@@ -32,7 +32,7 @@ _LOCK = threading.Lock()
 
 # Fields only a card uses. Each is either a picture, a duplicate of a field the
 # model keeps, or long text the model has a short form of.
-_UI_ONLY = ("image_url", "image_urls", "dish_photos", "airline_logo", "unique_key")
+_UI_ONLY = ("image_url", "image_urls", "dish_photos", "airline_logo", "airline_logos", "unique_key")
 # Dropped only when the short form named alongside is present.
 _UI_ONLY_IF = {
     "documents": "document_requirements",

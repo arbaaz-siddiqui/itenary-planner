@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatInr, idOf, imagesOf, kindOf, partyTotalNote, titleOf, withRowTotal } from "./cards";
+import { formatInr, idOf, imagesOf, kindOf, mergeImages, partyTotalNote, titleOf, withRowTotal } from "./cards";
 
 describe("kindOf", () => {
   it("trusts the group kind first", () => {
@@ -48,5 +48,14 @@ describe("withRowTotal / partyTotalNote", () => {
   it("adds nothing when the row shows the per-person price itself", () => {
     expect(partyTotalNote(withRowTotal(visa, "₹7,753.36"))).toBeNull();
     expect(partyTotalNote(withRowTotal(visa, null))).toBeNull();
+  });
+});
+
+describe("mergeImages", () => {
+  it("prefers the loaded gallery, which already holds the cover", () => {
+    expect(mergeImages(["a.webp"], ["b.webp", "c.webp", "b.webp"])).toEqual(["b.webp", "c.webp"]);
+  });
+  it("keeps the card's photo until the gallery arrives", () => {
+    expect(mergeImages(["a.webp"], [])).toEqual(["a.webp"]);
   });
 });

@@ -1394,3 +1394,29 @@ def call_tour_option_rate(
         raise BookingApiError(
             f"Tour option rate call failed: {e}", endpoint=TOUR_OPTION_RATE_PATH
         ) from e
+
+
+# The tour's photo gallery. No supplier API we hold returns it: Tourdetails
+# (B2B) and /api/tours/details (B2C) both carry a single imagePath. The
+# client's own website renders `tourImages` (every photo, in display order)
+# into its tour page, which resolves by tour id whatever the slug. Verified
+# 2026-10-16: Desert Safari 53632 has 6 photos, tour 28488 has 15.
+TOUR_PAGE_PATH = "/en/tours/dubai/tour/tour-{tour_id}"
+
+
+def call_tour_page(*, tour_id: int) -> str:
+    """The public tour page's HTML, for its embedded photo list."""
+    import requests
+
+    from settings import get_booking_api_settings, get_http_settings
+
+    url = get_booking_api_settings().b2c_base_url.rstrip("/") + TOUR_PAGE_PATH.format(
+        tour_id=int(tour_id)
+    )
+    try:
+        resp = requests.get(url, timeout=get_http_settings().timeout_secs,
+                            headers={"Accept": "text/html"})
+        resp.raise_for_status()
+        return resp.text
+    except Exception as e:
+        raise BookingApiError(f"Tour page fetch failed: {e}", endpoint=TOUR_PAGE_PATH) from e

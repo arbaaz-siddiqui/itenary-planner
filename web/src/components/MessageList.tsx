@@ -158,10 +158,10 @@ const Bubble = memo(function Bubble({
       if (cands.length === 1) return cands[0];
       const wanted = Number((hint?.price ?? "").replace(/[^0-9.]/g, ""));
       if (wanted > 0) {
-        const byPrice = cands.find((c) =>
+        const byPrice = cands.filter((c) =>
           PRICE_KEYS.some((k) => typeof c[k] === "number" && Math.abs((c[k] as number) - wanted) < 1),
         );
-        if (byPrice) return byPrice;
+        if (byPrice.length) return byPrice[Math.min(hint?.nth ?? 0, byPrice.length - 1)];
       }
       return cands[Math.min(hint?.nth ?? 0, cands.length - 1)];
     };
