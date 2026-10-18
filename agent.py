@@ -1322,6 +1322,14 @@ def invoke_and_log(
         if _final_reply(retry) != before:
             _save_final_reply(agent, config, retry)
         response = retry
+    visa_retry = _recheck_visa_timing(agent, config, _this_turn(list(response.get("messages") or [])),
+                                      thread_id=thread_id)
+    if visa_retry is not None:
+        before = _final_reply(visa_retry)
+        _apply_reply_guards(visa_retry)
+        if _final_reply(visa_retry) != before:
+            _save_final_reply(agent, config, visa_retry)
+        response = visa_retry
     _guard_empty_turn(response, surface=surface, thread_id=thread_id)
     return response
 
@@ -1387,6 +1395,55 @@ def _ensure_visa_party_total(response: dict[str, Any]) -> None:
 _VISA_GUARANTEE = re.compile(
     r"\b(definitely|certainly|surely|guarantee[ds]?|no problem|for sure)\b", re.IGNORECASE
 )
+
+
+_VISA_TIMING_ASK = re.compile(
+    r"\b(ready|in time|on time|enough time|how long|processing|process(ed)?|before (my|our|the) (flight|travel|trip))\b",
+    re.IGNORECASE,
+)
+
+_VISA_TIMING_MARKER = (
+    "[system] The customer asked whether the visa will be ready for a travel "
+    "date. Call get_visa_info now with that travel date and answer only from "
+    "its timeline. Never promise the visa will be ready or approved."
+)
+
+
+def _visa_timing_unchecked(turn: list[Any]) -> bool:
+    """This turn answered a visa-timing question without looking the date up.
+
+    Asked on 18 Oct "my flight is on 22 oct, will the visa be ready in time?",
+    the model answered from the earlier 6 Nov lookup: "Yes, it will be ready
+    in time ... plenty of time". Four days out, Normal processing may not
+    finish. The timing check only runs on a turn that called get_visa_info.
+    """
+    from rules import _LATEST_TEXT
+
+    said = _LATEST_TEXT.get()
+    if not said or "visa" not in said or not _VISA_TIMING_ASK.search(said):
+        return False
+    return not any(
+        str(c.get("tool_name") or c.get("name") or "") == "get_visa_info"
+        for c in extract_tool_calls({"messages": turn})
+    )
+
+
+def _recheck_visa_timing(agent: Any, config: dict[str, Any], turn: list[Any],
+                         *, thread_id: str) -> dict[str, Any] | None:
+    """Re-run a visa-timing answer with the lookup it skipped; None if fine."""
+    if not _visa_timing_unchecked(turn):
+        return None
+    logging.getLogger("agent.turn").warning(
+        "visa timing answered without a lookup - re-asking thread=%s", thread_id)
+    try:
+        retry = agent.invoke({"messages": [{"role": "user", "content": _VISA_TIMING_MARKER}]}, config)
+    except Exception:  # noqa: BLE001 - keep the first answer, guards still apply
+        return None
+    fresh = _this_turn(list((retry or {}).get("messages") or []))
+    if not any(str(c.get("tool_name") or "") == "get_visa_info"
+               for c in extract_tool_calls({"messages": fresh})):
+        return None
+    return retry
 
 
 def _enforce_visa_timeline(response: dict[str, Any]) -> None:
@@ -1932,6 +1989,15 @@ def stream_and_log(
         holder.text = _COULD_NOT_FINISH
     elif retry is not None:
         fresh = _this_turn(list(retry.get("messages") or []))
+        holder.messages = [*holder.messages, *fresh]
+        reply = _final_reply({"messages": fresh})
+        if reply:
+            holder.text = reply
+
+    visa_retry = _recheck_visa_timing(agent, config, _this_turn(list(holder.messages)),
+                                      thread_id=thread_id)
+    if visa_retry is not None:
+        fresh = _this_turn(list(visa_retry.get("messages") or []))
         holder.messages = [*holder.messages, *fresh]
         reply = _final_reply({"messages": fresh})
         if reply:
