@@ -522,6 +522,17 @@ def _resolve_hotel_by_name(name_query: str, city_id: int) -> int | None:
             ]
             city_match = [i for i in hotel_items if i.get("cityId") == city_id]
             if city_match:
+                # The exact name first: "Pullman Dubai Creek City Centre"
+                # ranked "... City Centre Residences" (a different property)
+                # first, and the customer was quoted the wrong hotel.
+                def _norm(t: str) -> str:
+                    return " ".join("".join(c if c.isalnum() else " " for c in t.lower()).split())
+
+                want = _norm(bare)
+                city_match.sort(key=lambda i: (
+                    _norm(str(i.get("name_text") or "")) != want,
+                    abs(len(_norm(str(i.get("name_text") or ""))) - len(want)),
+                ))
                 return int(city_match[0]["location_id"])
     except Exception:
         pass

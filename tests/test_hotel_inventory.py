@@ -116,3 +116,17 @@ def test_transfer_next_step_only_when_the_customer_asked() -> None:
     rules.set_conversation_text("hotel near the marina and an airport pickup")
     assert _asked_for_transfer()
     rules.set_conversation_text("")
+
+
+def test_a_named_hotel_resolves_to_that_exact_hotel() -> None:
+    """Was: "Pullman Dubai Creek City Centre" resolved to "... Residences"."""
+    from mcp_tools.search_hotels import _resolve_hotel_by_name
+
+    data = {"data": [
+        {"location_id": 457, "type": "hotel", "cityId": 1,
+         "name_text": "Pullman Dubai Creek City Centre Residences"},
+        {"location_id": 205, "type": "hotel", "cityId": 1, "name_text": "Pullman Dubai Creek City Centre"},
+    ]}
+    with patch("booking_api.call_entity_search", return_value=data), \
+         patch("reference_data_loader.resolve_city", return_value={"city_id": 1}):
+        assert _resolve_hotel_by_name("Pullman Dubai Creek City Centre", 1) == 205
