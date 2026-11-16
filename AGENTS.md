@@ -2,7 +2,7 @@
 
 Guide for AI coding agents working in this repository. Read it before changing code. It covers what the product is, how the code is laid out, how a request flows end to end, the UI system, pricing rules, testing, and how branches deploy.
 
-Facts here were checked against the code on `fix/enhance-ui` / `release/2026.10` in October 2026. When something here and the code disagree, the code wins; fix this file in the same change.
+Facts here were checked against the code on `release/2026.10` (October 2026) and `release/2026.11.17` (November 2026; §17). When something here and the code disagree, the code wins; fix this file in the same change.
 
 ---
 
@@ -346,7 +346,7 @@ Never print, log, commit or paste secret values (`.env`, `railway-env*.txt`). Re
 |---|---|
 | `main` | v2 baseline. Not the deploy source for the chat stack. |
 | `fix/*`, `feat/*` | One change per branch, cut from the current release line, tested locally. |
-| `release/2026.10` | Current release line. Finished fix/feat branches merge here with `--no-ff` (`merge: <branch> into release/2026.10`) after tests pass. Plan: `docs/RELEASE-2026.10-PLAN.md`. `release/2026.09` is the previous line. |
+| `release/2026.11.17` | Current release line (all countries, admin panel, OpenTelemetry on top of 2026.10). Finished fix/feat branches merge here with `--no-ff` (`merge: <branch> into release/2026.11.17`) after tests pass. Plan: `docs/PLAN-global-admin-otel.md`. `release/2026.10` is the previous line (plan `docs/RELEASE-2026.10-PLAN.md`). |
 | `chat/nextjs/development` | **Deployment branch** for the Next.js web service AND the chat API service on Railway. A push deploys both immediately. |
 | `chat/development` | Deployment branch for the Streamlit service. |
 | `voice/development`, `whatsapp/development` | Deployment branches for voice and WhatsApp. |
@@ -355,7 +355,7 @@ Never print, log, commit or paste secret values (`.env`, `railway-env*.txt`). Re
 Rules for agents:
 
 1. Work on a `fix/*` or `feat/*` branch. Commit and push to it freely.
-2. Merge into `release/2026.10` when the change is tested.
+2. Merge into `release/2026.11.17` when the change is tested.
 3. **Never merge or push to a deployment branch (`chat/nextjs/development`, `chat/development`, `voice/development`, `whatsapp/development`) unless the user explicitly says so in the current conversation.** A push there goes live. When the user does ask, remind them to check Railway env vars first (e.g. the current `BOOKING_TOKEN` on chat-api).
 4. Never force-push shared branches; never rewrite release history.
 5. Commit messages: conventional prefixes (`fix(web):`, `feat(tours):`, `merge:`), a short body explaining why.
