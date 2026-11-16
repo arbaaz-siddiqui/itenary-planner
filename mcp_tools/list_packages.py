@@ -16,6 +16,7 @@ from core import TripPlannerError, nights_between
 from rules import missing_search_fields, needs_input_error
 from mcp_tools.server import mcp
 from parsers import parse_package_response
+from mcp_tools.city_support import nothing_in_city, unknown_city
 from reference_data_loader import resolve_city
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,10 @@ def _price_options(options: list[dict[str, Any]], *, city: dict[str, Any], check
 
     def one(o: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
         own = resolve_city(str(o.get("city") or "")) or city
+        # A row whose city has no supplier id (an Indian city in cities.json)
+        # used to crash on int(None); price it under the searched city.
+        if not own.get("city_id") or not own.get("country_id"):
+            own = city
         try:
             return o, price_package(
                 package_id=int(o["package_id"]), name=str(o.get("name") or ""),
@@ -102,25 +107,9 @@ def _impl(
     try:
         city = resolve_city(destination_city)
         if city is None:
-            return {
-                "error": True,
-                "message": (
-                    f"We do not sell packages in {destination_city!r} — the "
-                    f"supplier's inventory for this service is Dubai only."
-                ),
-                "error_type": "UnsupportedRoute",
-                # A bare "Unsupported destination" got paraphrased to the
-                # customer as "I don't have that in my database", which reads
-                # as OUR system being broken rather than us not selling it.
-                "agent_instructions": (
-                    f"Say plainly that we do not offer packages in that city — we "
-                    f"cover Dubai for this service. Never say the data is "
-                    f"missing, unavailable, or not in your database, and never "
-                    f"imply a technical problem. Offer the Dubai equivalent "
-                    f"instead, and do not ask the customer for more details "
-                    f"first — the city is the blocker, not their input."
-                ),
-            }
+            return unknown_city(destination_city, "holiday packages")
+        if not city.get("city_id") or not city.get("country_id"):
+            return nothing_in_city(str(city.get("name") or destination_city), "holiday packages")
 
         # The supplier REQUIRES both dates: sending checkInDate:"" returns
         # HTTP 400 `{"$.checkInDate": ["Can't get datetime from the reader!"]}`

@@ -481,7 +481,16 @@ def _cancellation_display(option: dict[str, Any]) -> str:
     return base or "Non-refundable"
 
 
-def _resolve_hotel_by_name(name_query: str, city_id: int) -> int | None:
+def _address_names_area(area: str, address: str, known_area: str = "") -> bool:
+    """Outside Dubai: is the asked-for area named in the hotel's address?"""
+    want = " ".join((area or "").lower().split())
+    if not want:
+        return True
+    text = " " + " ".join(f"{address} {known_area}".lower().replace(",", " ").split()) + " "
+    return f" {want} " in text
+
+
+def _resolve_hotel_by_name(name_query: str, city_id: int, city_name: str = "") -> int | None:
     """Resolve a hotel name to its ID using the fast public autocomplete API.
 
     Primary path: /api/core/v1/search/hotels — a single no-auth GET that returns
@@ -498,18 +507,15 @@ def _resolve_hotel_by_name(name_query: str, city_id: int) -> int | None:
     # first and avoids matching same-brand hotels in other countries
     # (e.g. "Howard Johnson Bakersfield" instead of Dubai).
     from booking_api import call_entity_search
-    from reference_data_loader import resolve_city as _rc
-    _city_name = ""
-    try:
-        for _name in ("Dubai", "Abu Dhabi", "Sharjah"):
-            _c = _rc(_name)
-            if _c and int(_c.get("city_id", 0)) == city_id:
-                _city_name = _name
-                break
-    except Exception:
-        pass
+
+    # The resolved city's own name, whatever the city (it used to be looked
+    # up among Dubai, Abu Dhabi and Sharjah only).
+    _city_name = (city_name or "").strip()
     bare = name_query.strip()
-    queries = [f"{bare} {_city_name}".strip(), bare] if _city_name else [bare]
+    queries = (
+        [f"{bare} {_city_name}".strip(), bare]
+        if _city_name and _city_name.lower() not in bare.lower() else [bare]
+    )
     try:
         for q in queries:
             raw = call_entity_search(service="hotels", query=q, size=10)
@@ -544,7 +550,7 @@ def _resolve_hotel_by_name(name_query: str, city_id: int) -> int | None:
     from reference_data_loader import get_hotel_ids_for_city
     # Use the city we resolved above, not a hardcoded "dubai" — otherwise the
     # curated list for Dubai was searched no matter which city was requested.
-    curated = list(get_hotel_ids_for_city((_city_name or "dubai").lower()))
+    curated = list(get_hotel_ids_for_city(_city_name.lower())) if _city_name else []
     top_discovered = [hid for hid, _ in (discovered or [])[:200]]
     seen: set[int] = set()
     candidate_ids: list[int] = []
@@ -759,19 +765,21 @@ def _impl(
 
     try:
         city = resolve_city(destination_city)
-        if city is None or not city.get("city_id"):
-            return {
-                "error": True,
-                "message": f"Unsupported hotel destination: {destination_city!r}",
-                "error_type": "UnsupportedRoute",
-            }
+        if city is None:
+            from mcp_tools.city_support import unknown_city
+
+            return unknown_city(destination_city, "hotels")
+        if not city.get("city_id"):
+            from mcp_tools.city_support import nothing_in_city
+
+            return nothing_in_city(str(city.get("name") or destination_city), "hotels")
         city_id = int(city["city_id"])
         city_key = city["name"].lower()
 
         # Specific hotel requested by name — resolve to ID and search only that hotel
         specific_hotel_id: int | None = None
         if hotel_name and hotel_name.strip():
-            specific_hotel_id = _resolve_hotel_by_name(hotel_name.strip(), city_id)
+            specific_hotel_id = _resolve_hotel_by_name(hotel_name.strip(), city_id, str(city["name"]))
             if specific_hotel_id:
                 hotel_ids = [specific_hotel_id]
             else:
@@ -907,8 +915,10 @@ def _impl(
             [int(o.hotel_id) for o in options if str(o.hotel_id).isdigit()]
         )
         resolved: list[Any] = []
+        addresses: dict[str, str] = {}
         for o in options:
             rec = coords_map.get(str(o.hotel_id)) or static_map.get(str(o.hotel_id)) or {}
+            addresses[str(o.hotel_id)] = str(rec.get("full_address") or o.full_address or "")
             a, dist = resolve_dubai_area(
                 rec.get("full_address") or o.full_address,
                 rec.get("latitude"), rec.get("longitude"),
@@ -918,7 +928,13 @@ def _impl(
 
         area_note = None
         if area:
-            in_area = [o for o in options if area_matches(area, o.area, o.district)]
+            # Dubai has a neighbourhood table; elsewhere the area must be named
+            # in the hotel's own address ("Sukhumvit", "Covent Garden").
+            in_area = [
+                o for o in options
+                if (area_matches(area, o.area, o.district) if city_key == "dubai"
+                    else _address_names_area(area, addresses.get(str(o.hotel_id), ""), o.area))
+            ]
             if in_area:
                 options = in_area
             elif options:
@@ -1019,7 +1035,7 @@ def _impl(
             o.pop("rooms", None)
 
         # Coordinate enrichment: fetch lat/lng/address from the address endpoint
-        # so the agent can pass hotel_lat/hotel_lng directly to search_airport_transfer_dubai
+        # so the agent can pass hotel_lat/hotel_lng directly to search_airport_transfer
         # without needing a separate lookup_entity call.
         missing_ids = [
             int(o["hotel_id"]) for o in option_dicts
@@ -1115,7 +1131,7 @@ def _impl(
                 f"column headed 'Per Night (Per Room)' published double the real "
                 f"per-room rate. Never divide by pax."
             ),
-            # search_airport_transfer_dubai needs a hotel, so it cannot run in the
+            # search_airport_transfer needs a hotel, so it cannot run in the
             # same parallel wave as this search. The agent kept ending the turn
             # here and asking "Should I look for airport transfers?" — about
             # something the customer had already asked for. Prompt rules did not
@@ -1124,7 +1140,8 @@ def _impl(
             **(
                 {
                     "next_step": {
-                        "tool": "search_airport_transfer_dubai",
+                        "tool": "search_airport_transfer",
+                        "destination_city": city["name"],
                         "reason": (
                             "The customer asked for airport pickup/transfers. That "
                             "search needs a hotel, which you now have — call it in "

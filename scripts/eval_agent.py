@@ -305,7 +305,7 @@ def build_scenarios(gt: GroundTruth) -> list[Scenario]:
                 "I need an airport pickup on 1 December 2026 to Howard Johnson by "
                 "Wyndham Bur Dubai for 2 people. What are the options?"
             ),
-            must_call=("search_airport_transfer_dubai",),
+            must_call=("search_airport_transfer",),
             custom=lambda r, c: [
                 Check(
                     "states pricing basis",

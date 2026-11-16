@@ -27,7 +27,7 @@ from agent import (
     get_logger,
     invoke_and_log,
 )
-from itinerary_store import get_itinerary_path, public_url_for
+from itinerary_store import get_itinerary_filename, get_itinerary_path, public_url_for
 from settings import get_twilio_settings
 
 log = get_logger("whatsapp")
@@ -141,7 +141,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     log.info("whatsapp_service_stopping")
 
 
-app = FastAPI(title="Dubai Trip Planner — WhatsApp", lifespan=lifespan)
+app = FastAPI(title="GujjuTours Trip Planner — WhatsApp", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -158,7 +158,7 @@ async def serve_itinerary(itinerary_id: str) -> Response:
     return FileResponse(
         path,
         media_type="application/pdf",
-        filename="Dubai-itinerary.pdf",
+        filename=get_itinerary_filename(itinerary_id),
     )
 
 

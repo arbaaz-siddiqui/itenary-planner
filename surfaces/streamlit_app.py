@@ -32,14 +32,14 @@ from agent import (
 )
 from booking_api.http_client import http_requests_since, latest_http_seq
 from core import format_inr
-from itinerary_store import get_itinerary_path
+from itinerary_store import get_itinerary_filename, get_itinerary_path
 from llm import describe_current_provider
 
 # =============================================================================
 # Setup
 # =============================================================================
 configure_logging(prod=False)
-st.set_page_config(page_title="Dubai Trip Planner", page_icon="🏖️", layout="wide")
+st.set_page_config(page_title="GujjuTours Trip Planner", page_icon="🏖️", layout="wide")
 
 # Visual identity: off-white "desert sand + oasis" theme, glass floating navbar,
 # Fraunces/Inter type, soft image-rich cards. (surfaces/ui_theme.py)
@@ -530,7 +530,7 @@ _API_BACKED_TOOLS = {
     "search_tours",
     "get_tour_options",
     "get_tour_timeslots",
-    "search_airport_transfer_dubai",  # registered name; "search_transfers" never existed
+    "search_airport_transfer",  # registered name; "search_transfers" never existed
     "search_restaurants",
     "get_visa_info",
     "list_packages",
@@ -570,7 +570,7 @@ _TOOL_URL_MARKERS: dict[str, tuple[str, ...]] = {
     "get_tour_options": ("/api/tours/options", "/api/tours/optionRate"),
     "get_tour_timeslots": ("/TourSearch/Timeslot",),
     "get_tour_details": ("/TourSearch/Tourdetails",),
-    "search_airport_transfer_dubai": ("/TransferList",),
+    "search_airport_transfer": ("/TransferList",),
     "get_transfer_details": ("/TransferDetail",),
     "search_restaurants": ("/api/restaurant/v1/restaurants",),
     "get_restaurant_details": ("/api/restaurant/v1/restaurants/",),
@@ -878,7 +878,7 @@ def _render_itinerary_section() -> None:
             st.download_button(
                 "⬇️ Download itinerary PDF",
                 data=path.read_bytes(),
-                file_name="Dubai-itinerary.pdf",
+                file_name=get_itinerary_filename(itinerary_id),
                 mime="application/pdf",
                 use_container_width=True,
                 type="primary",
@@ -1256,7 +1256,7 @@ def _process_message(user_message: str, *, display_as: str | None = None) -> Non
                 "search_flights": "✈️ Searching flights…",
                 "search_hotels": "🏨 Finding hotels…",
                 "search_tours": "🎟️ Looking up tours & activities…",
-                "search_airport_transfer_dubai": "🚐 Checking transfers…",
+                "search_airport_transfer": "🚐 Checking transfers…",
                 "get_hotel_description": "🏊 Checking hotel amenities…",
                 "get_visa_info": "📄 Checking visa details…",
                 "search_restaurants": "🍽️ Finding restaurants…",
@@ -1508,7 +1508,7 @@ def _record_debug_calls(
 _init_session()
 _render_sidebar()
 
-st.title("🏖️ Dubai Trip Planner")
+st.title("🏖️ GujjuTours Trip Planner")
 # Show the ACTUAL active model (the live switcher's choice), not the env default —
 # otherwise the header shows a stale model name that disagrees with the sidebar.
 _active_model = st.session_state.get("model_override")
@@ -1570,7 +1570,7 @@ with debug_tab:
 
 # Chat input — must be at top level (Streamlit requires st.chat_input outside
 # tabs/columns). It drives the Chat tab.
-user_input = st.chat_input("Ask me anything about your Dubai trip…")
+user_input = st.chat_input("Ask me anything about your trip…")
 if user_input:
     _process_message(user_input)
     st.rerun()
