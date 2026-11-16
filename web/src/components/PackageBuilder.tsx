@@ -162,7 +162,7 @@ export function PackageBuilder({
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block">
               <span className={LABEL}>Destination</span>
-              <input ref={first} className={FIELD} value={form.city} onChange={(e) => set("city", e.target.value)} />
+              <input ref={first} className={FIELD} value={form.city} placeholder="e.g. Dubai, Singapore, Bangkok" onChange={(e) => set("city", e.target.value)} />
             </label>
             <label className="block">
               <span className={LABEL}>Arrival date</span>
@@ -244,7 +244,7 @@ export function PackageBuilder({
             <textarea
               rows={2}
               className={`${FIELD} resize-none`}
-              placeholder="e.g. Vegetarian meals, near Dubai Mall, no early starts"
+              placeholder="e.g. Vegetarian meals, near the city centre, no early starts"
               value={form.notes}
               onChange={(e) => set("notes", e.target.value)}
             />

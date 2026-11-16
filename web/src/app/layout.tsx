@@ -22,7 +22,7 @@ const display = Bricolage_Grotesque({
 
 export const metadata: Metadata = {
   title: "GujjuTours AI Travel Agent",
-  description: "Plan Dubai trips, flights, hotels, tours, transfers and visas with the GujjuTours AI travel agent",
+  description: "Plan trips anywhere: flights, hotels, tours, transfers and visas with the GujjuTours AI travel agent",
 };
 
 export const viewport: Viewport = {

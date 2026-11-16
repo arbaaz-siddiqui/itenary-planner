@@ -34,7 +34,7 @@ export function defaultPackageForm(today: Date = new Date()): PackageForm {
   const start = new Date(today.getTime() + 14 * 86_400_000);
   return {
     services: ["hotel", "tours", "transfers"],
-    city: "Dubai",
+    city: "",
     checkIn: start.toISOString().slice(0, 10),
     nights: 3,
     adults: 2,

@@ -5,7 +5,7 @@ const today = new Date("2026-10-16T09:00:00Z");
 
 describe("buildPackageRequest", () => {
   it("writes the website's builder fields as one plain request", () => {
-    const f = { ...defaultPackageForm(today), checkIn: "2026-10-23", stars: [5, 4] };
+    const f = { ...defaultPackageForm(today), city: "Dubai", checkIn: "2026-10-23", stars: [5, 4] };
     expect(buildPackageRequest(f)).toBe(
       "Build my own package: Dubai, arriving 23 October 2026, 3 nights, 2 adults, 1 room. " +
         "Include a 4 or 5 star hotel, tours for each day and airport pickup and drop-off. " +
@@ -17,6 +17,7 @@ describe("buildPackageRequest", () => {
   it("names children with their ages, flights, visa and notes", () => {
     const f = {
       ...defaultPackageForm(today),
+      city: "Dubai",
       checkIn: "2026-12-02",
       nights: 1,
       adults: 2,
@@ -35,12 +36,17 @@ describe("buildPackageRequest", () => {
 });
 
 describe("packageFormErrors", () => {
-  it("accepts the defaults", () => {
-    expect(packageFormErrors(defaultPackageForm(today), today)).toEqual([]);
+  it("accepts the defaults once a destination is named", () => {
+    expect(packageFormErrors({ ...defaultPackageForm(today), city: "Singapore" }, today)).toEqual([]);
+  });
+
+  it("starts with no destination, so none is assumed", () => {
+    expect(defaultPackageForm(today).city).toBe("");
+    expect(packageFormErrors(defaultPackageForm(today), today)).toEqual(["Enter a destination."]);
   });
 
   it("says what is missing in plain words", () => {
-    const f = { ...defaultPackageForm(today), services: [], checkIn: "2026-10-01", rooms: 3, adults: 2 };
+    const f = { ...defaultPackageForm(today), city: "Dubai", services: [], checkIn: "2026-10-01", rooms: 3, adults: 2 };
     expect(packageFormErrors(f, today)).toEqual([
       "Pick at least one service.",
       "The travel date is in the past.",
@@ -49,7 +55,7 @@ describe("packageFormErrors", () => {
   });
 
   it("needs a departure city only when flights are in", () => {
-    const f = { ...defaultPackageForm(today), services: ["flights" as const] };
+    const f = { ...defaultPackageForm(today), city: "Dubai", services: ["flights" as const] };
     expect(packageFormErrors(f, today)).toEqual(["Enter the city you fly from."]);
   });
 });
