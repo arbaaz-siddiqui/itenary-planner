@@ -1,0 +1,486 @@
+# OpenTelemetry collector (otel/opentelemetry-collector:0.111.0, debug exporter) output, local e2e run 2026-11-17.
+# The chat API exported to http://127.0.0.1:4318; traces went on to Jaeger, metrics and logs printed here.
+# Excerpt 1: one metrics export from gujjutours-chat-api (histogram buckets elided).
+
+2026-11-16T22:57:04.300Z	info	MetricsExporter	{"kind": "exporter", "data_type": "metrics", "name": "debug/detailed", "resource metrics": 1, "metrics": 16, "data points": 28}
+2026-11-16T22:57:04.324Z	info	ResourceMetrics #0
+Resource SchemaURL: 
+Resource attributes:
+     -> telemetry.sdk.language: Str(python)
+     -> telemetry.sdk.name: Str(opentelemetry)
+     -> telemetry.sdk.version: Str(1.39.1)
+     -> service.name: Str(gujjutours-chat-api)
+     -> service.namespace: Str(gujjutours)
+     -> deployment.environment: Str(local-e2e)
+     -> deployment.environment.name: Str(local-e2e)
+ScopeMetrics #0
+ScopeMetrics SchemaURL: https://opentelemetry.io/schemas/1.11.0
+InstrumentationScope opentelemetry.instrumentation.fastapi 0.60b1
+Metric #0
+Descriptor:
+     -> Name: http.server.active_requests
+     -> Description: Number of active HTTP server requests.
+     -> Unit: {request}
+     -> DataType: Sum
+     -> IsMonotonic: false
+     -> AggregationTemporality: Cumulative
+NumberDataPoints #0
+Data point attributes:
+     -> http.scheme: Str(http)
+     -> http.host: Str(127.0.0.1:8012)
+     -> http.flavor: Str(1.1)
+     -> http.method: Str(GET)
+     -> http.server_name: Str(127.0.0.1:8012)
+StartTimestamp: 2026-11-16 22:56:11.3099509 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Value: 0
+NumberDataPoints #1
+Data point attributes:
+     -> http.scheme: Str(http)
+     -> http.host: Str(127.0.0.1:8012)
+     -> http.flavor: Str(1.1)
+     -> http.method: Str(POST)
+     -> http.server_name: Str(127.0.0.1:8012)
+StartTimestamp: 2026-11-16 22:56:11.4626975 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Value: 0
+Metric #1
+Descriptor:
+     -> Name: http.server.duration
+     -> Description: Measures the duration of inbound HTTP requests.
+     -> Unit: ms
+     -> DataType: Histogram
+     -> AggregationTemporality: Cumulative
+HistogramDataPoints #0
+Data point attributes:
+     -> http.scheme: Str(http)
+     -> http.host: Str(127.0.0.1:8012)
+     -> net.host.port: Int(8012)
+     -> http.flavor: Str(1.1)
+     -> http.method: Str(GET)
+     -> http.server_name: Str(127.0.0.1:8012)
+     -> http.status_code: Int(200)
+     -> http.target: Str(/health)
+StartTimestamp: 2026-11-16 22:56:11.318124 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 1
+Sum: 9.000000
+Min: 9.000000
+Max: 9.000000
+HistogramDataPoints #1
+Data point attributes:
+     -> http.scheme: Str(http)
+     -> http.host: Str(127.0.0.1:8012)
+     -> net.host.port: Int(8012)
+     -> http.flavor: Str(1.1)
+     -> http.method: Str(POST)
+     -> http.server_name: Str(127.0.0.1:8012)
+     -> http.status_code: Int(201)
+     -> http.target: Str(/chat/sessions)
+StartTimestamp: 2026-11-16 22:56:11.5328599 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 1
+Sum: 71.000000
+Min: 71.000000
+Max: 71.000000
+HistogramDataPoints #2
+Data point attributes:
+     -> http.scheme: Str(http)
+     -> http.host: Str(127.0.0.1:8012)
+     -> net.host.port: Int(8012)
+     -> http.flavor: Str(1.1)
+     -> http.method: Str(POST)
+     -> http.server_name: Str(127.0.0.1:8012)
+     -> http.status_code: Int(200)
+     -> http.target: Str(/chat/stream)
+StartTimestamp: 2026-11-16 22:56:32.2510237 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 1
+Sum: 20070.000000
+Min: 20070.000000
+Max: 20070.000000
+Metric #2
+Descriptor:
+     -> Name: http.server.response.size
+     -> Description: measures the size of HTTP response messages (compressed).
+     -> Unit: By
+     -> DataType: Histogram
+     -> AggregationTemporality: Cumulative
+HistogramDataPoints #0
+Data point attributes:
+     -> http.scheme: Str(http)
+     -> http.host: Str(127.0.0.1:8012)
+     -> net.host.port: Int(8012)
+     -> http.flavor: Str(1.1)
+     -> http.method: Str(GET)
+     -> http.server_name: Str(127.0.0.1:8012)
+     -> http.status_code: Int(200)
+     -> http.target: Str(/health)
+StartTimestamp: 2026-11-16 22:56:11.318124 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 1
+Sum: 15.000000
+Min: 15.000000
+Max: 15.000000
+HistogramDataPoints #1
+Data point attributes:
+     -> http.scheme: Str(http)
+     -> http.host: Str(127.0.0.1:8012)
+     -> net.host.port: Int(8012)
+     -> http.flavor: Str(1.1)
+     -> http.method: Str(POST)
+     -> http.server_name: Str(127.0.0.1:8012)
+     -> http.status_code: Int(201)
+     -> http.target: Str(/chat/sessions)
+StartTimestamp: 2026-11-16 22:56:11.5328599 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 1
+Sum: 175.000000
+Min: 175.000000
+Max: 175.000000
+HistogramDataPoints #2
+Data point attributes:
+     -> http.scheme: Str(http)
+     -> http.host: Str(127.0.0.1:8012)
+     -> net.host.port: Int(8012)
+     -> http.flavor: Str(1.1)
+     -> http.method: Str(POST)
+     -> http.server_name: Str(127.0.0.1:8012)
+     -> http.status_code: Int(200)
+     -> http.target: Str(/chat/stream)
+StartTimestamp: 2026-11-16 22:56:32.2510237 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 1
+Sum: 175.000000
+Min: 175.000000
+Max: 175.000000
+Metric #3
+Descriptor:
+     -> Name: http.server.request.size
+     -> Description: Measures the size of HTTP request messages (compressed).
+     -> Unit: By
+     -> DataType: Histogram
+     -> AggregationTemporality: Cumulative
+HistogramDataPoints #0
+Data point attributes:
+     -> http.scheme: Str(http)
+     -> http.host: Str(127.0.0.1:8012)
+     -> net.host.port: Int(8012)
+     -> http.flavor: Str(1.1)
+     -> http.method: Str(POST)
+     -> http.server_name: Str(127.0.0.1:8012)
+     -> http.status_code: Int(201)
+     -> http.target: Str(/chat/sessions)
+StartTimestamp: 2026-11-16 22:56:11.5338711 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 1
+Sum: 2.000000
+Min: 2.000000
+Max: 2.000000
+HistogramDataPoints #1
+Data point attributes:
+     -> http.scheme: Str(http)
+     -> http.host: Str(127.0.0.1:8012)
+     -> net.host.port: Int(8012)
+     -> http.flavor: Str(1.1)
+     -> http.method: Str(POST)
+     -> http.server_name: Str(127.0.0.1:8012)
+     -> http.status_code: Int(200)
+     -> http.target: Str(/chat/stream)
+StartTimestamp: 2026-11-16 22:56:32.2510237 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 1
+Sum: 164.000000
+Min: 164.000000
+Max: 164.000000
+ScopeMetrics #1
+ScopeMetrics SchemaURL: https://opentelemetry.io/schemas/1.11.0
+InstrumentationScope opentelemetry.instrumentation.httpx 0.60b1
+Metric #0
+Descriptor:
+     -> Name: http.client.duration
+     -> Description: measures the duration of the outbound HTTP request
+     -> Unit: ms
+     -> DataType: Histogram
+     -> AggregationTemporality: Cumulative
+HistogramDataPoints #0
+Data point attributes:
+     -> http.method: Str(POST)
+     -> http.scheme: Str(https)
+     -> http.status_code: Int(200)
+StartTimestamp: 2026-11-16 22:56:19.9267459 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 3
+Sum: 7120.000000
+Min: 1968.000000
+Max: 3142.000000
+ScopeMetrics #2
+ScopeMetrics SchemaURL: 
+InstrumentationScope gujjutours 
+Metric #0
+Descriptor:
+     -> Name: llm.calls
+     -> Description: LLM calls by model
+     -> Unit: {call}
+     -> DataType: Sum
+     -> IsMonotonic: true
+     -> AggregationTemporality: Cumulative
+NumberDataPoints #0
+Data point attributes:
+     -> model: Str(google/gemma-4-26b-a4b-it)
+     -> provider: Str(openrouter)
+     -> outcome: Str(ok)
+StartTimestamp: 2026-11-16 22:56:21.1635678 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Value: 3
+Metric #1
+Descriptor:
+     -> Name: llm.duration
+     -> Description: LLM call duration
+     -> Unit: s
+     -> DataType: Histogram
+     -> AggregationTemporality: Cumulative
+HistogramDataPoints #0
+Data point attributes:
+     -> model: Str(google/gemma-4-26b-a4b-it)
+     -> provider: Str(openrouter)
+     -> outcome: Str(ok)
+StartTimestamp: 2026-11-16 22:56:21.1635678 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 3
+Sum: 10.285705
+Min: 2.836568
+Max: 4.571725
+Metric #2
+Descriptor:
+     -> Name: llm.tokens
+     -> Description: LLM tokens by model and type
+     -> Unit: {token}
+     -> DataType: Sum
+     -> IsMonotonic: true
+     -> AggregationTemporality: Cumulative
+NumberDataPoints #0
+Data point attributes:
+     -> model: Str(google/gemma-4-26b-a4b-it)
+     -> provider: Str(openrouter)
+     -> type: Str(input)
+StartTimestamp: 2026-11-16 22:56:21.1635678 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Value: 48497
+NumberDataPoints #1
+Data point attributes:
+     -> model: Str(google/gemma-4-26b-a4b-it)
+     -> provider: Str(openrouter)
+     -> type: Str(output)
+StartTimestamp: 2026-11-16 22:56:21.1635678 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Value: 178
+Metric #3
+Descriptor:
+     -> Name: supplier.calls
+     -> Description: Supplier API calls by endpoint and status
+     -> Unit: {call}
+     -> DataType: Sum
+     -> IsMonotonic: true
+     -> AggregationTemporality: Cumulative
+NumberDataPoints #0
+Data point attributes:
+     -> endpoint: Str(/api/xconnect/GetStaticDataByCity)
+     -> status: Str(200)
+StartTimestamp: 2026-11-16 22:56:22.6127229 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Value: 2
+NumberDataPoints #1
+Data point attributes:
+     -> endpoint: Str(/api/xconnect/Availabilitywithcancellation)
+     -> status: Str(200)
+StartTimestamp: 2026-11-16 22:56:23.3067353 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Value: 2
+NumberDataPoints #2
+Data point attributes:
+     -> endpoint: Str(/api/Currency/ROE/INR)
+     -> status: Str(200)
+StartTimestamp: 2026-11-16 22:56:24.6273743 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Value: 1
+Metric #4
+Descriptor:
+     -> Name: supplier.duration
+     -> Description: Supplier API call duration
+     -> Unit: s
+     -> DataType: Histogram
+     -> AggregationTemporality: Cumulative
+HistogramDataPoints #0
+Data point attributes:
+     -> endpoint: Str(/api/xconnect/GetStaticDataByCity)
+     -> status: Str(200)
+StartTimestamp: 2026-11-16 22:56:22.6127229 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 2
+Sum: 1.851989
+Min: 0.432097
+Max: 1.419892
+HistogramDataPoints #1
+Data point attributes:
+     -> endpoint: Str(/api/xconnect/Availabilitywithcancellation)
+     -> status: Str(200)
+StartTimestamp: 2026-11-16 22:56:23.3067353 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 2
+Sum: 1.965613
+Min: 0.680203
+Max: 1.285410
+HistogramDataPoints #2
+Data point attributes:
+     -> endpoint: Str(/api/Currency/ROE/INR)
+     -> status: Str(200)
+StartTimestamp: 2026-11-16 22:56:24.6278829 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 1
+Sum: 0.236334
+Min: 0.236334
+Max: 0.236334
+Metric #5
+Descriptor:
+     -> Name: supplier.errors
+     -> Description: Supplier API errors by endpoint and code
+     -> Unit: {error}
+     -> DataType: Sum
+     -> IsMonotonic: true
+     -> AggregationTemporality: Cumulative
+NumberDataPoints #0
+Data point attributes:
+     -> endpoint: Str(/api/xconnect/Availabilitywithcancellation)
+     -> code: Str(NOCOUNT_ERROR)
+StartTimestamp: 2026-11-16 22:56:23.3067353 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Value: 2
+Metric #6
+Descriptor:
+     -> Name: agent.tool.calls
+     -> Description: Agent tool calls by tool and outcome
+     -> Unit: {call}
+     -> DataType: Sum
+     -> IsMonotonic: true
+     -> AggregationTemporality: Cumulative
+NumberDataPoints #0
+Data point attributes:
+     -> tool: Str(search_hotels)
+     -> outcome: Str(ok)
+StartTimestamp: 2026-11-16 22:56:24.6288901 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Value: 1
+Metric #7
+Descriptor:
+     -> Name: agent.tool.duration
+     -> Description: Agent tool call duration
+     -> Unit: s
+     -> DataType: Histogram
+     -> AggregationTemporality: Cumulative
+HistogramDataPoints #0
+Data point attributes:
+     -> tool: Str(search_hotels)
+     -> outcome: Str(ok)
+StartTimestamp: 2026-11-16 22:56:24.6288901 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 1
+Sum: 3.454382
+Min: 3.454382
+Max: 3.454382
+Metric #8
+Descriptor:
+     -> Name: chat.turns
+     -> Description: Chat turns by mode and outcome
+     -> Unit: {turn}
+     -> DataType: Sum
+     -> IsMonotonic: true
+     -> AggregationTemporality: Cumulative
+NumberDataPoints #0
+Data point attributes:
+     -> chat.mode: Str(ask)
+     -> outcome: Str(ok)
+StartTimestamp: 2026-11-16 22:56:32.2503521 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Value: 1
+Metric #9
+Descriptor:
+     -> Name: chat.turn.duration
+     -> Description: Chat turn wall time
+     -> Unit: s
+     -> DataType: Histogram
+     -> AggregationTemporality: Cumulative
+HistogramDataPoints #0
+Data point attributes:
+     -> chat.mode: Str(ask)
+     -> outcome: Str(ok)
+StartTimestamp: 2026-11-16 22:56:32.2503521 +0000 UTC
+Timestamp: 2026-11-16 22:57:04.0158889 +0000 UTC
+Count: 1
+Sum: 20.010061
+Min: 20.010061
+Max: 20.010061
+ScopeMetrics #3
+ScopeMetrics SchemaURL: https://opentelemetry.io/schemas/1.11.0
+InstrumentationScope opentelemetry.instrumentation.requests 0.60b1
+Metric #0
+Descriptor:
+     -> Name: http.client.duration
+     -> Description: measures the duration of the outbound HTTP request
+     -> Unit: ms
+     -> DataType: Histogram
+     -> AggregationTemporality: Cumulative
+HistogramDataPoints #0
+Data point attributes:
+
+# Excerpt 2: log records bridged from Python logging (note Trace ID / Span ID linking each log to its span).
+
+Buckets #15, Count: 0
+	{"kind": "exporter", "data_type": "metrics", "name": "debug/detailed"}
+2026-11-16T22:56:34.007Z	info	LogsExporter	{"kind": "exporter", "data_type": "logs", "name": "debug/detailed", "resource logs": 1, "log records": 1}
+2026-11-16T22:56:34.007Z	info	ResourceLog #0
+Resource SchemaURL: 
+Resource attributes:
+     -> telemetry.sdk.language: Str(python)
+     -> telemetry.sdk.name: Str(opentelemetry)
+     -> telemetry.sdk.version: Str(1.39.1)
+     -> service.name: Str(gujjutours-chat-api)
+     -> service.namespace: Str(gujjutours)
+     -> deployment.environment: Str(local-e2e)
+     -> deployment.environment.name: Str(local-e2e)
+ScopeLogs #0
+ScopeLogs SchemaURL: 
+InstrumentationScope httpx 
+LogRecord #0
+ObservedTimestamp: 2026-11-16 22:56:29.5988995 +0000 UTC
+Timestamp: 2026-11-16 22:56:29.598128896 +0000 UTC
+SeverityText: INFO
+SeverityNumber: Info(9)
+Body: Str(HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK")
+Attributes:
+     -> code.file.path: Str(C:\Users\<user>\Downloads\AI_itinerary_planner\venv\Lib\site-packages\httpx\_client.py)
+     -> code.function.name: Str(_send_single_request)
+     -> code.line.number: Int(1025)
+     -> service.name: Str(gujjutours-chat-api)
+     -> service.namespace: Str(gujjutours)
+     -> deployment.environment: Str(local-e2e)
+     -> deployment.environment.name: Str(local-e2e)
+ScopeLogs #0
+ScopeLogs SchemaURL: 
+InstrumentationScope booking_api.http_client 
+LogRecord #0
+ObservedTimestamp: 2026-11-16 22:56:23.919924 +0000 UTC
+Timestamp: 2026-11-16 22:56:23.919923968 +0000 UTC
+SeverityText: INFO
+SeverityNumber: Info(9)
+Body: Str([BOOKING-API] [04:26:23.919] <-- 200 [1284 ms] /api/xconnect/Availabilitywithcancellation)
+Attributes:
+     -> code.file.path: Str(C:\wt\gt-otel-observability\booking_api\http_client.py)
+     -> code.function.name: Str(_request)
+     -> code.line.number: Int(256)
+Trace ID: f638151ede8ae4324ce3cec8e7ef38eb
+Span ID: f4432213799fb3cc
+Flags: 1
+LogRecord #1
+ObservedTimestamp: 2026-11-16 22:56:23.9209219 +0000 UTC
+Timestamp: 2026-11-16 22:56:23.920921856 +0000 UTC
