@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
 
-from . import auth, db, repository
+from . import admin, auth, db, repository
 
 log = logging.getLogger("chat_api")
 
@@ -78,6 +78,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Admin panel (read-only, ADMIN_EMAILS only; everyone else gets 404).
+app.include_router(admin.router)
 
 
 # ---------------------------------------------------------------- schemas
@@ -264,7 +267,7 @@ async def logout(response: Response) -> None:
 
 @app.get("/auth/me")
 async def me(user: dict = Depends(auth.current_user)) -> dict[str, Any]:
-    return {"user": _user_out(user)}
+    return {"user": {**_user_out(user), "is_admin": admin.is_admin(user)}}
 
 
 @app.get("/me/preferences")
@@ -904,6 +907,18 @@ async def _turn_events(
     saved = repository.add_message(
         str(session["id"]), "assistant", reply, tool_calls, option_groups
     )
+
+    # What was searched, for the admin panel. Best effort: never fails a turn.
+    try:
+        from . import admin_repository
+        from .search_log import search_rows
+
+        admin_repository.add_search_rows(
+            str(session["user_id"]), str(session["id"]), str(saved["id"]),
+            search_rows(tool_calls),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("search_log_write_failed: %s", e)
 
     # Learn durable facts from what the customer actually said, so the next
     # session starts warm. Only fields the agent genuinely reuses -- a bigger
