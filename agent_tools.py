@@ -435,9 +435,15 @@ def get_destination_tips_tool(destination: str = "Dubai") -> dict[str, Any]:
     key = destination.strip().lower().split(",")[0].strip()
     tips = DESTINATION_TIPS.get(key)
     if tips is None:
+        # Not an error: we sell everywhere, we only curate tips for some cities.
         return {
-            "error": True,
-            "message": f"No tips available for {destination!r}",
+            "destination": destination,
+            "curated": False,
+            "message": (
+                f"No curated tips for {destination}. Answer general questions "
+                f"briefly and plainly, and use the search tools (tours, "
+                f"restaurants, visa) for any fact or price."
+            ),
             "available": list(DESTINATION_TIPS.keys()),
         }
     return {"destination": destination, **tips}
@@ -588,7 +594,7 @@ def _end_date_for(start_date: str, nights: int) -> str:
 
 
 @lru_cache(maxsize=8)
-def _tour_facts_index(travel_date: str) -> tuple[tuple[str, float, str, str], ...]:
+def _tour_facts_index(travel_date: str, city: str = "Dubai") -> tuple[tuple[str, float, str, str], ...]:
     """(name_lower, price_per_adult, duration, timeslots_json) for the catalogue.
 
     Cached: a plan with six tours must not trigger six catalogue searches.
@@ -599,7 +605,7 @@ def _tour_facts_index(travel_date: str) -> tuple[tuple[str, float, str, str], ..
         from mcp_tools.search_tours import _impl as _search_tours
 
         res = _search_tours(
-            destination_city="Dubai",
+            destination_city=city or "Dubai",
             travel_date=travel_date,
             adults=1,
             max_results=400,
@@ -619,7 +625,7 @@ def _tour_facts_index(travel_date: str) -> tuple[tuple[str, float, str, str], ..
         return ()
 
 
-def _tour_facts_lookup(title: str, travel_date: str) -> dict[str, Any]:
+def _tour_facts_lookup(title: str, travel_date: str, city: str = "Dubai") -> dict[str, Any]:
     """Price, duration and slots for a tour named in a plan.
 
     Exact match first, then containment either way round, because the model
@@ -631,7 +637,7 @@ def _tour_facts_lookup(title: str, travel_date: str) -> dict[str, Any]:
     want = (title or "").strip().lower()
     if not want:
         return {}
-    index = _tour_facts_index(travel_date)
+    index = _tour_facts_index(travel_date, city)
     hit = next((row for row in index if row[0] == want), None)
     if hit is None:
         # Longest containment match wins, so "Dubai Frame" does not grab
@@ -704,9 +710,9 @@ def _flight_block(o: dict[str, Any]) -> dict[str, Any]:
     return block
 
 
-def _tour_price_lookup(title: str, travel_date: str) -> float:
+def _tour_price_lookup(title: str, travel_date: str, city: str = "Dubai") -> float:
     """Per-adult price for a tour named in a plan. 0.0 when unmatched."""
-    return float(_tour_facts_lookup(title, travel_date).get("price") or 0.0)
+    return float(_tour_facts_lookup(title, travel_date, city).get("price") or 0.0)
 
 
 @tool
@@ -772,11 +778,13 @@ def plan_itinerary_tool(
         include_visa: False when the customer does not want a visa (has one,
             or said "no visa"); the cheapest tourist visa is added otherwise.
         transfer_total_inr: the price of an AIRPORT transfer from
-            search_airport_transfer_dubai that the customer has seen. 0 when no
+            search_airport_transfer that the customer has seen. 0 when no
             airport transfer was searched: never pass a tour's transfer price
             here (that is already inside the tour's total).
         origin_city: departure city, only needed as a fallback if you cannot
             pass flight_total_inr.
+        destination_city: the trip's city ("Dubai", "Singapore", "Bangkok").
+            Tours, hotel, meals, airport legs and the visa are all for it.
         flight_fare_ref: the `fare_ref` of the flight you showed (from
             search_flights). The plan then carries THAT fare's price, flight
             numbers, times, durations, baggage and refundability in `flight`;
@@ -790,7 +798,7 @@ def plan_itinerary_tool(
     The tool also plans and prices, from supplier data, what a trip needs:
     breakfast at the hotel and lunch and dinner near each day's activities
     (meals are pay-at-venue, not in the total), the airport pickup and
-    drop-off for the hotel's zone, the UAE visa (unless the customer said they
+    drop-off for the hotel's zone, the destination's visa (unless the customer said they
     do not need one) and each tour with its transfer. Do not add any of these
     yourself, and quote every figure from `package_lines` and `total_inr`.
 
@@ -804,6 +812,10 @@ def plan_itinerary_tool(
         the failure this field exists to prevent.
     """
     from scheduling import build_itinerary
+
+    # The trip's city: every catalogue, hotel, meal, airport and visa lookup
+    # below is for it (they were all pinned to Dubai).
+    city = _plan_city_name(destination_city)
 
     # Every per-person line (tours, visa) is multiplied by this. Defaulting to 1
     # priced a 2-adult package for one person (Safari Rs 2,675, not 5,350.66).
@@ -828,7 +840,7 @@ def plan_itinerary_tool(
         row = dict(t)
         title = str(row.get("name") or row.get("title") or "").strip()
         if title:
-            facts = _tour_facts_lookup(title, start_date)
+            facts = _tour_facts_lookup(title, start_date, city)
             if not row.get("duration") and facts.get("duration"):
                 row["duration"] = facts["duration"]
             if not (row.get("price_per_adult_inr") or row.get("price_inr")) and facts.get("price"):
@@ -837,14 +849,14 @@ def plan_itinerary_tool(
             # the model sent each tour's time from the last plan as its only
             # "slot" (Dubai Frame has none; it sent 16:00), which pinned it to
             # a time that no longer fitted and the tour was dropped.
-            real = facts.get("timeslots") or _tour_slots(title, str(row.get("date") or start_date))
+            real = facts.get("timeslots") or _tour_slots(title, str(row.get("date") or start_date), city)
             if real:
                 row["timeslots"] = real
-            elif row.get("timeslots") and _known_tour(title, str(row.get("date") or start_date)):
+            elif row.get("timeslots") and _known_tour(title, str(row.get("date") or start_date), city):
                 row.pop("timeslots", None)  # the tour is sold without set times
         enriched.append(row)
     tours = enriched
-    _mark_dinner_tours(tours, start_date, int(adults or 0))
+    _mark_dinner_tours(tours, start_date, int(adults or 0), city)
 
     # TOP UP so the trip is not mostly empty. Three tours cannot fill five days,
     # and telling the model to "search for more and call again" did not work —
@@ -868,7 +880,7 @@ def plan_itinerary_tool(
             drop = {
                 "the", "a", "an", "in", "of", "at", "to", "from", "with", "and",
                 "dubai", "abu", "dhabi", "ticket", "tickets", "tour", "tours",
-                "experience", "entry", "pass", "combo",
+                "experience", "entry", "pass", "combo", *city.lower().split(),
             }
             words = {w for w in name.lower().replace("-", " ").split() if w not in drop}
             return " ".join(sorted(words)) or name.lower()
@@ -901,7 +913,7 @@ def plan_itinerary_tool(
         # No add cap: an earlier cap of `usable_days * 2` stopped the top-up
         # before the budget was met and left the last day blank. The minute
         # budget plus the duplicate filter are the real limiters.
-        catalogue = list(_tour_facts_index(start_date))
+        catalogue = list(_tour_facts_index(start_date, city))
         catalogue.sort(key=lambda row: _dedupe_key(row[0]) not in prev_keys)
         for name, price, duration, _slots in catalogue:
             if have_min >= want_min:
@@ -913,17 +925,17 @@ def plan_itinerary_tool(
             key = _dedupe_key(name)
             if key in chosen_keys:
                 continue
-            if not _fill_candidate(name, [str(t.get("name") or "") for t in tours], start_date):
+            if not _fill_candidate(name, [str(t.get("name") or "") for t in tours], start_date, city):
                 continue
             mins = parse_duration_minutes(duration) or 120
             if mins > per_day:  # cannot fit a single day on its own
                 continue
             chosen_keys.add(key)
             tours.append(
-                {"name": _display_name(name, start_date), "price_per_adult_inr": price, "duration": duration,
-                 "auto_filled": True}
+                {"name": _display_name(name, start_date, city), "price_per_adult_inr": price,
+                 "duration": duration, "auto_filled": True}
             )
-            auto_filled.append(_display_name(name, start_date))
+            auto_filled.append(_display_name(name, start_date, city))
             have_min += mins
 
     from rules import customer_said
@@ -945,6 +957,7 @@ def plan_itinerary_tool(
         hotel_name=hotel_name,
         hotel_checkin_time=hotel_checkin_time or None,
         departure_time=departure_time or None,
+        destination=city,
     )
     out = build_itinerary(tours=tours, **_sched_kwargs)
     if out.get("error"):
@@ -957,7 +970,7 @@ def plan_itinerary_tool(
     if fill_days:
         pool = [
             (n, p, d)
-            for n, p, d, _s in _tour_facts_index(start_date)
+            for n, p, d, _s in _tour_facts_index(start_date, city)
             if n and p > 0 and d and (parse_duration_minutes(d) or 120) <= per_day
         ]
         guard = 0
@@ -968,14 +981,14 @@ def plan_itinerary_tool(
                 key = _dedupe_key(name)
                 if key in chosen_keys:
                     continue
-                if not _fill_candidate(name, [str(t.get("name") or "") for t in tours], start_date):
+                if not _fill_candidate(name, [str(t.get("name") or "") for t in tours], start_date, city):
                     continue
                 chosen_keys.add(key)
                 tours.append(
-                    {"name": _display_name(name, start_date), "price_per_adult_inr": price, "duration": duration,
-                 "auto_filled": True}
+                    {"name": _display_name(name, start_date, city), "price_per_adult_inr": price,
+                     "duration": duration, "auto_filled": True}
                 )
-                auto_filled.append(_display_name(name, start_date))
+                auto_filled.append(_display_name(name, start_date, city))
                 added = True
                 break
             if not added:
@@ -989,12 +1002,13 @@ def plan_itinerary_tool(
     if auto_filled:
         import concurrent.futures as _cf
 
-        _mark_dinner_tours(tours, start_date, int(adults or 0))
+        _mark_dinner_tours(tours, start_date, int(adults or 0), city)
         # Their real start times too, so the final layout uses bookable slots.
         need = [t for t in tours if isinstance(t, dict) and not t.get("timeslots")]
         with _cf.ThreadPoolExecutor(max_workers=8) as _pool:
             for t, slots in zip(need, _pool.map(
-                    lambda t: _tour_slots(str(t.get("name") or ""), str(t.get("date") or start_date)), need)):
+                    lambda t: _tour_slots(str(t.get("name") or ""), str(t.get("date") or start_date), city),
+                    need)):
                 if slots:
                     t["timeslots"] = slots
         out = build_itinerary(tours=tours, **_sched_kwargs)
@@ -1040,7 +1054,7 @@ def plan_itinerary_tool(
             # mid-search, so the unstated-origin guard does not apply here.
             _f = _sf(
                 origin_city=origin_city,
-                destination_city=destination_city or "Dubai",
+                destination_city=city,
                 departure_date=start_date,
                 return_date=_end_date_for(start_date, nights),
                 adults=pax,
@@ -1076,7 +1090,7 @@ def plan_itinerary_tool(
             # four-adult total.
             _rooms = [{"adults": 2, "children": 0, "child_ages": []} for _ in range((pax + 1) // 2)]
             _h = _sh(
-                destination_city=destination_city or "Dubai",
+                destination_city=city,
                 check_in=start_date,
                 check_out=_end_date_for(start_date, nights),
                 rooms=_rooms,
@@ -1098,6 +1112,7 @@ def plan_itinerary_tool(
     # meals or visa" still produced a Rs 15,504.58 visa line and total.
     # Left out only when the customer's own words say so: the model passed
     # include_visa=False on its own and a full trip went out with no visa.
+    visa_country = _visa_country_name(city)
     if customer_excluded("visa"):
         visa_per_adult_inr = 0.0
     elif visa_per_adult_inr:
@@ -1113,11 +1128,13 @@ def plan_itinerary_tool(
         try:
             from mcp_tools.get_visa_info import _impl as _gv
 
+            # The destination's own visa (a city resolves to its country).
             _v = _gv(
-                destination_country="UAE",
+                destination_country=city,
                 nationality_country="India",
                 travel_date=start_date,
             )
+            visa_country = str(_v.get("country") or visa_country)
             _vo = [o for o in (_v.get("options") or []) if o.get("price_per_person_inr")]
             if _vo:
                 visa_per_adult_inr = min(float(o["price_per_person_inr"]) for o in _vo)
@@ -1125,7 +1142,9 @@ def plan_itinerary_tool(
         except Exception as e:  # noqa: BLE001
             logger.warning("visa lookup for total failed: %s", e)
     # Needed but not priced (the lookup failed): say so, never drop it quietly.
-    visa_missing = not customer_excluded("visa") and not visa_per_adult_inr
+    # A country the supplier sells no visa for is not "missing": nothing to add.
+    visa_missing = (not customer_excluded("visa") and not visa_per_adult_inr
+                    and bool(visa_country))
 
     transfer_note = ""
     # A transfer figure must be an airport transfer this conversation was
@@ -1147,17 +1166,17 @@ def plan_itinerary_tool(
     # asked for was added to the package total. A transfer is in the package
     # only when transfer_total_inr is passed (one was shown and chosen);
     # otherwise the plan marks it "not included in the package price".
-    exact = _exact_tour_totals(out, tours, pax)
-    hotel_rec = _hotel_record(hotel_name, start_date, nights, pax)
+    exact = _exact_tour_totals(out, tours, pax, city)
+    hotel_rec = _hotel_record(hotel_name, start_date, nights, pax, city)
     # The airport pickup and drop-off are part of a planned trip: priced from
     # GujjuTours' own airport transfer for the hotel's zone, unless one was
     # already quoted and chosen, or the customer said they do not want one.
     airport_legs: list[dict[str, Any]] = []
     if not transfer_total_inr and hotel_rec and not customer_excluded("transfer"):
-        airport_legs = _airport_legs(out, hotel_rec, start_date, nights, pax)
+        airport_legs = _airport_legs(out, hotel_rec, start_date, nights, pax, city)
         if airport_legs:
             transfer_total_inr = round(sum(leg["total_inr"] for leg in airport_legs), 2)
-    _annotate_meals(out, hotel_rec, hotel_name, pax)
+    _annotate_meals(out, hotel_rec, hotel_name, pax, city)
     scheduled: list[dict[str, Any]] = []
     seen: set[str] = set()
     for day in out.get("days") or []:
@@ -1188,7 +1207,7 @@ def plan_itinerary_tool(
             # Priced for the day it is scheduled on, not the arrival date: tour
             # rates vary by date, and the two used to differ.
             if per_adult <= 0 and title:
-                per_adult = _tour_price_lookup(title, day_date)
+                per_adult = _tour_price_lookup(title, day_date, city)
             # The supplier's own total for the party, with the transfer the
             # customer needs, when it can be had; per-adult x party otherwise.
             ex = exact.get(title)
@@ -1237,8 +1256,9 @@ def plan_itinerary_tool(
             lines.append({"item": s["tour"], "date": s["date"], "amount_inr": s["group_inr"],
                           **({"detail": detail} if detail else {})})
     if components["visa"]:
-        lines.append({"item": "UAE tourist visa", "date": start_date, "amount_inr": components["visa"],
-                      "detail": f"{_visa_label(visa_per_adult_inr)}, {pax} x ₹{visa_per_adult_inr:,.2f}"})
+        lines.append({"item": f"{visa_country or city} tourist visa", "date": start_date,
+                      "amount_inr": components["visa"],
+                      "detail": f"{_visa_label(visa_per_adult_inr, visa_country)}, {pax} x ₹{visa_per_adult_inr:,.2f}"})
     if airport_legs:
         for leg in airport_legs:
             lines.append({"item": leg["label"], "date": leg["date"], "amount_inr": leg["total_inr"],
@@ -1248,7 +1268,7 @@ def plan_itinerary_tool(
     out["package_lines"] = lines
     if visa_missing:
         out["visa_note"] = (
-            "The UAE visa could not be priced just now, so it is NOT in the total. Tell "
+            f"The {visa_country} visa could not be priced just now, so it is NOT in the total. Tell "
             "the customer the visa is needed and its price will be added; do not leave it out silently."
         )
     if transfer_note:
@@ -1269,6 +1289,7 @@ def plan_itinerary_tool(
     out["cost_breakdown"] = components
     out["total_inr"] = round(sum(components.values()), 2)
     out["adults"] = pax
+    out["destination"] = city
     # The reply kept pasting the search tools' tables and naming the plan in
     # one line ("I have put together a sample itinerary ... total Rs 14,940"),
     # so the customer never saw the day-by-day they asked for.
@@ -1306,6 +1327,7 @@ def plan_itinerary_tool(
     # sent, including a visa the customer had said not to add.
     _remember_plan({
         "days": out.get("days") or [],
+        "destination": city,
         "start_date": start_date,
         "nights": nights,
         "adults": pax,
@@ -1419,7 +1441,7 @@ _GENERIC_WORDS = {"dubai", "tour", "tours", "ticket", "tickets", "by", "gujjutou
                   "guide", "hindi", "english", "private", "sharing", "transfer"}
 
 
-def _fill_candidate(name: str, chosen: list[str], travel_date: str = "") -> bool:
+def _fill_candidate(name: str, chosen: list[str], travel_date: str = "", city: str = "Dubai") -> bool:
     """A catalogue tour fit to add to a plan: a sightseeing activity, and not
     another version of one already in it (a second city tour, a second dhow
     cruise). Auto-fill had added the airport pickup as a "tour" and two of
@@ -1427,18 +1449,20 @@ def _fill_candidate(name: str, chosen: list[str], travel_date: str = "") -> bool
     low = name.lower()
     if any(w in low for w in _FILL_SKIP):
         return False
-    # A day trip out of Dubai needs its transfer: Qasr Al Hosn "from Dubai"
+    # A day trip out of the city needs its transfer: Qasr Al Hosn "from Dubai"
     # is sold without one, which leaves the customer in Abu Dhabi by car.
-    if travel_date and ("from dubai" in low or "abu dhabi" in low):
+    home = (city or "Dubai").strip().lower()
+    if travel_date and (f"from {home}" in low or (home == "dubai" and "abu dhabi" in low)):
         from mcp_tools.plan_pricing import tour_price
 
-        hit = _catalogue(travel_date).get(low.strip())
+        hit = _catalogue(travel_date, city).get(low.strip())
         priced = tour_price(tour_id=hit[1], name=hit[0], date=travel_date, adults=1) if hit else None
         if not priced or "sharing" not in str(priced.get("transfer_type") or "").lower():
             return False
-    core = {w for w in low.replace("-", " ").split() if w not in _GENERIC_WORDS}
+    generic = _GENERIC_WORDS | set(home.split())
+    core = {w for w in low.replace("-", " ").split() if w not in generic}
     for other in chosen:
-        oc = {w for w in other.lower().replace("-", " ").split() if w not in _GENERIC_WORDS}
+        oc = {w for w in other.lower().replace("-", " ").split() if w not in generic}
         if core and oc and (core <= oc or oc <= core or len(core & oc) >= 2):
             return False
     return True
@@ -1446,11 +1470,11 @@ def _fill_candidate(name: str, chosen: list[str], travel_date: str = "") -> bool
 
 
 @lru_cache(maxsize=256)
-def _tour_slots_cached(title: str, travel_date: str) -> tuple[dict[str, Any], ...]:
+def _tour_slots_cached(title: str, travel_date: str, city: str = "Dubai") -> tuple[dict[str, Any], ...]:
     try:
         from mcp_tools.search_tours import _impl as _search_tours
 
-        res = _search_tours(destination_city="Dubai", travel_date=travel_date, adults=1, query=title,
+        res = _search_tours(destination_city=city or "Dubai", travel_date=travel_date, adults=1, query=title,
                             max_results=3)
     except Exception:  # noqa: BLE001
         return ()
@@ -1461,53 +1485,76 @@ def _tour_slots_cached(title: str, travel_date: str) -> tuple[dict[str, Any], ..
     return ()
 
 
-def _visa_label(per_adult: float) -> str:
+def _visa_label(per_adult: float, country: str = "UAE") -> str:
     """The quoted visa's own name; the plan used to call every visa
     "30 days single entry", the multiple-entry one too."""
     from mcp_tools.quote_registry import label_for
 
-    return label_for("visa", per_adult) or "UAE tourist visa"
+    return label_for("visa", per_adult) or f"{country or 'UAE'} tourist visa"
 
 
-def _known_tour(title: str, travel_date: str) -> bool:
+def _plan_city_name(destination_city: str) -> str:
+    """The plan's city as the supplier spells it ("singapore" -> "Singapore")."""
+    from reference_data_loader import resolve_city
+
+    name = (destination_city or "").strip() or "Dubai"
+    rec = resolve_city(name)
+    return str((rec or {}).get("name") or name)
+
+
+def _visa_country_name(city: str) -> str:
+    """The country whose visa a trip to `city` needs ("UAE" for Dubai), or ""
+    when the supplier sells no visa for it."""
+    try:
+        from mcp_tools.get_visa_info import resolve_visa_country
+
+        row, name = resolve_visa_country(city)
+    except Exception:  # noqa: BLE001 - the visa lookup itself reports failures
+        return "UAE" if city.strip().lower() == "dubai" else city
+    return name if row is not None else ""
+
+
+def _known_tour(title: str, travel_date: str, city: str = "Dubai") -> bool:
     """The day's catalogue lists this tour (so an empty slot list is real)."""
-    return title.strip().lower() in _catalogue(travel_date)
+    return title.strip().lower() in _catalogue(travel_date, city)
 
 
-def _tour_slots(title: str, travel_date: str) -> list[dict[str, Any]]:
+def _tour_slots(title: str, travel_date: str, city: str = "Dubai") -> list[dict[str, Any]]:
     """The real start times of one tour on one day (Burj Khalifa's 33 slots),
     fetched for the plan's own tours only."""
-    return list(_tour_slots_cached(title.strip(), travel_date))
+    return list(_tour_slots_cached(title.strip(), travel_date, city))
 
 
 @lru_cache(maxsize=8)
-def _catalogue(travel_date: str) -> dict[str, tuple[str, int]]:
+def _catalogue(travel_date: str, city: str = "Dubai") -> dict[str, tuple[str, int]]:
     """{lower-case name: (supplier spelling, tour id)} for one day's catalogue,
     one search per date. A search per tour made a 4-night plan take 217 s."""
     try:
         from mcp_tools.search_tours import _impl as _search_tours
 
-        res = _search_tours(destination_city="Dubai", travel_date=travel_date, adults=1, max_results=400,
-                            enrich=False)
+        res = _search_tours(destination_city=city or "Dubai", travel_date=travel_date, adults=1,
+                            max_results=400, enrich=False)
     except Exception:  # noqa: BLE001
         return {}
     return {str(o["name"]).strip().lower(): (str(o["name"]), int(o["tour_id"]))
             for o in res.get("options") or [] if o.get("name") and o.get("tour_id")}
 
 
-def _display_name(lower_name: str, travel_date: str) -> str:
+def _display_name(lower_name: str, travel_date: str, city: str = "Dubai") -> str:
     """The supplier's own spelling of a catalogue tour (the index is lower
     case; title-casing it printed "Dubai City Tour By Gujjutours")."""
-    hit = _catalogue(travel_date).get(lower_name.strip().lower())
+    hit = _catalogue(travel_date, city).get(lower_name.strip().lower())
     return hit[0] if hit else lower_name.title()
 
-def _tour_id_for(title: str, travel_date: str) -> int | None:
+
+def _tour_id_for(title: str, travel_date: str, city: str = "Dubai") -> int | None:
     """The supplier tour id of a tour named in a plan (search is cached)."""
-    hit = _catalogue(travel_date).get((title or "").strip().lower())
+    hit = _catalogue(travel_date, city).get((title or "").strip().lower())
     return hit[1] if hit else None
 
 
-def _mark_dinner_tours(tours: list[dict[str, Any]], start_date: str, adults: int) -> None:
+def _mark_dinner_tours(tours: list[dict[str, Any]], start_date: str, adults: int,
+                       city: str = "Dubai") -> None:
     """Find each tour's id and whether its standard option serves dinner (the
     desert safari's "BBQ & Live Shows"), so the day plan does not add a second
     dinner that evening."""
@@ -1517,7 +1564,7 @@ def _mark_dinner_tours(tours: list[dict[str, Any]], start_date: str, adults: int
 
     def one(t: dict[str, Any]) -> None:
         name = str(t.get("name") or t.get("title") or "")
-        tid = t.get("tour_id") or _tour_id_for(name, str(t.get("date") or start_date))
+        tid = t.get("tour_id") or _tour_id_for(name, str(t.get("date") or start_date), city)
         if not tid:
             return
         t["tour_id"] = int(tid)
@@ -1531,7 +1578,8 @@ def _mark_dinner_tours(tours: list[dict[str, Any]], start_date: str, adults: int
         list(pool.map(one, todo))
 
 
-def _exact_tour_totals(out: dict[str, Any], tours: list[dict[str, Any]], pax: int) -> dict[str, dict[str, Any]]:
+def _exact_tour_totals(out: dict[str, Any], tours: list[dict[str, Any]], pax: int,
+                       city: str = "Dubai") -> dict[str, dict[str, Any]]:
     """{tour title: the supplier's party total on the day it is scheduled}.
 
     Multiplying a per-adult price in code put Rs 1,180.26 where the supplier
@@ -1548,7 +1596,7 @@ def _exact_tour_totals(out: dict[str, Any], tours: list[dict[str, Any]], pax: in
             if item.get("kind") != "tour" or title in jobs:
                 continue
             # Tours the plan added itself have no id yet.
-            tid = ids.get(title) or _tour_id_for(title, str(day.get("date") or ""))
+            tid = ids.get(title) or _tour_id_for(title, str(day.get("date") or ""), city)
             if tid:
                 jobs[title] = (int(tid), str(day.get("date") or ""))
     found: dict[str, dict[str, Any]] = {}
@@ -1573,13 +1621,14 @@ def _exact_tour_totals(out: dict[str, Any], tours: list[dict[str, Any]], pax: in
 _HOTEL_RECORDS: "OrderedDict[str, tuple[float, dict[str, Any] | None]]" = OrderedDict()
 
 
-def _hotel_record(hotel_name: str, start_date: str, nights: int, pax: int) -> dict[str, Any] | None:
+def _hotel_record(hotel_name: str, start_date: str, nights: int, pax: int,
+                  city: str = "Dubai") -> dict[str, Any] | None:
     """The plan's hotel as search returns it: area, coordinates, board."""
     import time as _time
 
     if not hotel_name:
         return None
-    key = f"{hotel_name.lower()}|{start_date}|{nights}|{pax}"
+    key = f"{hotel_name.lower()}|{start_date}|{nights}|{pax}|{(city or '').lower()}"
     hit = _HOTEL_RECORDS.get(key)
     if hit and _time.monotonic() - hit[0] < 600:
         return hit[1]
@@ -1588,7 +1637,7 @@ def _hotel_record(hotel_name: str, start_date: str, nights: int, pax: int) -> di
         from mcp_tools.search_hotels import _impl as _sh
 
         rooms = [{"adults": 2, "children": 0, "child_ages": []} for _ in range((pax + 1) // 2)]
-        res = _sh(destination_city="Dubai", check_in=start_date,
+        res = _sh(destination_city=city or "Dubai", check_in=start_date,
                   check_out=_end_date_for(start_date, nights), rooms=rooms)
         want = hotel_name.strip().lower()
         rec = next((o for o in res.get("options") or [] if want in str(o.get("hotel_name") or "").lower()), None)
@@ -1601,7 +1650,7 @@ def _hotel_record(hotel_name: str, start_date: str, nights: int, pax: int) -> di
 
 
 def _airport_legs(out: dict[str, Any], hotel: dict[str, Any], start_date: str, nights: int,
-                  pax: int) -> list[dict[str, Any]]:
+                  pax: int, city: str = "Dubai") -> list[dict[str, Any]]:
     """Price the airport pickup and drop-off, and show them on their days."""
     from mcp_tools.plan_pricing import airport_transfer
 
@@ -1611,7 +1660,7 @@ def _airport_legs(out: dict[str, Any], hotel: dict[str, Any], start_date: str, n
     legs: list[dict[str, Any]] = []
     for direction, date, label in (("pickup", start_date, "Airport pickup"), ("dropoff", end, "Airport drop-off")):
         priced = airport_transfer(direction=direction, date=date, adults=pax,
-                                  hotel_area=area, hotel_district=district)
+                                  hotel_area=area, hotel_district=district, city=city)
         if priced:
             legs.append({"label": label, "date": date, "direction": direction, **priced})
     days = out.get("days") or []
@@ -1636,7 +1685,8 @@ def _airport_legs(out: dict[str, Any], hotel: dict[str, Any], start_date: str, n
     return legs
 
 
-def _annotate_meals(out: dict[str, Any], hotel: dict[str, Any] | None, hotel_name: str, pax: int) -> None:
+def _annotate_meals(out: dict[str, Any], hotel: dict[str, Any] | None, hotel_name: str, pax: int,
+                    city: str = "Dubai") -> None:
     """Name where each meal is eaten: the hotel for breakfast (included when
     the room includes it), a nearby restaurant of ours for lunch and dinner."""
     from mcp_tools.plan_pricing import meal_venue
@@ -1656,7 +1706,7 @@ def _annotate_meals(out: dict[str, Any], hotel: dict[str, Any] | None, hotel_nam
             venue = meal_venue(near=str(item.get("near") or ""), at=str(item.get("start") or ""),
                                date=str(day.get("date") or ""), adults=pax, hotel_name=hotel_name,
                                hotel_lat=float(lat) if lat is not None else None,
-                               hotel_lng=float(lng) if lng is not None else None)
+                               hotel_lng=float(lng) if lng is not None else None, city=city)
             meal = title.split(" ")[0]
             if venue["kind"] == "restaurant":
                 item["title"] = f"{meal} at {venue['venue']}"
@@ -1700,7 +1750,7 @@ def _components_from_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
 
 @tool
 def generate_itinerary_pdf_tool(
-    destination: str = "Dubai",
+    destination: str = "",
     origin_city: str = "",
     start_date: str = "",
     end_date: str = "",
@@ -1767,7 +1817,7 @@ def generate_itinerary_pdf_tool(
         result, and WhatsApp attaches the file itself. Just say the itinerary
         is ready to download.
     """
-    from itinerary_store import save_itinerary_pdf
+    from itinerary_store import download_name, save_itinerary_pdf
 
     # A customer who was just given a day-by-day plan in chat expects to see it
     # in the document. The model kept writing a full 5-day schedule in the reply
@@ -1855,6 +1905,9 @@ def generate_itinerary_pdf_tool(
             visa = None
             inclusions = [i for i in (inclusions or []) if "visa" not in str(i).lower()]
 
+    # The trip's own city when the caller left it out (it used to default to
+    # Dubai for every trip).
+    destination = (destination or "").strip() or str(last_plan.get("destination") or "") or "Dubai"
     data: dict[str, Any] = {
         "destination": destination,
         "origin_city": origin_city,
@@ -1887,7 +1940,7 @@ def generate_itinerary_pdf_tool(
     # attaches the file.
     return {
         "itinerary_id": itinerary_id,
-        "filename": f"{destination}-itinerary.pdf",
+        "filename": download_name(destination),
         "summary": (
             f"Itinerary PDF ready ({destination}, {party_summary or 'your party'}). "
             "Tell the customer it is ready and that they can download it below. "

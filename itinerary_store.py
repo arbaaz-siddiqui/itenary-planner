@@ -11,6 +11,7 @@ they survive restarts and can be fetched by id from any worker.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 from pathlib import Path
@@ -50,7 +51,26 @@ def save_itinerary_pdf(doc: ItineraryDoc | dict) -> tuple[str, Path]:
     # appearing to do nothing.
     if not path.exists():
         path.write_bytes(build_itinerary_pdf(model))
+    # The download name follows the trip ("Singapore-itinerary.pdf").
+    with contextlib.suppress(OSError):
+        path.with_suffix(".name").write_text(download_name(model.destination), encoding="utf-8")
     return itinerary_id, path
+
+
+def download_name(destination: str | None) -> str:
+    """"Singapore-itinerary.pdf"; "itinerary.pdf" when the trip has no city."""
+    safe = "".join(c for c in str(destination or "") if c.isalnum() or c in " -").strip().replace(" ", "-")
+    return f"{safe}-itinerary.pdf" if safe else "itinerary.pdf"
+
+
+def get_itinerary_filename(itinerary_id: str) -> str:
+    """The download name saved with a PDF, or a generic one."""
+    path = get_itinerary_path(itinerary_id)
+    try:
+        name = path.with_suffix(".name").read_text(encoding="utf-8").strip() if path else ""
+    except OSError:
+        name = ""
+    return name or "itinerary.pdf"
 
 
 def get_itinerary_path(itinerary_id: str) -> Path | None:

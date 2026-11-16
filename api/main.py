@@ -59,7 +59,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     log.info("chat_api_stopping")
 
 
-app = FastAPI(title="Dubai Trip Planner — Chat API", lifespan=lifespan)
+app = FastAPI(title="GujjuTours Trip Planner — Chat API", lifespan=lifespan)
 
 # The browser sends the session cookie cross-origin (web service -> api
 # service), so credentials must be allowed and the origin echoed explicitly:
@@ -205,8 +205,11 @@ async def serve_itinerary(itinerary_id: str) -> Response:
 
     path = get_itinerary_path(itinerary_id)
     if path is not None:
+        # Named for its trip ("Singapore-itinerary.pdf"), not always Dubai.
+        from itinerary_store import get_itinerary_filename
+
         return FileResponse(
-            path, media_type="application/pdf", filename="Dubai-itinerary.pdf"
+            path, media_type="application/pdf", filename=get_itinerary_filename(itinerary_id)
         )
     # The API's disk is replaced on every deploy; the copy kept with the
     # chat is what makes an older PDF still download.
@@ -525,6 +528,7 @@ def _seed_plan_from_history(thread_id: str, messages: list[dict[str, Any]]) -> N
                           if str(l.get("item") or "").startswith("Hotel (")), "")
             seed_plan(thread_id, {
                 "days": days,
+                "destination": card.get("destination") or "",
                 "start_date": card.get("start_date") or (days[0].get("date") if days else ""),
                 "nights": max(0, len(days) - 1),
                 "adults": card.get("adults"),
@@ -570,10 +574,10 @@ _MODE_CONTEXT = {
 _FOLLOW_UPS: dict[str, list[str]] = {
     "tours": ["Show private transfer prices", "Add a hotel for these dates", "Plan my full trip"],
     "hotels": ["Only free cancellation", "Show cheaper hotels", "Add an airport transfer"],
-    "flights": ["Show cheaper flights", "Only non-stop flights", "Find hotels in Dubai"],
-    "restaurants": ["Jain-friendly options", "Restaurants near Burj Khalifa", "Show the menu"],
+    "flights": ["Show cheaper flights", "Only non-stop flights", "Find hotels there"],
+    "restaurants": ["Jain-friendly options", "Only vegetarian places", "Show the menu"],
     "transfers": ["Shared transfer instead", "Add the return transfer", "Find a hotel"],
-    "visa": ["Which documents do I need?", "How long does processing take?", "Find flights to Dubai"],
+    "visa": ["Which documents do I need?", "How long does processing take?", "Find flights there"],
     "packages": ["Show package details", "Compare the top two", "Plan a custom trip"],
 }
 
@@ -854,6 +858,7 @@ async def _turn_events(
                     plan_out = out
         if plan_out:
             option_groups.insert(0, {"kind": "itinerary", "items": [{
+                "destination": plan_out.get("destination") or "",
                 "start_date": plan_out.get("start_date") or (plan_out["days"][0].get("date")),
                 "days": plan_out.get("days"),
                 "package_lines": plan_out.get("package_lines") or [],
