@@ -4,6 +4,15 @@
 // localStorage so a refresh still shows your sessions.
 
 import type {
+  AdminOverview,
+  AdminSearch,
+  AdminSearchList,
+  AdminTranscript,
+  AdminUserDetail,
+  AdminUserList,
+  SearchFilters,
+} from "./admin";
+import type {
   ChatSession,
   Message,
   OptionGroup,
@@ -115,7 +124,162 @@ function seedSeq(s: MockStore): void {
 
 const nextId = (p: string) => `${p}_${++seq}`;
 
+// --- admin panel stubs: built from the mock store, read-only -------------
+
+function mockSearches(s: MockStore): AdminSearch[] {
+  const user = s.user ?? MOCK_USER;
+  return Object.entries(s.messages).flatMap(([sid, ms]) =>
+    ms.flatMap((m) =>
+      (m.tool_calls ?? []).map((tc, i) => {
+        const input = (tc.input ?? {}) as Record<string, unknown>;
+        const output = (tc.output ?? {}) as Record<string, unknown>;
+        return {
+          id: `${m.id}_${i}`,
+          user_id: user.id,
+          email: user.email,
+          session_id: sid,
+          tool: tc.name,
+          destination: typeof input.destination_city === "string" ? input.destination_city : null,
+          start_date: typeof input.check_in === "string" ? input.check_in : null,
+          party: typeof input.adults === "number" ? `${input.adults} adults` : null,
+          result_count: Array.isArray(output.options) ? output.options.length : null,
+          error: output.error ? String(output.message ?? "failed") : null,
+          created_at: m.created_at,
+        };
+      }),
+    ),
+  );
+}
+
+const mockAdmin = {
+  async adminOverview(days: number): Promise<AdminOverview> {
+    await delay(200);
+    const s = db();
+    const searches = mockSearches(s);
+    const turns = Object.values(s.messages).flat().filter((m) => m.role === "user").length;
+    const today = new Date();
+    const daily = Array.from({ length: days }, (_, i) => {
+      const d = new Date(today.getTime() - (days - 1 - i) * 86_400_000);
+      const last = i === days - 1;
+      return {
+        day: d.toISOString().slice(0, 10),
+        active_users: last ? 1 : 0,
+        signups: 0,
+        turns: last ? turns : 0,
+        searches: last ? searches.length : 0,
+        failed_searches: 0,
+      };
+    });
+    const byTool = new Map<string, number>();
+    for (const r of searches) byTool.set(r.tool, (byTool.get(r.tool) ?? 0) + 1);
+    return {
+      days,
+      kpis: {
+        total_users: 1,
+        new_users: 0,
+        active_users: 1,
+        chats: s.sessions.length,
+        turns,
+        searches: searches.length,
+        failed_searches: searches.filter((r) => r.error).length,
+        thumbs_up: 0,
+        thumbs_down: 0,
+      },
+      daily,
+      searches_by_tool: [...byTool].map(([tool, n]) => ({ tool, searches: n, failed: 0 })),
+      top_destinations: searches.some((r) => r.destination)
+        ? [{ destination: "Dubai", searches: searches.filter((r) => r.destination).length }]
+        : [],
+      recent_failed: searches.filter((r) => r.error),
+    };
+  },
+
+  async adminUsers(_q: string, page: number, pageSize: number): Promise<AdminUserList> {
+    await delay(200);
+    const s = db();
+    const u = s.user ?? MOCK_USER;
+    const all = Object.values(s.messages).flat();
+    return {
+      total: 1,
+      page,
+      page_size: pageSize,
+      users: [
+        {
+          id: u.id,
+          email: u.email,
+          first_name: u.first_name ?? "",
+          last_name: u.last_name ?? "",
+          created_at: s.sessions[s.sessions.length - 1]?.created_at ?? nowISO(),
+          last_active: all[all.length - 1]?.created_at ?? null,
+          chats: s.sessions.length,
+          messages: all.length,
+          searches: mockSearches(s).length,
+        },
+      ],
+    };
+  },
+
+  async adminUser(id: string): Promise<AdminUserDetail> {
+    await delay(200);
+    const s = db();
+    const u = s.user ?? MOCK_USER;
+    const searches = mockSearches(s);
+    return {
+      user: { id, email: u.email, first_name: u.first_name ?? "", last_name: u.last_name ?? "", created_at: nowISO() },
+      facts: {},
+      saved_cards: s.saved?.length ?? 0,
+      searches: searches.length,
+      last_search: searches[searches.length - 1]?.created_at ?? null,
+      last_active: s.sessions[0]?.updated_at ?? null,
+      sessions: s.sessions.map((x) => ({
+        id: x.id,
+        title: x.title,
+        pinned: Boolean(x.pinned),
+        created_at: x.created_at,
+        updated_at: x.updated_at,
+        messages: s.messages[x.id]?.length ?? 0,
+        searches: searches.filter((r) => r.session_id === x.id).length,
+      })),
+    };
+  },
+
+  async adminTranscript(sessionId: string): Promise<AdminTranscript> {
+    await delay(200);
+    const s = db();
+    const u = s.user ?? MOCK_USER;
+    const session = s.sessions.find((x) => x.id === sessionId);
+    if (!session) throw Object.assign(new Error("Not Found"), { status: 404 });
+    return {
+      session: { id: session.id, title: session.title, created_at: session.created_at, updated_at: session.updated_at },
+      user: { id: u.id, email: u.email, first_name: u.first_name ?? "", last_name: u.last_name ?? "" },
+      messages: (s.messages[sessionId] ?? []).map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        created_at: m.created_at,
+        options: m.options ?? [],
+        feedback: m.feedback ?? null,
+        tool_calls: (m.tool_calls ?? []).map((tc) => ({
+          tool_name: tc.name,
+          input: tc.input ?? {},
+          output_preview: JSON.stringify(tc.output ?? null).slice(0, 2000),
+        })),
+      })),
+    };
+  },
+
+  async adminSearches(f: SearchFilters): Promise<AdminSearchList> {
+    await delay(200);
+    const all = mockSearches(db());
+    const rows = all.filter(
+      (r) => (!f.tool || r.tool === f.tool) && (!f.errors_only || r.error) && (!f.user_id || r.user_id === f.user_id),
+    );
+    return { total: rows.length, page: 1, page_size: 50, searches: rows, tools: [...new Set(all.map((r) => r.tool))] };
+  },
+};
+
 export const mockApi = {
+  ...mockAdmin,
   async login(email: string, password: string): Promise<{ user: User }> {
     await delay(400);
     if (!email || !password) {
@@ -140,7 +304,8 @@ export const mockApi = {
     await delay(200);
     const s = db();
     if (!s.user) throw Object.assign(new Error("Not authenticated"), { status: 401 });
-    return { user: s.user };
+    // Mock mode shows the admin panel too, over this browser's own mock chats.
+    return { user: { ...s.user, is_admin: true } };
   },
 
   async listSessions(): Promise<ChatSession[]> {

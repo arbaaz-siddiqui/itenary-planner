@@ -782,3 +782,24 @@ ul.ui-list {
 .status-in {
   animation: status-in 220ms ease-out both;
 }
+
+/* Admin charts: bars grow in once when a dashboard opens. The global
+   reduced-motion rule above cuts these to an instant. */
+@keyframes admin-grow-y {
+  from {
+    transform: scaleY(0);
+  }
+}
+@keyframes admin-grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+.admin-bar {
+  transform-origin: bottom;
+  animation: admin-grow-y 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.admin-bar-x {
+  transform-origin: left;
+  animation: admin-grow-x 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}

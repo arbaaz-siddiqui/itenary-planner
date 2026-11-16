@@ -46,8 +46,9 @@ export function CardShell({
 }
 
 export function HeartButton({ card, className = "" }: { card: CardRef; className?: string }) {
-  const { isSaved, toggleSave } = useCardActions();
+  const { isSaved, toggleSave, readOnly } = useCardActions();
   const saved = isSaved(card.id);
+  if (readOnly) return null;
   return (
     <button
       type="button"
@@ -135,7 +136,8 @@ export function TagChips({ tags, max = 4 }: { tags: string[]; max?: number }) {
 }
 
 export function BookButton({ card, label = "Book now" }: { card: CardRef; label?: string }) {
-  const { book } = useCardActions();
+  const { book, readOnly } = useCardActions();
+  if (readOnly) return null;
   return (
     <button
       type="button"
