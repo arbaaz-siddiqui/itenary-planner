@@ -1085,6 +1085,16 @@ def _impl(
         # One batched call, best-effort — see _enrich_with_content.
         _enrich_with_content(option_dicts, city_id)
 
+        # What this conversation was quoted, so a plan can only carry a hotel
+        # stay price a search produced (see quote_registry): with availability
+        # down, the model put "Marina Bay Sands Rs 1,50,000" into a plan.
+        from mcp_tools.quote_registry import remember
+
+        remember("hotel", [o.get("price_inr") for o in option_dicts] + [
+            r.get("price_inr") for o in option_dicts
+            for r in (o.get("room_types") or []) if isinstance(r, dict)
+        ])
+
         return {
             "options": option_dicts,
             "cheapest_price_inr": options[0].price_inr if options else None,

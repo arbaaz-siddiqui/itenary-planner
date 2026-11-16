@@ -399,3 +399,54 @@ class TestPlanUsesTheDestination:
 
         out = get_destination_tips_tool.invoke({"destination": "Singapore"})
         assert not out.get("error") and out["curated"] is False
+
+
+# --- plan guards found on the Singapore plan screenshot -------------------------
+
+class TestPlanGuards:
+    def test_an_unquoted_hotel_price_is_not_billed(self) -> None:
+        from agent_tools import plan_itinerary_tool
+
+        with patch("agent_tools._tour_facts_index", lambda *a, **k: ()), \
+             patch("mcp_tools.search_hotels._impl", lambda **k: {"options": []}), \
+             patch("mcp_tools.get_visa_info._impl", lambda **k: {"options": []}):
+            out = plan_itinerary_tool.invoke({
+                "start_date": "2026-12-10", "nights": 3, "adults": 2,
+                "destination_city": "Singapore", "hotel_name": "Marina Bay Sands",
+                "hotel_total_inr": 150000,
+            })
+        assert out["cost_breakdown"]["hotel"] == 0
+        assert "hotel_total_inr was ignored" in out["hotel_note"]
+
+    def test_a_quoted_hotel_price_is_billed(self) -> None:
+        from agent_tools import plan_itinerary_tool
+        from mcp_tools.quote_registry import remember
+
+        remember("hotel", [41234.5])
+        with patch("agent_tools._tour_facts_index", lambda *a, **k: ()), \
+             patch("mcp_tools.get_visa_info._impl", lambda **k: {"options": []}):
+            out = plan_itinerary_tool.invoke({
+                "start_date": "2026-12-10", "nights": 3, "adults": 2,
+                "destination_city": "Singapore", "hotel_total_inr": 41234.5,
+            })
+        assert out["cost_breakdown"]["hotel"] == 41234.5
+
+    def test_the_fill_skips_a_tour_far_above_the_citys_prices(self) -> None:
+        from agent_tools import _filler_price_cap
+
+        rows = [(f"t{i}", p, "2 Hours", "[]") for i, p in enumerate([900, 1000, 1100, 1200, 1300])]
+        assert _filler_price_cap(rows) == 4400
+        assert _filler_price_cap(rows[:3]) == float("inf")
+
+    def test_a_placeholder_hotel_name_is_no_hotel(self) -> None:
+        from agent_tools import plan_itinerary_tool
+
+        with patch("agent_tools._tour_facts_index", lambda *a, **k: ()), \
+             patch("mcp_tools.search_hotels._impl", lambda **k: {"options": []}), \
+             patch("mcp_tools.get_visa_info._impl", lambda **k: {"options": []}):
+            out = plan_itinerary_tool.invoke({
+                "start_date": "2026-12-10", "nights": 2, "adults": 2,
+                "destination_city": "Singapore", "hotel_name": "Unavailable",
+            })
+        titles = " ".join(i["title"] for d in out["days"] for i in d["items"])
+        assert "Unavailable" not in titles

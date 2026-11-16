@@ -816,6 +816,10 @@ def plan_itinerary_tool(
     # The trip's city: every catalogue, hotel, meal, airport and visa lookup
     # below is for it (they were all pinned to Dubai).
     city = _plan_city_name(destination_city)
+    # With no hotel found the model sent hotel_name="Unavailable", and the
+    # card read "Check out of Unavailable". A placeholder is no hotel.
+    if (hotel_name or "").strip().lower() in _NO_HOTEL_NAMES:
+        hotel_name = ""
 
     # Every per-person line (tours, visa) is multiplied by this. Defaulting to 1
     # priced a 2-adult package for one person (Safari Rs 2,675, not 5,350.66).
@@ -915,12 +919,13 @@ def plan_itinerary_tool(
         # budget plus the duplicate filter are the real limiters.
         catalogue = list(_tour_facts_index(start_date, city))
         catalogue.sort(key=lambda row: _dedupe_key(row[0]) not in prev_keys)
+        price_cap = _filler_price_cap(catalogue)
         for name, price, duration, _slots in catalogue:
             if have_min >= want_min:
                 break
             # No published duration: it cannot be timed into a day honestly
             # (and such listings include oddities like "Mysore Palace Dubai").
-            if not name or price <= 0 or not duration:
+            if not name or price <= 0 or not duration or price > price_cap:
                 continue
             key = _dedupe_key(name)
             if key in chosen_keys:
@@ -968,10 +973,12 @@ def plan_itinerary_tool(
     # tours while any day is empty — this is what makes "Free Day" impossible
     # rather than merely unlikely.
     if fill_days:
+        _index = _tour_facts_index(start_date, city)
+        _cap = _filler_price_cap(list(_index))
         pool = [
             (n, p, d)
-            for n, p, d, _s in _tour_facts_index(start_date, city)
-            if n and p > 0 and d and (parse_duration_minutes(d) or 120) <= per_day
+            for n, p, d, _s in _index
+            if n and 0 < p <= _cap and d and (parse_duration_minutes(d) or 120) <= per_day
         ]
         guard = 0
         while out.get("empty_days") and guard < 40:
@@ -1082,6 +1089,21 @@ def plan_itinerary_tool(
         except Exception as e:  # noqa: BLE001 — a missing component is reported
             logger.debug("flight lookup for total failed: %s", e)
 
+    # A hotel figure must be one a hotel search quoted in this conversation.
+    # With hotel availability down the model put "Marina Bay Sands Rs
+    # 1,50,000" into a Singapore plan; the hotel is looked up instead.
+    hotel_note = ""
+    if hotel_total_inr:
+        from mcp_tools.quote_registry import was_quoted
+
+        if not was_quoted("hotel", float(hotel_total_inr)):
+            logger.warning("unquoted hotel price %s replaced by a live lookup", hotel_total_inr)
+            hotel_total_inr = 0.0
+            hotel_note = (
+                "hotel_total_inr was ignored: no hotel search in this conversation quoted "
+                "that price. Quote only the hotel line in package_lines; if there is none, "
+                "say the hotel could not be priced and offer to search hotels."
+            )
     if not hotel_total_inr:
         try:
             from mcp_tools.search_hotels import _impl as _sh
@@ -1271,6 +1293,8 @@ def plan_itinerary_tool(
             f"The {visa_country} visa could not be priced just now, so it is NOT in the total. Tell "
             "the customer the visa is needed and its price will be added; do not leave it out silently."
         )
+    if hotel_note:
+        out["hotel_note"] = hotel_note
     if transfer_note:
         out["transfer_note"] = transfer_note
     if flight_block:
@@ -1439,6 +1463,24 @@ _FILL_SKIP = ("airport", "lounge", "transfer", "add-on", "add on", "sim card", "
 _GENERIC_WORDS = {"dubai", "tour", "tours", "ticket", "tickets", "by", "gujjutours", "with", "the", "and",
                   "of", "in", "from", "a", "an", "to", "experience", "entry", "admission", "pass", "combo",
                   "guide", "hindi", "english", "private", "sharing", "transfer"}
+
+
+# Hotel names the model sends when it has no hotel.
+_NO_HOTEL_NAMES = {"unavailable", "not available", "n/a", "na", "none", "tbd", "tba", "hotel",
+                   "the hotel", "your hotel", "hotel tbd", "to be confirmed", "unknown"}
+
+
+def _filler_price_cap(catalogue: list[tuple[str, float, str, str]]) -> float:
+    """The most a tour the plan adds by itself may cost per adult: four times
+    the catalogue's median. A Singapore plan filled a day with a private
+    fishing charter at Rs 1,17,758 for two. Relative to the city's own
+    prices, so no figure is hardcoded; no cap on a short catalogue."""
+    import statistics
+
+    prices = [float(row[1]) for row in catalogue if row[1] and row[1] > 0]
+    if len(prices) < 5:
+        return float("inf")
+    return 4 * statistics.median(prices)
 
 
 def _fill_candidate(name: str, chosen: list[str], travel_date: str = "", city: str = "Dubai") -> bool:
