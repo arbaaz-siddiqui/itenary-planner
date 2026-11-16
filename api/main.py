@@ -22,6 +22,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
 
+import observability
+
 from . import auth, db, repository
 
 log = logging.getLogger("chat_api")
@@ -40,6 +42,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent import configure_logging
 
     configure_logging(prod=True)
+    # After the console handlers exist, so logs go to both (no-op when off).
+    observability.bridge_logging()
 
     # Fail fast and loudly if SESSION_SECRET is missing. Without this the
     # service starts happily and every login returns 500 at the moment a
@@ -60,6 +64,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Dubai Trip Planner — Chat API", lifespan=lifespan)
+
+# OpenTelemetry: on only when OTEL_EXPORTER_OTLP_ENDPOINT is set (see
+# docs/OBSERVABILITY.md). Here, not in lifespan: the middleware and the
+# psycopg hook must exist before the app serves or opens a connection.
+observability.init_telemetry("gujjutours-chat-api")
+observability.instrument_fastapi(app)
 
 # The browser sends the session cookie cross-origin (web service -> api
 # service), so credentials must be allowed and the origin echoed explicitly:
@@ -622,8 +632,11 @@ async def _stream_turn(
 
     async def run() -> None:
         try:
-            async for event in _turn_events(session, message, mode, regenerate):
-                out.put_nowait(event)
+            with observability.turn_span(
+                session_id=sid, mode=mode, regenerate=regenerate, message=message
+            ):
+                async for event in _turn_events(session, message, mode, regenerate):
+                    out.put_nowait(event)
         except asyncio.CancelledError:
             log.info("turn_cancelled session=%s", sid)
             raise
@@ -775,11 +788,13 @@ async def _turn_events(
             # message ("Recursion limit of 12 reached ... visit docs.langchain")
             # is not something a traveller can act on.
             log.exception("stream_turn_failed: %s", e)
+            observability.turn_failed(e)
             loop.call_soon_threadsafe(queue.put_nowait, ("error", _TURN_FAILED))
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)
 
-    task = loop.run_in_executor(None, _produce)
+    # The worker thread joins this turn's trace (no-op when telemetry is off).
+    task = loop.run_in_executor(None, observability.bind_context(_produce))
 
     # A tool_call segment only appears once the model has DECIDED on a tool,
     # which can take a few seconds. Announce the turn immediately so the client
@@ -804,6 +819,9 @@ async def _turn_events(
 
     reply = normalize_reply(holder.text or "")
     tool_calls = extract_tool_calls(holder.response) or []
+    observability.annotate_turn(
+        tools=[str(c.get("tool_name") or "") for c in tool_calls], reply=reply
+    )
 
     # Option cards (tours / hotels / flights) are built BEFORE the message is
     # saved so they can be stored with it. They used to be emitted after the
