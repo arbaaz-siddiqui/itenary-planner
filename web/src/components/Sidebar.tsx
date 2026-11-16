@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   HelpCircle,
   LogOut,
@@ -12,6 +13,7 @@ import {
   Plus,
   Search,
   Settings,
+  ShieldCheck,
   Trash2,
   X,
 } from "lucide-react";
@@ -181,6 +183,7 @@ export interface SidebarProps {
 }
 
 export function Sidebar(p: SidebarProps) {
+  const router = useRouter();
   const collapsed = Boolean(p.collapsed);
   const groups = useMemo(() => groupSessions(p.sessions, p.pinned), [p.sessions, p.pinned]);
   const name = displayFirstName(p.user) || "Traveller";
@@ -325,6 +328,8 @@ export function Sidebar(p: SidebarProps) {
       </nav>
 
       <div className={`shrink-0 space-y-0.5 border-t border-sidebar-border py-2 ${collapsed ? "px-2" : "px-3"}`}>
+        {/* Only for accounts in ADMIN_EMAILS; the server enforces it too. */}
+        {p.user?.is_admin && item("admin", "Admin", ShieldCheck, () => router.push("/admin"))}
         {item("settings", "Settings", Settings, p.onSettings)}
         {item("help", "Help", HelpCircle, () => window.open("https://www.gujjutours.com/en/contact-us", "_blank", "noopener"))}
         <div className={`flex items-center gap-2.5 rounded-lg py-1.5 ${collapsed ? "justify-center" : "px-2.5"}`}>

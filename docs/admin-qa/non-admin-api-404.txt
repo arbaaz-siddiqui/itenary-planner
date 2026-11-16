@@ -1,0 +1,26 @@
+Admin API access check, local chat API (127.0.0.1:8011), ADMIN_EMAILS=admin.qa@example.com
+Run: 2026-11-16T23:06Z
+
+GET /auth/me as priya.shah@example.com (customer):
+{"user":{"id":"2226af24-f6d3-4245-9143-8124da25b730","email":"priya.shah@example.com","first_name":"Priya","last_name":"Shah","is_admin":false}}
+
+GET /admin-api/overview
+  customer:   {"detail":"Not Found"} -> HTTP 404
+  signed out: {"detail":"Not Found"} -> HTTP 404
+  admin:      HTTP 200
+GET /admin-api/users
+  customer:   {"detail":"Not Found"} -> HTTP 404
+  signed out: {"detail":"Not Found"} -> HTTP 404
+  admin:      HTTP 200
+GET /admin-api/users/2226af24-f6d3-4245-9143-8124da25b730
+  customer:   {"detail":"Not Found"} -> HTTP 404
+  signed out: {"detail":"Not Found"} -> HTTP 404
+  admin:      HTTP 200
+GET /admin-api/sessions/a644760b-2303-48c4-9dc6-d26d3926bd49/messages
+  customer:   {"detail":"Not Found"} -> HTTP 404
+  signed out: {"detail":"Not Found"} -> HTTP 404
+  admin:      HTTP 200
+GET /admin-api/searches
+  customer:   {"detail":"Not Found"} -> HTTP 404
+  signed out: {"detail":"Not Found"} -> HTTP 404
+  admin:      HTTP 200
