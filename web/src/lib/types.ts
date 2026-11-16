@@ -8,6 +8,8 @@ export interface User {
   /** Empty for accounts created before sign-up asked for a name. */
   first_name?: string;
   last_name?: string;
+  /** From /auth/me: the account is listed in the server's ADMIN_EMAILS. */
+  is_admin?: boolean;
 }
 
 /** Travel defaults from Settings; the agent reads them at the start of a chat. */

@@ -38,25 +38,14 @@ _SORTS = ("price", "rating", "distance")
 
 
 def unsupported_destination(destination_city: str) -> dict[str, Any]:
-    return {
-        "error": True,
-        "message": (
-            f"We do not sell restaurants in {destination_city!r} — the "
-            f"supplier's inventory for this service is Dubai only."
-        ),
-        "error_type": "UnsupportedRoute",
-        # A bare "Unsupported destination" got paraphrased to the
-        # customer as "I don't have that in my database", which reads
-        # as OUR system being broken rather than us not selling it.
-        "agent_instructions": (
-            "Say plainly that we do not offer restaurants in that city — we "
-            "cover Dubai for this service. Never say the data is "
-            "missing, unavailable, or not in your database, and never "
-            "imply a technical problem. Offer the Dubai equivalent "
-            "instead, and do not ask the customer for more details "
-            "first — the city is the blocker, not their input."
-        ),
-    }
+    """The city could not be searched: unknown, or no restaurants sold there."""
+    from mcp_tools.city_support import nothing_in_city, unknown_city
+    from reference_data_loader import resolve_city
+
+    city = resolve_city(destination_city)
+    if city is None:
+        return unknown_city(destination_city, "restaurants")
+    return nothing_in_city(str(city.get("name") or destination_city), "restaurants")
 
 
 #: Dish photos carried on each search row, for the card's photo strip. The
@@ -339,6 +328,10 @@ def _impl(
         city_name = str(city.get("name") or destination_city)
 
         catalog = load_city_catalog(city, search_date, adults, children)
+        if not catalog.restaurants and not catalog.total_in_city:
+            from mcp_tools.city_support import nothing_in_city
+
+            return nothing_in_city(city_name, "restaurants")
         on = _parse_day(search_date)
         filters = {
             k: v.strip() for k, v in (

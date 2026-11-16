@@ -184,6 +184,10 @@ def load_system_prompt(*, surface: str = "streamlit") -> str:
 # =============================================================================
 # Parallel ToolNode — runs all tool calls in a single LLM response concurrently
 # =============================================================================
+# Tools renamed since chats were saved: old name -> current name.
+_RENAMED_TOOLS = {"search_airport_transfer_dubai": "search_airport_transfer"}
+
+
 class ParallelToolNode(ToolNode):
     """Drop-in replacement for LangGraph's ToolNode that executes all tool calls
     from one AI message in parallel using asyncio.gather.
@@ -203,6 +207,8 @@ class ParallelToolNode(ToolNode):
             # `get_tour_options(tour_id:28488,...)<tool_call|>`. Recover the
             # real tool rather than burning a round-trip on "not found".
             base = re.split(r"[(\{<\s]", tool_name, 1)[0].strip()
+            # A chat saved before a rename still calls the old name.
+            base = _RENAMED_TOOLS.get(base, base)
             t = tools_by_name.get(base)
             if t is None:
                 return ToolMessage(
@@ -2031,7 +2037,7 @@ def stream_and_log(
 _TOOL_NAMES_RE = re.compile(
     r"\b(search_flights|search_hotels|search_tours|search_restaurants|get_visa_info|"
     r"list_packages|get_exchange_rate|resolve_party_tool|check_floor_tool|"
-    r"search_airport_transfer_dubai|enumerate_package_details|generate_itinerary_pdf"
+    r"search_airport_transfer(?:_dubai)?|enumerate_package_details|generate_itinerary_pdf"
     r"|get_tour_options|get_tour_timeslots|get_tour_details"
     # Both call shapes leak: name{...} and name(arg:value). A live run emitted
     # `get_tour_options(tour_id:28488,travel_date:<|"|>...)<tool_call|>`.

@@ -75,7 +75,7 @@ visa + food"), search **everything they named** in that first turn.
 
 - **Wave 1 (parallel — independent):** `search_flights` · `search_hotels` ·
   `search_tours` · `get_visa_info` · `search_restaurants`
-- **Wave 2 (needs wave 1):** `search_airport_transfer_dubai` **requires a hotel**.
+- **Wave 2 (needs wave 1):** `search_airport_transfer` **requires a hotel**.
   The moment `search_hotels` returns, take the best hotel's `hotel_name` (+ its
   `latitude`/`longitude` from the same result) and call it — same turn.
 
@@ -210,7 +210,7 @@ max_results".
 | `search_flights` | `*origin_city`, `*destination_city`, `*departure_date` | `return_date`, `adults`, `children`, `child_ages`, `cabin`, `max_stops`, `max_results`, `airline_filter` |
 | `search_hotels` | `*destination_city`, `*check_in`, `*check_out` | **A specific hotel named → `hotel_name` is REQUIRED.** Pass it as the customer said it ("Howard Johnson") — don't add the area. Also `rooms`, `min_stars`/`max_stars`, `amenities`, `force_refresh`. Returns lat/lng + full address on every hotel — feed those straight to transfers |
 | `search_tours` | `*destination_city`, `*travel_date`, `*adults` | `max_results` (10), `offset` for "show more", `query` for a named tour, **`transfer_type`**: `"with_transfer"` = the 85 shared/private tours, `"ticket_only"` = the 185 entry-ticket ones |
-| `search_airport_transfer_dubai` | `*arrival_date` | **Always pass `hotel_name`** — the supplier matches by hotel name. `hotel_lat`/`hotel_lng` help but are optional; the name alone resolves coords. Don't ask pax/vehicle type first |
+| `search_airport_transfer` | `*arrival_date` | **Always pass `hotel_name`** — the supplier matches by hotel name. `hotel_lat`/`hotel_lng` help but are optional; the name alone resolves coords. Don't ask pax/vehicle type first |
 | `search_restaurants` | `*destination_city`, `*search_date` | `adults`, `children` |
 | `get_visa_info` | `*destination_country`, `*nationality_country`, `*travel_date` | ALWAYS call — never recite visa facts from memory |
 | `list_packages` | — | Pre-built packages |

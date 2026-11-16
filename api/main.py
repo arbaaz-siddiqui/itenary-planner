@@ -22,7 +22,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
 
-from . import auth, db, repository
+import observability
+
+from . import admin, auth, db, repository
 
 log = logging.getLogger("chat_api")
 
@@ -40,6 +42,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent import configure_logging
 
     configure_logging(prod=True)
+    # After the console handlers exist, so logs go to both (no-op when off).
+    observability.bridge_logging()
 
     # Fail fast and loudly if SESSION_SECRET is missing. Without this the
     # service starts happily and every login returns 500 at the moment a
@@ -59,7 +63,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     log.info("chat_api_stopping")
 
 
-app = FastAPI(title="Dubai Trip Planner — Chat API", lifespan=lifespan)
+app = FastAPI(title="GujjuTours Trip Planner — Chat API", lifespan=lifespan)
+
+# OpenTelemetry: on only when OTEL_EXPORTER_OTLP_ENDPOINT is set (see
+# docs/OBSERVABILITY.md). Here, not in lifespan: the middleware and the
+# psycopg hook must exist before the app serves or opens a connection.
+observability.init_telemetry("gujjutours-chat-api")
+observability.instrument_fastapi(app)
 
 # The browser sends the session cookie cross-origin (web service -> api
 # service), so credentials must be allowed and the origin echoed explicitly:
@@ -78,6 +88,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Admin panel (read-only, ADMIN_EMAILS only; everyone else gets 404).
+app.include_router(admin.router)
 
 
 # ---------------------------------------------------------------- schemas
@@ -205,8 +218,11 @@ async def serve_itinerary(itinerary_id: str) -> Response:
 
     path = get_itinerary_path(itinerary_id)
     if path is not None:
+        # Named for its trip ("Singapore-itinerary.pdf"), not always Dubai.
+        from itinerary_store import get_itinerary_filename
+
         return FileResponse(
-            path, media_type="application/pdf", filename="Dubai-itinerary.pdf"
+            path, media_type="application/pdf", filename=get_itinerary_filename(itinerary_id)
         )
     # The API's disk is replaced on every deploy; the copy kept with the
     # chat is what makes an older PDF still download.
@@ -264,7 +280,7 @@ async def logout(response: Response) -> None:
 
 @app.get("/auth/me")
 async def me(user: dict = Depends(auth.current_user)) -> dict[str, Any]:
-    return {"user": _user_out(user)}
+    return {"user": {**_user_out(user), "is_admin": admin.is_admin(user)}}
 
 
 @app.get("/me/preferences")
@@ -525,6 +541,7 @@ def _seed_plan_from_history(thread_id: str, messages: list[dict[str, Any]]) -> N
                           if str(l.get("item") or "").startswith("Hotel (")), "")
             seed_plan(thread_id, {
                 "days": days,
+                "destination": card.get("destination") or "",
                 "start_date": card.get("start_date") or (days[0].get("date") if days else ""),
                 "nights": max(0, len(days) - 1),
                 "adults": card.get("adults"),
@@ -570,10 +587,10 @@ _MODE_CONTEXT = {
 _FOLLOW_UPS: dict[str, list[str]] = {
     "tours": ["Show private transfer prices", "Add a hotel for these dates", "Plan my full trip"],
     "hotels": ["Only free cancellation", "Show cheaper hotels", "Add an airport transfer"],
-    "flights": ["Show cheaper flights", "Only non-stop flights", "Find hotels in Dubai"],
-    "restaurants": ["Jain-friendly options", "Restaurants near Burj Khalifa", "Show the menu"],
+    "flights": ["Show cheaper flights", "Only non-stop flights", "Find hotels there"],
+    "restaurants": ["Jain-friendly options", "Only vegetarian places", "Show the menu"],
     "transfers": ["Shared transfer instead", "Add the return transfer", "Find a hotel"],
-    "visa": ["Which documents do I need?", "How long does processing take?", "Find flights to Dubai"],
+    "visa": ["Which documents do I need?", "How long does processing take?", "Find flights there"],
     "packages": ["Show package details", "Compare the top two", "Plan a custom trip"],
 }
 
@@ -622,8 +639,11 @@ async def _stream_turn(
 
     async def run() -> None:
         try:
-            async for event in _turn_events(session, message, mode, regenerate):
-                out.put_nowait(event)
+            with observability.turn_span(
+                session_id=sid, mode=mode, regenerate=regenerate, message=message
+            ):
+                async for event in _turn_events(session, message, mode, regenerate):
+                    out.put_nowait(event)
         except asyncio.CancelledError:
             log.info("turn_cancelled session=%s", sid)
             raise
@@ -775,11 +795,13 @@ async def _turn_events(
             # message ("Recursion limit of 12 reached ... visit docs.langchain")
             # is not something a traveller can act on.
             log.exception("stream_turn_failed: %s", e)
+            observability.turn_failed(e)
             loop.call_soon_threadsafe(queue.put_nowait, ("error", _TURN_FAILED))
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)
 
-    task = loop.run_in_executor(None, _produce)
+    # The worker thread joins this turn's trace (no-op when telemetry is off).
+    task = loop.run_in_executor(None, observability.bind_context(_produce))
 
     # A tool_call segment only appears once the model has DECIDED on a tool,
     # which can take a few seconds. Announce the turn immediately so the client
@@ -804,6 +826,9 @@ async def _turn_events(
 
     reply = normalize_reply(holder.text or "")
     tool_calls = extract_tool_calls(holder.response) or []
+    observability.annotate_turn(
+        tools=[str(c.get("tool_name") or "") for c in tool_calls], reply=reply
+    )
 
     # Option cards (tours / hotels / flights) are built BEFORE the message is
     # saved so they can be stored with it. They used to be emitted after the
@@ -854,6 +879,7 @@ async def _turn_events(
                     plan_out = out
         if plan_out:
             option_groups.insert(0, {"kind": "itinerary", "items": [{
+                "destination": plan_out.get("destination") or "",
                 "start_date": plan_out.get("start_date") or (plan_out["days"][0].get("date")),
                 "days": plan_out.get("days"),
                 "package_lines": plan_out.get("package_lines") or [],
@@ -904,6 +930,18 @@ async def _turn_events(
     saved = repository.add_message(
         str(session["id"]), "assistant", reply, tool_calls, option_groups
     )
+
+    # What was searched, for the admin panel. Best effort: never fails a turn.
+    try:
+        from . import admin_repository
+        from .search_log import search_rows
+
+        admin_repository.add_search_rows(
+            str(session["user_id"]), str(session["id"]), str(saved["id"]),
+            search_rows(tool_calls),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("search_log_write_failed: %s", e)
 
     # Learn durable facts from what the customer actually said, so the next
     # session starts warm. Only fields the agent genuinely reuses -- a bigger

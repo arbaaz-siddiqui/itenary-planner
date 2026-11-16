@@ -436,7 +436,7 @@ def _gap_for(day: DayPlan, start: time, latest: time, length: int) -> time | Non
 def _add_meals(days: list[DayPlan], *, policy: SchedulePolicy, hotel_name: str,
                lunch_on: set[int], blocked_days: set[int], has_departure: bool,
                landed: time | None, serves_dinner: set[str] | None = None) -> None:
-    """Breakfast, lunch and dinner on every day the customer is in Dubai.
+    """Breakfast, lunch and dinner on every day the customer is at the destination.
 
     Breakfast is at the hotel; lunch and dinner name the activity they follow
     (`near`) so the caller can pick a venue close to it, and a tour that
@@ -517,6 +517,7 @@ def build_itinerary(
     hotel_checkin_time: Any = None,
     departure_time: Any = None,
     policy: SchedulePolicy | None = None,
+    destination: str = "Dubai",
 ) -> dict[str, Any]:
     """Lay tours across the trip, respecting slots and the post-landing rest.
 
@@ -545,7 +546,7 @@ def build_itinerary(
     if landed is not None:
         days[0].label = "Arrival"
         days[0].items.append(
-            ScheduledItem(start=_fmt(landed), end="", title="Arrive in Dubai", kind="flight")
+            ScheduledItem(start=_fmt(landed), end="", title=f"Arrive in {destination or 'Dubai'}", kind="flight")
         )
         at_hotel = _to_time(hotel_checkin_time)
         hotel_carry = 0

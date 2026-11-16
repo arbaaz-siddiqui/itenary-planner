@@ -116,8 +116,14 @@ const Bubble = memo(function Bubble({
   onRegenerate,
   onEdit,
   onRate,
+  readOnly = false,
+  extra,
 }: {
   m: Message;
+  /** Admin transcript: no edit, retry, regenerate, rating or suggestion chips. */
+  readOnly?: boolean;
+  /** Rendered under the bubble (the admin transcript's tool calls). */
+  extra?: React.ReactNode;
   /** Live segments for the streaming bubble only. Persisted messages render
    *  from stored `content`, which is what keeps reload working unchanged. */
   segments?: Segment[];
@@ -185,7 +191,7 @@ const Bubble = memo(function Bubble({
   if (m.role === "user") {
     return (
       <div className="group flex items-start justify-end gap-1">
-        {isLastUser && !busy && (
+        {isLastUser && !busy && !readOnly && (
           <button
             type="button"
             onClick={() => onEdit(m.content)}
@@ -277,7 +283,7 @@ const Bubble = memo(function Bubble({
         {m.error && (
           <div role="alert" className="mt-3 flex items-center gap-3 rounded-xl border border-brand-red/30 bg-brand-red/10 px-3.5 py-2.5 text-sm text-fg">
             <span className="min-w-0 flex-1">{m.error}</span>
-            {isLastAssistant && !busy && (
+            {isLastAssistant && !busy && !readOnly && (
               <button
                 type="button"
                 onClick={onRegenerate}
@@ -290,11 +296,22 @@ const Bubble = memo(function Bubble({
           </div>
         )}
 
-        {!m.pending && m.content && (
+        {!m.pending && m.content && !readOnly && (
           <AssistantActions m={m} canRegenerate={isLastAssistant && !busy} onRegenerate={onRegenerate} onRate={onRate} />
         )}
+        {readOnly && m.feedback && (
+          <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-fg-muted">
+            {m.feedback === "up" ? (
+              <ThumbsUp size={13} className="text-success" aria-hidden />
+            ) : (
+              <ThumbsDown size={13} className="text-brand-red" aria-hidden />
+            )}
+            Customer rated this reply {m.feedback === "up" ? "good" : "bad"}
+          </p>
+        )}
+        {extra}
 
-        {isLastAssistant && !busy && suggestions.length > 0 && (
+        {isLastAssistant && !busy && !readOnly && suggestions.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2" aria-label="Suggested next steps">
             {suggestions.map((s) => (
               <button
@@ -323,8 +340,14 @@ export function MessageList({
   onRegenerate,
   onEdit,
   onRate,
+  readOnly = false,
+  extraFor,
 }: {
   messages: Message[];
+  /** Admin transcript: a read-only view of a saved chat. */
+  readOnly?: boolean;
+  /** Something to show under a message (admin: its tool calls). */
+  extraFor?: (m: Message) => React.ReactNode;
   /** Id of the bubble currently streaming, if any. */
   liveId?: string | null;
   segments?: Segment[];
@@ -353,6 +376,8 @@ export function MessageList({
             onRegenerate={onRegenerate}
             onEdit={onEdit}
             onRate={onRate}
+            readOnly={readOnly}
+            extra={extraFor?.(m)}
           />
         );
       })}

@@ -1,18 +1,29 @@
-"""reference_data_loader — Loaders for cities + hotels JSON.
+"""reference_data_loader — Loaders for cities, airports and hotels JSON.
 
-Pure I/O over the static files in reference_data/. Cached after first
-read so we don't hit disk on every lookup.
+Mostly pure I/O over the static files in reference_data/, cached after first
+read. One exception: `resolve_city` falls back to the supplier's public
+autocomplete for a city that is not in cities.json (the supplier sells
+worldwide; cities.json only curates Dubai and the Indian origins). That call
+is imported lazily, like geo.py does, and can be switched off with
+CITY_SUPPLIER_LOOKUP=0 (the test suite does).
 """
 
 from __future__ import annotations
 
 import difflib
 import json
+import logging
+import os
+import re
+import threading
+import unicodedata
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 REFERENCE_DATA_ROOT = Path(__file__).resolve().parent / "reference_data"
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -40,10 +51,16 @@ def _iata_index() -> dict[str, dict[str, Any]]:
     return idx
 
 
-def resolve_city(name: str) -> dict[str, Any] | None:
+def _city_key(name: str) -> str:
+    return name.strip().lower().split(",")[0].strip()
+
+
+def _resolve_local(name: str) -> dict[str, Any] | None:
+    """cities.json only: exact key, a raw IATA code of a known city, or a close
+    spelling of a long name."""
     if not name:
         return None
-    key = name.strip().lower().split(",")[0].strip()
+    key = _city_key(name)
     hit = (_load_cities().get("cities") or {}).get(key)
     if hit:
         return hit
@@ -62,6 +79,181 @@ def resolve_city(name: str) -> dict[str, Any] | None:
         if close:
             return (_load_cities().get("cities") or {}).get(close[0])
     return None
+
+
+def resolve_city(name: str, *, supplier: bool = True) -> dict[str, Any] | None:
+    """A city record: {name, city_id, country_id, country_name, lat, lng, iata}.
+
+    cities.json first (curated, offline). Anything else the supplier sells is
+    found through its public autocomplete (`supplier_city`), so London,
+    Bangkok or Bali resolve with the supplier's own ids. A curated city with no
+    supplier id (the Indian origins) gets the supplier's ids added.
+    `supplier=False` keeps the lookup offline: use it when scanning arbitrary
+    words, which must never cost a network call.
+    """
+    if not name or not name.strip():
+        return None
+    local = _resolve_local(name)
+    if local is not None:
+        if local.get("city_id") or not supplier:
+            return local
+        found = supplier_city(str(local.get("name") or name))
+        if found and found.get("city_id"):
+            return {**local, "city_id": found["city_id"], "country_id": found["country_id"],
+                    "country_name": local.get("country_name") or found.get("country_name")}
+        return local
+    if not supplier:
+        return None
+    token = name.strip().upper()
+    if len(token) == 3 and token.isalpha() and token in _load_airports().get("airports", {}):
+        rec = airport(token) or {}
+        found = supplier_city(str(rec.get("city") or ""))
+        return {**found, "iata": token} if found else None
+    return supplier_city(name)
+
+
+def _plain(text: str) -> str:
+    """Lower case, accents and punctuation dropped: "Malé" -> "male"."""
+    text = unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode()
+    return " ".join(re.sub(r"[^a-z0-9 ]+", " ", text.lower()).split())
+
+
+def supplier_lookup_enabled() -> bool:
+    return os.environ.get("CITY_SUPPLIER_LOOKUP", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+_SUPPLIER_CITIES: dict[str, dict[str, Any] | None] = {}
+_SUPPLIER_LOCK = threading.Lock()
+# The services whose autocomplete lists cities; hotels covers the most places,
+# tours lists the cities that only sell tours (Bali). Same city id space.
+_CITY_SERVICES = ("hotels", "tours")
+
+
+def supplier_city(name: str) -> dict[str, Any] | None:
+    """The supplier's own record of a city, from its public autocomplete.
+
+    Only a row of type city whose name IS the query (or a close spelling of a
+    long one) counts, so a word like "desert" never becomes "Palm Desert".
+    Answers are cached for the process; a failed call is not, so a supplier
+    blip is retried next time.
+    """
+    key = _plain(_city_key(name or ""))
+    if len(key) < 3 or not supplier_lookup_enabled():
+        return None
+    with _SUPPLIER_LOCK:
+        if key in _SUPPLIER_CITIES:
+            return _SUPPLIER_CITIES[key]
+    try:
+        from booking_api.endpoints import call_entity_search
+    except Exception:  # noqa: BLE001 - no client means no supplier answer
+        return None
+    found: dict[str, Any] | None = None
+    complete = True
+    for service in _CITY_SERVICES:
+        try:
+            raw = call_entity_search(service=service, query=_city_key(name), size=10) or {}
+        except Exception as e:  # noqa: BLE001
+            logger.warning("supplier city lookup failed q=%r: %s", name, e)
+            complete = False
+            continue
+        if raw.get("error"):
+            complete = False
+        found = _pick_city_row(raw.get("data") or [], key)
+        if found:
+            break
+    if found or complete:
+        with _SUPPLIER_LOCK:
+            _SUPPLIER_CITIES[key] = found
+            while len(_SUPPLIER_CITIES) > 2000:
+                _SUPPLIER_CITIES.pop(next(iter(_SUPPLIER_CITIES)))
+    return found
+
+
+def _pick_city_row(rows: list[Any], key: str) -> dict[str, Any] | None:
+    cities = [r for r in rows if isinstance(r, dict) and str(r.get("type") or "").lower() == "city"
+              and r.get("cityId")]
+
+    def named(r: dict[str, Any]) -> str:
+        return _plain(str(r.get("name_text") or r.get("city") or ""))
+
+    row = next((r for r in cities if named(r) == key), None)
+    if row is None and len(key) >= FUZZY_MIN_LEN:
+        row = next((r for r in cities if close_spelling(named(r), key)), None)
+    if row is None:
+        return None
+    lat, lng = _num(row.get("latitude")), _num(row.get("longitude"))
+    name = str(row.get("name_text") or row.get("city") or "").strip()
+    rec: dict[str, Any] = {
+        "name": name,
+        "city_id": int(row["cityId"]),
+        "country_id": int(row["countryId"]) if row.get("countryId") else None,
+        "country_name": str(row.get("country") or "").strip(),
+        "lat": lat,
+        "lng": lng,
+        "source": "supplier",
+    }
+    main = city_airport(name, lat=lat, lng=lng)
+    if main:
+        rec["iata"] = main["iata"]
+    return rec
+
+
+def _num(value: Any) -> float | None:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if f else None
+
+
+# ------------------------------------------------------------------ airports
+@lru_cache(maxsize=1)
+def _load_airports() -> dict[str, Any]:
+    """reference_data/airports.json, built by scripts/build_airports.py."""
+    path = REFERENCE_DATA_ROOT / "airports.json"
+    if not path.exists():
+        return {"airports": {}, "cities": {}, "countries": {}}
+    with path.open(encoding="utf-8") as f:
+        return json.load(f)  # type: ignore[no-any-return]
+
+
+def airport(code: str) -> dict[str, Any] | None:
+    """{iata, name, city, country, country_code, lat, lng, size} for a code."""
+    code = (code or "").strip().upper()
+    data = _load_airports()
+    rec = (data.get("airports") or {}).get(code)
+    if not rec:
+        return None
+    return {
+        "iata": code,
+        "name": rec.get("n"),
+        "city": rec.get("c"),
+        "country": (data.get("countries") or {}).get(rec.get("cc"), rec.get("cc")),
+        "country_code": rec.get("cc"),
+        "lat": rec.get("lat"),
+        "lng": rec.get("lng"),
+        "size": "large" if rec.get("s") == 2 else "medium",
+    }
+
+
+def city_airport(name: str, *, lat: float | None = None, lng: float | None = None) -> dict[str, Any] | None:
+    """The main airport of a city: by name from airports.json, else the
+    nearest large (then medium) airport within reach of the city's position."""
+    key = _plain(_city_key(name or ""))
+    codes = (_load_airports().get("cities") or {}).get(key) or []
+    if codes:
+        return airport(codes[0])
+    if lat is None or lng is None:
+        return None
+    best: tuple[float, dict[str, Any]] | None = None
+    for code, rec in (_load_airports().get("airports") or {}).items():
+        d = _km(lat, lng, float(rec["lat"]), float(rec["lng"]))
+        # A medium airport must be much closer to win over a large one.
+        limit = 120.0 if rec.get("s") == 2 else 60.0
+        score = d if rec.get("s") == 2 else d * 2
+        if d <= limit and (best is None or score < best[0]):
+            best = (score, {"code": code})
+    return airport(best[1]["code"]) if best else None
 
 
 # Thresholds for misspelt place names: "ahemdabad" -> "ahmedabad" scores 0.89.
@@ -85,8 +277,25 @@ def iter_cities() -> list[dict[str, Any]]:
 
 
 def resolve_iata(name: str) -> str | None:
-    city = resolve_city(name)
-    return city.get("iata") if city else None
+    """The airport code to fly to or from a place.
+
+    cities.json first (Dubai and the Indian origins keep their codes), then a
+    raw 3-letter airport code, then the city's main airport in airports.json,
+    then the supplier's record of the city and the airport nearest to it.
+    """
+    if not name or not name.strip():
+        return None
+    city = _resolve_local(name)
+    if city and city.get("iata"):
+        return str(city["iata"])
+    token = name.strip().upper()
+    if len(token) == 3 and token.isalpha() and airport(token):
+        return token
+    main = city_airport(name)
+    if main:
+        return str(main["iata"])
+    found = resolve_city(name)
+    return str(found["iata"]) if found and found.get("iata") else None
 
 
 def resolve_country_id(name: str) -> int | None:

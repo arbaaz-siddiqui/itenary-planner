@@ -307,7 +307,7 @@ def _impl(
             "Otherwise: pass best_match_id as hotel_ids=[id] in get_hotel_info, "
             "or best_match_name as hotel_name in search_hotels. "
             "Also capture best_match['latitude'] and best_match['longitude'] — "
-            "you will need these as hotel_lat/hotel_lng for search_airport_transfer_dubai."
+            "you will need these as hotel_lat/hotel_lng for search_airport_transfer."
             if svc == "hotels" else
             scoped_note if not_found else
             _NEXT_STEP.get(svc, _DEFAULT_NEXT_STEP)

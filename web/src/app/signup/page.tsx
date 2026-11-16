@@ -87,7 +87,7 @@ export default function SignupPage() {
   return (
     <AuthShell
       title="Create your account"
-      subtitle="Plan flights, hotels, tours and visas for Dubai in one conversation."
+      subtitle="Plan flights, hotels, tours and visas for your next trip in one conversation."
       footer={
         <>
           Already have an account?{" "}

@@ -18,6 +18,8 @@ export interface CardActions {
   toggleSave: (card: CardRef) => void;
   /** Book / enquire: hands the selection to the agent as the next message. */
   book: (card: CardRef) => void;
+  /** Admin transcripts: cards are shown as the customer saw them, without save or book. */
+  readOnly?: boolean;
 }
 
 const noop: CardActions = {

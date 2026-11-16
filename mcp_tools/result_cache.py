@@ -37,7 +37,7 @@ _TOOL_TTL = {
     # volatile (availability + prices) — short TTL, re-check often
     "search_hotels": _VOLATILE_TTL,
     "search_flights": _VOLATILE_TTL,
-    "search_airport_transfer_dubai": _VOLATILE_TTL,
+    "search_airport_transfer": _VOLATILE_TTL,
     "search_tours": _VOLATILE_TTL,
     "search_restaurants": _VOLATILE_TTL,
     "list_packages": _VOLATILE_TTL,

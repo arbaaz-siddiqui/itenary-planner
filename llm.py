@@ -14,6 +14,7 @@ import httpx
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
+import observability
 from core import InvalidSettingError, MissingApiKey
 from settings import get_llm_settings
 
@@ -38,6 +39,7 @@ def build_anthropic_llm(*, temperature: float = 0.3, max_tokens: int = 1500) -> 
         max_tokens_to_sample=max_tokens,
         timeout=120,
         stop=None,
+        callbacks=observability.llm_callbacks("anthropic"),
     )
 
 
@@ -81,6 +83,8 @@ def build_openrouter_llm(
         # A dropped connection killed the turn outright; two retries ride out
         # the transient drops we measured (19 in one long run).
         max_retries=2,
+        # A span per model call (model, tokens, latency); None while telemetry is off.
+        callbacks=observability.llm_callbacks("openrouter"),
         **({"extra_body": extra_body} if extra_body else {}),
     )
 
@@ -103,6 +107,7 @@ def build_selfhosted_llm(*, temperature: float = 0.3, max_tokens: int = 1500) ->
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=180,
+        callbacks=observability.llm_callbacks("selfhosted"),
     )
 
 
