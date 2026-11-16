@@ -13,6 +13,7 @@ from core import TripPlannerError
 from mcp_tools.server import mcp
 from mcp_tools.tour_pricing import party_label
 from parsers import parse_tour_response
+from mcp_tools.city_support import nothing_in_city, unknown_city
 from reference_data_loader import resolve_city
 
 logger = logging.getLogger(__name__)
@@ -337,26 +338,10 @@ def _impl(
 
     try:
         city = resolve_city(destination_city)
-        if city is None or not city.get("city_id"):
-            return {
-                "error": True,
-                "message": (
-                    f"We do not sell tours in {destination_city!r} — the "
-                    f"supplier's inventory for this service is Dubai only."
-                ),
-                "error_type": "UnsupportedRoute",
-                # A bare "Unsupported destination" got paraphrased to the
-                # customer as "I don't have that in my database", which reads
-                # as OUR system being broken rather than us not selling it.
-                "agent_instructions": (
-                    f"Say plainly that we do not offer tours in that city — we "
-                    f"cover Dubai for this service. Never say the data is "
-                    f"missing, unavailable, or not in your database, and never "
-                    f"imply a technical problem. Offer the Dubai equivalent "
-                    f"instead, and do not ask the customer for more details "
-                    f"first — the city is the blocker, not their input."
-                ),
-            }
+        if city is None:
+            return unknown_city(destination_city, "tours")
+        if not city.get("city_id") or not city.get("country_id"):
+            return nothing_in_city(str(city.get("name") or destination_city), "tours")
         list_raw = call_tour_search(
             country_id=int(city["country_id"]),
             city_id=int(city["city_id"]),

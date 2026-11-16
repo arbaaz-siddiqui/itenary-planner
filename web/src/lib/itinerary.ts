@@ -32,6 +32,8 @@ export interface CostLine {
 }
 
 export interface Itinerary {
+  /** The trip's city ("Singapore"); "" on cards saved before it was sent. */
+  destination: string;
   startDate: string;
   endDate: string;
   nights: number;
@@ -110,6 +112,7 @@ export function toItinerary(raw: OptionItem | null | undefined): Itinerary | nul
 
   const startDate = str(raw, "start_date") || parsed[0]?.date || "";
   return {
+    destination: str(raw, "destination"),
     startDate,
     endDate: parsed[parsed.length - 1]?.date ?? startDate,
     nights: Math.max(0, parsed.length - 1),
@@ -120,8 +123,16 @@ export function toItinerary(raw: OptionItem | null | undefined): Itinerary | nul
     notes: (Array.isArray(raw?.notes) ? (raw!.notes as unknown[]) : [])
       .filter((n): n is string => typeof n === "string" && n.trim() !== "")
       // Written for the agent; the card says it to the customer.
-      .map((n) => (/visa/i.test(n) ? "The UAE visa is needed; its price will be added to the total." : n)),
+      .map(visaNote),
   };
+}
+
+/** The agent's unpriced-visa note, said to the customer: "The Singapore visa
+ * is needed; its price will be added to the total." */
+export function visaNote(note: string): string {
+  if (!/visa/i.test(note)) return note;
+  const country = /^The (.+?) visa\b/i.exec(note.trim())?.[1];
+  return `The ${country ? `${country} ` : ""}visa is needed; its price will be added to the total.`;
 }
 
 /** "Fri, 6 Nov" for a yyyy-mm-dd date. */

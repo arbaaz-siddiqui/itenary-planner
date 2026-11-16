@@ -142,7 +142,7 @@ class TestPerSurfaceTools:
         from agent_tools import tools_for_surface
 
         core = {"search_flights", "search_hotels", "search_tours",
-                "search_airport_transfer_dubai", "get_visa_info"}
+                "search_airport_transfer", "get_visa_info"}
         for surface in ("streamlit", "whatsapp", "voice", "unknown"):
             names = {t.name for t in tools_for_surface(surface)}
             assert core <= names, f"{surface} lost a core search tool"

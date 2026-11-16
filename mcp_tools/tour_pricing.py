@@ -265,12 +265,30 @@ def option_policies(tour_id: int, option: dict[str, Any]) -> dict[str, str]:
     return {k: v for k, v in out.items() if v}
 
 
-def tour_image_url(tour_id: int, travel_date: str) -> str:
+def _tour_city(tour_id: int, tour_name: str) -> dict[str, Any] | None:
+    """The city a tour is sold in, from the public autocomplete row whose id is
+    this tour's. None when the name does not find it."""
+    if not tour_name:
+        return None
+    from booking_api.endpoints import call_entity_search
+
+    try:
+        rows = (call_entity_search(service="tours", query=tour_name, size=10) or {}).get("data") or []
+    except Exception:  # noqa: BLE001
+        return None
+    for r in rows:
+        if isinstance(r, dict) and str(r.get("location_id")) == str(tour_id) and r.get("cityId"):
+            return {"city_id": int(r["cityId"]), "country_id": int(r.get("countryId") or 0)}
+    return None
+
+
+def tour_image_url(tour_id: int, travel_date: str, tour_name: str = "") -> str:
     """The tour's own image, for its variants to share.
 
     Variant rows carry no image of their own, so without this every variant
     card renders an empty placeholder. Cached at the static tier: a photo does
-    not change with the date or the party size.
+    not change with the date or the party size. Dubai's catalogue first; a
+    tour sold elsewhere is found in its own city's catalogue through its name.
     """
     from booking_api.endpoints import call_tour_search
     from parsers import DEFAULT_IMAGE_BASE_URL, _resolve_image_url
@@ -278,8 +296,7 @@ def tour_image_url(tour_id: int, travel_date: str) -> str:
 
     from .result_cache import _STATIC_TTL, cached_or_call
 
-    def _produce() -> dict[str, Any]:
-        city = resolve_city("Dubai") or {}
+    def _produce(city: dict[str, Any]) -> dict[str, Any]:
         if not city.get("city_id"):
             return {"images": {}}
         listed = (
@@ -301,8 +318,19 @@ def tour_image_url(tour_id: int, travel_date: str) -> str:
         return {"images": images}
 
     try:
+        dubai = resolve_city("Dubai", supplier=False) or {}
         got = cached_or_call(
-            "tour_images", {"travel_date": travel_date}, _produce, ttl=_STATIC_TTL
+            "tour_images", {"travel_date": travel_date}, lambda: _produce(dubai), ttl=_STATIC_TTL
+        )
+        url = str((got.get("images") or {}).get(str(tour_id)) or "")
+        if url or not tour_name:
+            return url
+        other = _tour_city(tour_id, tour_name)
+        if not other or other["city_id"] == dubai.get("city_id"):
+            return ""
+        got = cached_or_call(
+            "tour_images", {"travel_date": travel_date, "city_id": other["city_id"]},
+            lambda: _produce(other), ttl=_STATIC_TTL,
         )
         return str((got.get("images") or {}).get(str(tour_id)) or "")
     except Exception:
@@ -474,7 +502,7 @@ def tour_options(
         return row
 
     with cf.ThreadPoolExecutor(max_workers=max(1, len(listed))) as ex:
-        image = ex.submit(tour_image_url, tour_id, travel_date)
+        image = ex.submit(tour_image_url, tour_id, travel_date, tour_name)
         options = list(ex.map(price, listed))
 
     # Variants share the tour's picture; the cards read it per row.

@@ -148,7 +148,7 @@ _CRITICAL_ARGS = {
     "search_hotels": {"destination_city", "check_in", "check_out"},
     "search_tours": {"destination_city", "travel_date"},
     "get_hotel_description": {"hotel_ids"},
-    "search_airport_transfer_dubai": {"arrival_date"},
+    "search_airport_transfer": {"arrival_date"},
 }
 
 

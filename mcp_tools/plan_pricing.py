@@ -13,6 +13,11 @@ actually pays for and where they eat:
 - a venue for each lunch and dinner: one of our restaurants near the activity
   before it and open at that hour, else the hotel's restaurant.
 
+Every function takes the trip's `city` (default "Dubai"). The attraction and
+area tables (dubai_attractions.json, dubai_areas.json) are Dubai's own; other
+cities place meals from the hotel's position and the supplier's restaurants
+there, if it sells any.
+
 Every figure comes from a supplier call; nothing is estimated. A part that
 cannot be priced is returned without a price, never with a guess.
 """
@@ -48,8 +53,17 @@ def _area_centres() -> dict[str, tuple[float, float]]:
     return {str(a["area"]).lower(): (float(a["lat"]), float(a["lng"])) for a in areas}
 
 
-def place_of(activity: str) -> dict[str, Any] | None:
-    """Where an activity happens: {area, lat, lng, remote}, or None."""
+def _is_dubai(city: str) -> bool:
+    return (city or "Dubai").strip().lower() == "dubai"
+
+
+def place_of(activity: str, city: str = "Dubai") -> dict[str, Any] | None:
+    """Where an activity happens: {area, lat, lng, remote}, or None.
+
+    Only Dubai has an attraction table; elsewhere this answers None and the
+    caller falls back to the hotel's position."""
+    if not _is_dubai(city):
+        return None
     name = (activity or "").lower()
     for entry in _attractions():
         if any(m in name for m in entry.get("match") or []):
@@ -95,11 +109,11 @@ def open_at(opening_hours_display: str, hhmm: str) -> bool:
     return False
 
 
-def _restaurants(date: str, adults: int) -> list[dict[str, Any]]:
+def _restaurants(date: str, adults: int, city: str = "Dubai") -> list[dict[str, Any]]:
     try:
         from mcp_tools.search_restaurants import _impl as search
 
-        return list((search(destination_city="Dubai", search_date=date, adults=adults,
+        return list((search(destination_city=city or "Dubai", search_date=date, adults=adults,
                             max_results=50) or {}).get("options") or [])
     except Exception as e:
         log.warning("plan_restaurants_failed: %s", e)
@@ -107,7 +121,8 @@ def _restaurants(date: str, adults: int) -> list[dict[str, Any]]:
 
 
 def meal_venue(*, near: str, at: str, date: str, adults: int, hotel_name: str,
-               hotel_lat: float | None = None, hotel_lng: float | None = None) -> dict[str, Any]:
+               hotel_lat: float | None = None, hotel_lng: float | None = None,
+               city: str = "Dubai") -> dict[str, Any]:
     """Where a lunch or dinner is eaten.
 
     One of our restaurants within NEAR_KM of the activity before it (or of the
@@ -115,7 +130,7 @@ def meal_venue(*, near: str, at: str, date: str, adults: int, hotel_name: str,
     hotel's restaurant. Restaurant prices are a per-person starting price, so
     they are shown as such and kept out of the trip total.
     """
-    place = place_of(near) if near else None
+    place = place_of(near, city) if near else None
     if place and place.get("remote"):
         return {"venue": f"at {near}", "kind": "on_site",
                 "note": "Food is available on site"}
@@ -123,7 +138,7 @@ def meal_venue(*, near: str, at: str, date: str, adults: int, hotel_name: str,
         (hotel_lat, hotel_lng) if hotel_lat is not None and hotel_lng is not None else None)
     best = None
     if origin is not None:
-        for r in _restaurants(date, adults):
+        for r in _restaurants(date, adults, city):
             lat, lng = r.get("latitude"), r.get("longitude")
             if lat is None or lng is None or not open_at(str(r.get("opening_hours_display") or ""), at):
                 continue
@@ -259,20 +274,21 @@ def _area_names(*areas: str) -> list[str]:
 
 
 def airport_transfer(*, direction: str, date: str, adults: int, hotel_area: str,
-                     hotel_district: str = "") -> dict[str, Any] | None:
+                     hotel_district: str = "", city: str = "Dubai") -> dict[str, Any] | None:
     """GujjuTours' airport pickup or drop-off for the hotel's zone, priced.
 
     `direction` is "pickup" or "dropoff". The zone is the option whose
     description lists the hotel's area (Zone 1: Deira / Bur Dubai / ...); the
     vehicle is the smallest that seats the party. Priced per vehicle, as the
-    website sells it. None when no zone lists the area.
+    website sells it. None when no zone lists the area. Outside Dubai there is
+    no zone table: an option that names no zone at all fits any hotel.
     """
     from mcp_tools.get_tour_options import _cached
     from mcp_tools.search_tours import _impl as search_tours
 
     want = "pickup" if direction == "pickup" else "dropoff"
     try:
-        found = search_tours(destination_city="Dubai", travel_date=date, adults=max(1, adults),
+        found = search_tours(destination_city=city or "Dubai", travel_date=date, adults=max(1, adults),
                              query=f"Airport {'Pickup' if want == 'pickup' else 'Dropoff'}")
     except Exception as e:
         log.warning("plan_airport_search_failed: %s", e)
@@ -298,7 +314,10 @@ def airport_transfer(*, direction: str, date: str, adults: int, hotel_area: str,
 
     def in_zone(o: dict[str, Any]) -> bool:
         text = texts.get(str(o["option_id"]), "")
-        return any(re.search(r"\b" + re.escape(n) + r"\b", text) for n in names)
+        if any(re.search(r"\b" + re.escape(n) + r"\b", text) for n in names):
+            return True
+        # Outside Dubai a single-zone airport transfer lists no areas.
+        return not _is_dubai(city) and "zone" not in text and "zone" not in str(o.get("name") or "").lower()
 
     def seats(o: dict[str, Any]) -> int:
         m = _SEATS.search(str(o.get("name") or ""))

@@ -43,6 +43,18 @@ def _hermetic_fx(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _offline_city_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """resolve_city falls back to the supplier's autocomplete (and the visa
+    tool to its country table) for any city not in cities.json. Tests stay
+    offline: a test that wants the supplier path sets CITY_SUPPLIER_LOOKUP=1
+    and mocks the call."""
+    monkeypatch.setenv("CITY_SUPPLIER_LOOKUP", "0")
+    import reference_data_loader
+
+    reference_data_loader._SUPPLIER_CITIES.clear()
+
+
+@pytest.fixture(autouse=True)
 def _clear_settings_caches() -> None:
     """Make sure @lru_cache'd settings don't leak between tests."""
     from settings import clear_all_caches

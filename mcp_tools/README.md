@@ -10,7 +10,7 @@ call `booking_api` → parse via `parsers.py` → return dict.
 | `search_flights.py` | `search_flights` | Round-trip or one-way flight search with IATA-based destination filter. |
 | `search_hotels.py` | `search_hotels` | Hotel availability with per-room cancellation and pricing. |
 | `search_tours.py` | `search_tours` | Dubai tour/activity list with rates. |
-| `search_transfers.py` | `search_airport_transfer_dubai` | Point-to-point transfers via coordinates. |
+| `search_transfers.py` | `search_airport_transfer` | Point-to-point transfers via coordinates. |
 | `search_restaurants.py` | `search_restaurants` | Restaurant list with cuisine and veg-type filters. |
 | `get_visa_info.py` | `get_visa_info` | UAE visa options for Indian passport holders. |
 | `list_packages.py` | `list_packages` | Pre-built Dubai holiday packages. |

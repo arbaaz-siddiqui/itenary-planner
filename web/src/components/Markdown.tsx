@@ -119,7 +119,12 @@ function reactText(n: React.ReactNode): string {
   return "";
 }
 
-const PRICE = /(₹|INR|AED)\s?[\d,.]+|\$\d[\d,.]*|[\d,.]+\s?(₹|INR|AED)/i;
+// Prices in any currency a trip may quote: rupees first, then the usual
+// foreign ones (AED for Dubai, SGD, THB, GBP, EUR...). The old pattern held
+// literal backspace bytes where word boundaries were meant, so "INR 500" was
+// never read as a price.
+const PRICE =
+  /(₹|INR|AED|USD|EUR|GBP|SGD|THB|MYR|IDR|JPY|AUD|OMR|QAR|SAR|US\$|S\$|[$€£¥฿])\s?\d[\d,.]*|\d[\d,.]*\s?(₹|INR|AED|USD|EUR|GBP|SGD|THB|MYR|IDR|JPY|AUD|OMR|QAR|SAR)\b/i;
 const NUMBER = /^[\s~≈+-]*[\d,.]+\s*(%|h|hrs?|min|mins|km|nights?|days?|pax|adults?)?\s*$/i;
 
 function LabelledRow({ children }: { children?: React.ReactNode }) {
