@@ -44,6 +44,7 @@ def _color_status(sc: int, elapsed_ms: float) -> str:
 import requests
 from requests.exceptions import RequestException, Timeout
 
+import observability
 from core import (
     BookingApiError,
     BookingApiNotFound,
@@ -162,12 +163,31 @@ class BookingApiClient:
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        # One span per supplier call (all retries): endpoint, status, the
+        # supplier's error code, duration. Never the headers (bearer tokens).
+        host = self.base_url.split("://", 1)[-1].split("/", 1)[0]
+        with observability.supplier_span(method, path, host) as call:
+            return self._request(
+                method, path, json=json, params=params, headers=headers, call=call
+            )
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None,
+        params: dict[str, Any] | None,
+        headers: dict[str, str] | None,
+        call: observability.SupplierCall,
+    ) -> dict[str, Any]:
         url = self._url(path)
         attempt = 0
         last_exc: Exception | None = None
 
         while attempt <= self.max_retries:
             attempt += 1
+            call.attempts = attempt
             req_start = time.perf_counter()
             try:
                 # Plainly visible in the terminal so you can TRACE exactly which
@@ -222,6 +242,7 @@ class BookingApiClient:
                 _resp_body = response.json()
             except Exception:  # noqa: BLE001
                 _resp_body = response.text[:20000]
+            call.response(sc, _resp_body)
             record_http_request(
                 method=method,
                 url=url,

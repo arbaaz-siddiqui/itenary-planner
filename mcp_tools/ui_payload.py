@@ -23,6 +23,8 @@ import time
 import uuid
 from typing import Any
 
+import observability
+
 # Kept long enough for the turn that produced them to finish and be saved.
 _TTL_SECS = 3600.0
 _MAX_ENTRIES = 500
@@ -112,9 +114,12 @@ def wrap_tool(tool: Any) -> Any:
     if func is None or getattr(func, "_ui_split", False):
         return tool
 
+    name = str(getattr(tool, "name", "") or getattr(func, "__name__", "tool"))
+
     @functools.wraps(func)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
-        return split(func(*args, **kwargs))
+        # `agent.tool {name}` span + metrics; a plain call while telemetry is off.
+        return split(observability.traced_tool(name, func, args, kwargs))
 
     wrapped._ui_split = True  # type: ignore[attr-defined]
     tool.func = wrapped
