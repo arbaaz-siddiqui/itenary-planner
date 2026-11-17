@@ -40,6 +40,8 @@ const nextConfig: NextConfig = {
         // The generated itinerary PDF. Without this the download link resolved
         // against Next and 404'd.
         { source: "/itinerary/:path*", destination: `${target}/itinerary/:path*` },
+        // Admin panel API (the server answers 404 to anyone not in ADMIN_EMAILS).
+        { source: "/admin-api/:path*", destination: `${target}/admin-api/:path*` },
       ],
       fallback: [],
     };

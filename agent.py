@@ -184,6 +184,10 @@ def load_system_prompt(*, surface: str = "streamlit") -> str:
 # =============================================================================
 # Parallel ToolNode — runs all tool calls in a single LLM response concurrently
 # =============================================================================
+# Tools renamed since chats were saved: old name -> current name.
+_RENAMED_TOOLS = {"search_airport_transfer_dubai": "search_airport_transfer"}
+
+
 class ParallelToolNode(ToolNode):
     """Drop-in replacement for LangGraph's ToolNode that executes all tool calls
     from one AI message in parallel using asyncio.gather.
@@ -203,6 +207,8 @@ class ParallelToolNode(ToolNode):
             # `get_tour_options(tour_id:28488,...)<tool_call|>`. Recover the
             # real tool rather than burning a round-trip on "not found".
             base = re.split(r"[(\{<\s]", tool_name, 1)[0].strip()
+            # A chat saved before a rename still calls the old name.
+            base = _RENAMED_TOOLS.get(base, base)
             t = tools_by_name.get(base)
             if t is None:
                 return ToolMessage(
@@ -303,16 +309,87 @@ def build_react_agent(
     # Surface-scoped: voice has no screen and cannot receive a PDF, WhatsApp has
     # no image cards. Handing a surface tools it cannot use costs schema tokens
     # on every request and gives the model more ways to route wrong.
-    parallel_tools = ParallelToolNode(tools_for_surface(surface))
+    surface_tools = tools_for_surface(surface)
+    parallel_tools = ParallelToolNode(surface_tools)
+    model = _search_first_model(llm, surface_tools)
 
     return create_react_agent(
-        model=llm,
+        model=model,
         tools=parallel_tools,
         prompt=load_system_prompt(surface=surface),
         pre_model_hook=_supersede_earlier_searches,
         post_model_hook=_split_concatenated_args,
         checkpointer=checkpointer,
     )
+
+
+#: What a customer asks to be searched, and the search tool each ask needs.
+#: With a date in the same message, the turn must start with one of those
+#: tools (see _search_first_model).
+_SEARCH_ASKS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\b(tours?|activit(?:y|ies)|things to do|sightseeing|excursions?|attractions?)\b", re.I), "search_tours"),
+    (re.compile(r"\b(flights?|fly|flying|airfares?)\b", re.I), "search_flights"),
+    (re.compile(r"\b(hotels?|stays?|resorts?|apartments?|villas?|hostels?|accommodation)\b", re.I), "search_hotels"),
+    (re.compile(r"\b(visas?)\b", re.I), "get_visa_info"),
+    (re.compile(r"\b(transfers?|pick ?ups?|drop ?offs?|cabs?|taxis?)\b", re.I), "search_airport_transfer"),
+    (re.compile(r"\b(packages?|holiday deals?)\b", re.I), "list_packages"),
+    (re.compile(r"\b(restaurants?|dinner|lunch|places to eat)\b", re.I), "search_restaurants"),
+)
+
+
+def _search_tools_asked(messages: list[Any]) -> list[str]:
+    """The search tools the customer's message asks for, when the turn has just
+    started and the message gives a date; [] otherwise.
+
+    Asked "Show me tours in Bangkok on 12 Dec 2026", the model first wrote a
+    table of invented prices with no search; the unsourced-price guard then
+    re-asked it, which cost a second model call (about 7 s) and showed the
+    made-up table until it was replaced. Forced with every search tool on
+    offer, it opened a tour search with list_packages, so each ask maps to
+    its own tool.
+    """
+    if not messages or _message_role(messages[-1]) not in {"human", "user"}:
+        return []
+    from rules import _DATE_WORDS
+
+    said = _customer_part(_message_content(messages[-1]) or "")
+    if not said or not _DATE_WORDS.search(said):
+        return []
+    return [tool for pattern, tool in _SEARCH_ASKS if pattern.search(said)]
+
+
+def _must_search_first(messages: list[Any]) -> bool:
+    """The turn must open with a search (see _search_tools_asked)."""
+    return bool(_search_tools_asked(messages))
+
+
+def _search_first_model(llm: Any, tools: list[Any]) -> Any:
+    """The chat model for each step: on the first step of a turn that asks for a
+    dated search, one that must call a search the customer asked for; the usual
+    one otherwise. Falls back to the plain model when the provider cannot force
+    a tool.
+    """
+    bound = llm.bind_tools(tools)
+    by_name = {getattr(t, "name", ""): t for t in tools}
+    forced_cache: dict[tuple[str, ...], Any] = {}
+
+    def forced_for(names: tuple[str, ...]) -> Any:
+        if names not in forced_cache:
+            chosen = [by_name[n] for n in names if n in by_name]
+            try:
+                forced_cache[names] = (
+                    llm.bind_tools(chosen, tool_choice="required") if chosen else bound
+                )
+            except Exception:  # noqa: BLE001 - provider without tool_choice: never force
+                forced_cache[names] = bound
+        return forced_cache[names]
+
+    def pick(state: Any, runtime: Any = None) -> Any:
+        msgs = state.get("messages") if isinstance(state, dict) else getattr(state, "messages", None)
+        names = tuple(_search_tools_asked(list(msgs or [])))
+        return forced_for(names) if names else bound
+
+    return pick
 
 
 #: Searches whose earlier results the model must not reuse once the customer
@@ -1322,6 +1399,14 @@ def invoke_and_log(
         if _final_reply(retry) != before:
             _save_final_reply(agent, config, retry)
         response = retry
+    visa_retry = _recheck_visa_timing(agent, config, _this_turn(list(response.get("messages") or [])),
+                                      thread_id=thread_id)
+    if visa_retry is not None:
+        before = _final_reply(visa_retry)
+        _apply_reply_guards(visa_retry)
+        if _final_reply(visa_retry) != before:
+            _save_final_reply(agent, config, visa_retry)
+        response = visa_retry
     _guard_empty_turn(response, surface=surface, thread_id=thread_id)
     return response
 
@@ -1387,6 +1472,55 @@ def _ensure_visa_party_total(response: dict[str, Any]) -> None:
 _VISA_GUARANTEE = re.compile(
     r"\b(definitely|certainly|surely|guarantee[ds]?|no problem|for sure)\b", re.IGNORECASE
 )
+
+
+_VISA_TIMING_ASK = re.compile(
+    r"\b(ready|in time|on time|enough time|how long|processing|process(ed)?|before (my|our|the) (flight|travel|trip))\b",
+    re.IGNORECASE,
+)
+
+_VISA_TIMING_MARKER = (
+    "[system] The customer asked whether the visa will be ready for a travel "
+    "date. Call get_visa_info now with that travel date and answer only from "
+    "its timeline. Never promise the visa will be ready or approved."
+)
+
+
+def _visa_timing_unchecked(turn: list[Any]) -> bool:
+    """This turn answered a visa-timing question without looking the date up.
+
+    Asked on 18 Oct "my flight is on 22 oct, will the visa be ready in time?",
+    the model answered from the earlier 6 Nov lookup: "Yes, it will be ready
+    in time ... plenty of time". Four days out, Normal processing may not
+    finish. The timing check only runs on a turn that called get_visa_info.
+    """
+    from rules import _LATEST_TEXT
+
+    said = _LATEST_TEXT.get()
+    if not said or "visa" not in said or not _VISA_TIMING_ASK.search(said):
+        return False
+    return not any(
+        str(c.get("tool_name") or c.get("name") or "") == "get_visa_info"
+        for c in extract_tool_calls({"messages": turn})
+    )
+
+
+def _recheck_visa_timing(agent: Any, config: dict[str, Any], turn: list[Any],
+                         *, thread_id: str) -> dict[str, Any] | None:
+    """Re-run a visa-timing answer with the lookup it skipped; None if fine."""
+    if not _visa_timing_unchecked(turn):
+        return None
+    logging.getLogger("agent.turn").warning(
+        "visa timing answered without a lookup - re-asking thread=%s", thread_id)
+    try:
+        retry = agent.invoke({"messages": [{"role": "user", "content": _VISA_TIMING_MARKER}]}, config)
+    except Exception:  # noqa: BLE001 - keep the first answer, guards still apply
+        return None
+    fresh = _this_turn(list((retry or {}).get("messages") or []))
+    if not any(str(c.get("tool_name") or "") == "get_visa_info"
+               for c in extract_tool_calls({"messages": fresh})):
+        return None
+    return retry
 
 
 def _enforce_visa_timeline(response: dict[str, Any]) -> None:
@@ -1937,6 +2071,15 @@ def stream_and_log(
         if reply:
             holder.text = reply
 
+    visa_retry = _recheck_visa_timing(agent, config, _this_turn(list(holder.messages)),
+                                      thread_id=thread_id)
+    if visa_retry is not None:
+        fresh = _this_turn(list(visa_retry.get("messages") or []))
+        holder.messages = [*holder.messages, *fresh]
+        reply = _final_reply({"messages": fresh})
+        if reply:
+            holder.text = reply
+
     # Corrections apply here too; the caller sends `holder.text` as the final
     # reply so a corrected answer replaces what streamed.
     last_before = _final_reply(holder.response)
@@ -1965,7 +2108,7 @@ def stream_and_log(
 _TOOL_NAMES_RE = re.compile(
     r"\b(search_flights|search_hotels|search_tours|search_restaurants|get_visa_info|"
     r"list_packages|get_exchange_rate|resolve_party_tool|check_floor_tool|"
-    r"search_airport_transfer_dubai|enumerate_package_details|generate_itinerary_pdf"
+    r"search_airport_transfer(?:_dubai)?|enumerate_package_details|generate_itinerary_pdf"
     r"|get_tour_options|get_tour_timeslots|get_tour_details"
     # Both call shapes leak: name{...} and name(arg:value). A live run emitted
     # `get_tour_options(tour_id:28488,travel_date:<|"|>...)<tool_call|>`.

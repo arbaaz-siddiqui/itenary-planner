@@ -2,13 +2,13 @@
 
 Guide for AI coding agents working in this repository. Read it before changing code. It covers what the product is, how the code is laid out, how a request flows end to end, the UI system, pricing rules, testing, and how branches deploy.
 
-Facts here were checked against the code on `fix/enhance-ui` / `release/2026.10` in October 2026. When something here and the code disagree, the code wins; fix this file in the same change.
+Facts here were checked against the code on `release/2026.10` (October 2026) and `release/2026.11.17` (November 2026; §17). When something here and the code disagree, the code wins; fix this file in the same change.
 
 ---
 
 ## 1. What this is
 
-An AI travel agent for **GujjuTours** (supplier platform: ActivityLinker), focused on Dubai. A customer chats ("3 nights in Dubai for 2 in November") and the agent searches live supplier inventory (flights, hotels, tours, transfers, restaurants, visas, packages), quotes prices in INR, builds day-by-day itineraries and PDF quotes.
+An AI travel agent for **GujjuTours** (supplier platform: ActivityLinker). It sells worldwide since Nov 2026 (any city the supplier knows); Dubai keeps its curated data (areas, attractions, airport zones, hotel list). See §17. A customer chats ("3 nights in Dubai for 2 in November") and the agent searches live supplier inventory (flights, hotels, tours, transfers, restaurants, visas, packages), quotes prices in INR, builds day-by-day itineraries and PDF quotes.
 
 Pieces:
 
@@ -121,7 +121,7 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
 | Flights | `search_flights`, `get_flight_details` | max 9 passengers (supplier rejects more); details need `conversationId` |
 | Hotels | `search_hotels` (prices EVERY property in the city: `booking_api.city_hotel_catalogue` (GetStaticDataByCity, 4,510 Dubai IDs with `Category` + stars) filtered by stars (strict, unrated left out) and `property_type` (hotel, apartment, aparthotel, hostel, villa, resort), priced 200 IDs per call in parallel by `call_hotel_availability_many` (~6.5 s for the whole city), cheapest first; `refundable_only` keeps hotels whose shown (cheapest) rate has free cancellation, as the website's filter does; `area=` filter; results carry `property_type`, `stars` from each hotel's static record and `area`/`district` resolved from its address via `reference_data/dubai_areas.json`; the airport-transfer `next_step` only when the customer asked for a transfer); static content: `lookup_hotel_city`, `list_city_hotels`, `get_hotel_info`, `get_hotel_description`, `get_hotel_reviews` | static content uses the hotels-only token; 9 rooms / 30 nights / 2 children (age 1-12) max |
 | Tours | `search_tours` (`theme=` adventure / romantic / family / culture / water / food, matched on the supplier's tour category via `reference_data/tour_themes.json`; `enrich=False` skips the slot and transfer fan-out), `get_tour_details`, `get_tour_timeslots`, `get_tour_options` (agent-only) | party totals per transfer type; `tour_pricing.py` |
-| Transfers | `search_airport_transfer_dubai` (module `search_transfers.py`), `get_transfer_details` | hotel name alone resolves coordinates |
+| Transfers | `search_airport_transfer` (module `search_transfers.py`; was `search_airport_transfer_dubai`, the old name still maps), `get_transfer_details` | any city's main airport from `airports.json`; hotel name alone resolves coordinates |
 | Restaurants | `search_restaurants`, `get_restaurant_details` | only ~9 Dubai restaurants, all veg; `restaurant_catalog.py` |
 | Visa | `get_visa_info`, `list_visa_countries` | Indian nationality uses supplier id 245. Every quoted price and its visa name go to `quote_registry` (`remember`, `remember_label`). Returns `refund_policy`, `track_times` (website wording), `party_totals`, and a `timeline` (working days to travel, which track fits) |
 | Packages | `list_packages`, `get_package_details` | live price built like the website (`package_pricing.py`, see §8); `list_packages` prices the first 8 matching the nights asked |
@@ -200,7 +200,7 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
 - Cookies: `samesite=none; secure` when `COOKIE_SECURE` is set, or unset and `CORS_ORIGINS` contains https; otherwise `lax`. `CORS_ORIGINS` must list exact origins (e.g. `http://localhost:3000`), never `*`.
 - Boot logs (does not raise) a missing `SESSION_SECRET` or a failed migration, so `/health` stays green: check logs or `/health/db`.
 
-**Migrations** (`migrations/`, idempotent SQL, no version table): `001_init` (users, chat_sessions, chat_messages, user_memory), `002_message_options`, `003_accounts` (names, session_epoch), `004_turns`, `005_artifacts_and_trip_state` (column `trip_window`; `window` is reserved), `006_message_feedback`, `007_user_saved_pins_settings` (`chat_sessions.pinned`, `saved_cards`, `users.ui_settings`), `008_itinerary_pdfs` (PDF bytes per chat). Add new ones as `009_*.sql`, written to be re-runnable.
+**Migrations** (`migrations/`, idempotent SQL, no version table): `001_init` (users, chat_sessions, chat_messages, user_memory), `002_message_options`, `003_accounts` (names, session_epoch), `004_turns`, `005_artifacts_and_trip_state` (column `trip_window`; `window` is reserved), `006_message_feedback`, `007_user_saved_pins_settings` (`chat_sessions.pinned`, `saved_cards`, `users.ui_settings`), `008_itinerary_pdfs` (PDF bytes per chat), `009_search_log` (`search_log`, `admin_audit`; see §17.2). Add new ones as `010_*.sql`, written to be re-runnable.
 
 **Data ownership (no leaks).** Every query that touches account data puts `user_id` in its WHERE clause (or joins through `chat_sessions.user_id`), so a missing check returns nothing rather than someone else's row; by-id endpoints return 404 for another account's ids. Where data lives:
 
@@ -234,7 +234,7 @@ The browser keeps no account data. `localStorage` holds only the theme as a firs
   - Visa: `price_per_person_inr`, `child_price_inr`.
   - Restaurants: `price_per_adult_inr`; dishes `adult_price_inr`, `child_price_inr`.
   - Packages: `price_inr` (party total), `price_per_person_inr`, `pricing_available`, `package_lines` (hotel + each tour/transfer with `price_inr`), `unpriced_parts`.
-- **Package price = the website's:** the supplier's packagerate answers empty lists and packagestaticdata has only day titles, so `mcp_tools/package_pricing.py` reads the parts from the package's gujjutours.com page (`itineraryServices`, `packageHotels`; URL `/en/holidays/{country}-{id}/{city}-{id}/{name}-{id}`) and prices them as the website's browser does: first available hotel in priority order via B2C `packagehotelv1` (whole stay, AED) + each service's optionRate `rate` asked for ONE adult (or one unit for transfer type 4; adult + unit when the option's `restrictedRateType` lists "Unit"; private with a vehicle id when the band has one; supplier id from the option list), optional parts included, an unpriceable part left out and named; total converted once (AED → INR × sellingROE), per person from the unrounded total. Verified to the paisa on 10 Dubai packages on 2026-10-16. The website prices tours for one adult even for a bigger party; that is reproduced and reported to the client.
+- **Package price = the website's:** the supplier's packagerate answers empty lists and packagestaticdata has only day titles, so `mcp_tools/package_pricing.py` reads the parts from the package's gujjutours.com page (`itineraryServices`, `packageHotels`; URL `/en/holidays/{country}-{id}/{city}-{id}/{name}-{id}`) and prices them as the website's browser does: first available hotel in priority order via B2C `packagehotelv1` (whole stay, AED) + each service's optionRate `rate` asked for the WHOLE PARTY (adults + child ages; since Nov 2026 the website asks for its party, it asked for one adult in October) (or one unit for transfer type 4; adult + unit when the option's `restrictedRateType` lists "Unit"; private with a vehicle id when the band has one; supplier id from the option list), optional parts included, an unpriceable part left out and named; total converted once (AED → INR × sellingROE), per person from the unrounded total. Verified to the paisa on 10 Dubai packages on 2026-10-16. Verified again 17 Nov 2026: Dubai package 3, 2 adults, 24 Nov = Rs 34,604.99 on both.
 - **optionRate needs `isCache: false`:** without it the supplier answers from a rate cache (Desert Safari 30647 private: AED 474.10 vs the live 914.10 the website shows).
 - **Per-vehicle tours:** a list row with `tourRateTypeId` "11" is sold per vehicle (airport pickup / drop-off): `sold_per_vehicle`, party total is one vehicle, options with no transfer types price one unit on type 4.
 - **Display rule:** cards show the per-person (or per-night / per-vehicle) price; the reply text states the total for the customer's party, quoted from the result.
@@ -329,7 +329,9 @@ Next.js 15.5, React 19.1, Tailwind v4 (`@tailwindcss/postcss`, no `tailwind.conf
 - **Booking:** `BOOKING_BASE_URL`, `BOOKING_B2C_BASE_URL` (must be `https://www.gujjutours.com`; `stagingb2c` 404s), `BOOKING_TOKEN` (must carry all service types), `BOOKING_TRANSFER_TOKEN` (transfer inventory; the main token returns empty there), `BOOKING_HOTEL_STATIC_TOKEN` (optional hotels-only account), `BOOKING_FLIGHT_TARGET`, `BOOKING_TENANT_ID`, `FLIGHT_LIST_TENANT_ID`, `FLIGHT_SEARCH_TENANT_ID`, `FLIGHT_LIST_CUSTOM_HOST`, `BOOKING_ROE_VERIFICATION_TOKEN`. The supplier JWT expires 2027-05-25.
 - **FX / pricing:** `AED_TO_INR`, `USD_TO_INR`, `EUR_TO_INR`, `GBP_TO_INR`, `SGD_TO_INR` (fallbacks only), `ROE_BASE_CURRENCY`, `FX_DISABLE_LIVE_ROE`, `PAYMENT_BUFFER_DAYS`, `DEPOSIT_PCT_*`, `TCS_*`, `EMI_TENURES`.
 - **HTTP / misc:** `HTTP_TIMEOUT_SECS`, `HTTP_MAX_RETRIES`, `PLACE_RADIUS_KM`, `RESTAURANT_DETAIL_WORKERS`, `RESTAURANT_DETAIL_FANOUT`, `WHATSAPP_DB_PATH`, `ITINERARY_DIR`, `PUBLIC_BASE_URL`, `NO_COLOR`.
-- **Chat API:** `CORS_ORIGINS`, `COOKIE_SECURE`.
+- **Chat API:** `CORS_ORIGINS`, `COOKIE_SECURE`, `ADMIN_EMAILS` (admin panel; unset = nobody is an admin).
+- **Cities:** `CITY_SUPPLIER_LOOKUP` (`0` turns the supplier city fallback off; the tests set it).
+- **Telemetry (off unless an endpoint is set):** `OTEL_EXPORTER_OTLP_ENDPOINT` (or `..._TRACES_ENDPOINT`), `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SERVICE_NAME`, `OTEL_CAPTURE_CONTENT` (default false), `OTEL_SDK_DISABLED`, `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS` (e.g. `psycopg`). See `docs/OBSERVABILITY.md`.
 - **WhatsApp:** `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`.
 - **Voice:** `VAPI_*`, `VOICE_CALL_PROVIDER`, `VOICE_SERVICE_URL`, `LIVEKIT_*`, `TWILIO_TERMINATION_*`, `SARVAM_API_KEY` (or `SARWAM_AI_API_KEY`), `SARVAM_STT_MODEL`, `SARVAM_SPEAKER`, `SARVAM_TTS_SAMPLE_RATE`.
 - **Web:** `API_PROXY_TARGET`, `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_MOCK_MODE`, `NEXT_PUBLIC_AUTH_VIDEO_URL`.
@@ -344,7 +346,7 @@ Never print, log, commit or paste secret values (`.env`, `railway-env*.txt`). Re
 |---|---|
 | `main` | v2 baseline. Not the deploy source for the chat stack. |
 | `fix/*`, `feat/*` | One change per branch, cut from the current release line, tested locally. |
-| `release/2026.10` | Current release line. Finished fix/feat branches merge here with `--no-ff` (`merge: <branch> into release/2026.10`) after tests pass. Plan: `docs/RELEASE-2026.10-PLAN.md`. `release/2026.09` is the previous line. |
+| `release/2026.11.17` | Current release line (all countries, admin panel, OpenTelemetry on top of 2026.10). Finished fix/feat branches merge here with `--no-ff` (`merge: <branch> into release/2026.11.17`) after tests pass. Plan: `docs/PLAN-global-admin-otel.md`. `release/2026.10` is the previous line (plan `docs/RELEASE-2026.10-PLAN.md`). |
 | `chat/nextjs/development` | **Deployment branch** for the Next.js web service AND the chat API service on Railway. A push deploys both immediately. |
 | `chat/development` | Deployment branch for the Streamlit service. |
 | `voice/development`, `whatsapp/development` | Deployment branches for voice and WhatsApp. |
@@ -353,7 +355,7 @@ Never print, log, commit or paste secret values (`.env`, `railway-env*.txt`). Re
 Rules for agents:
 
 1. Work on a `fix/*` or `feat/*` branch. Commit and push to it freely.
-2. Merge into `release/2026.10` when the change is tested.
+2. Merge into `release/2026.11.17` when the change is tested.
 3. **Never merge or push to a deployment branch (`chat/nextjs/development`, `chat/development`, `voice/development`, `whatsapp/development`) unless the user explicitly says so in the current conversation.** A push there goes live. When the user does ask, remind them to check Railway env vars first (e.g. the current `BOOKING_TOKEN` on chat-api).
 4. Never force-push shared branches; never rewrite release history.
 5. Commit messages: conventional prefixes (`fix(web):`, `feat(tours):`, `merge:`), a short body explaining why.
@@ -403,6 +405,11 @@ Rules for agents:
 - `agent._customer_words` reads only the customer's part of each message: the Plan mode [system] block says "no flights, visa or meals they did not ask for", and read as customer words it removed the visa from every plan.
 - Re-planning (Plan mode changes): `plan_itinerary_tool` takes a tour's start times from the supplier (`_tour_slots`), never from the caller (the model sent each tour's last planned time as its only slot and pinned Dubai Frame into a full day); a tour whose own date is full moves to another day instead of being dropped; the day fill offers the last plan's tours first (stable days) and skips one this turn's message names and the caller left out (`rules.customer_named_now`, from `set_conversation_text(..., latest=)`); fillers need a published duration. A visa price must be one `get_visa_info` quoted in the chat (`quote_registry.was_quoted`), else the live fare is looked up (the model sent Rs 3,500; the fare is Rs 7,752.29). The visa line is named by `quote_registry.label_for`. A hotel's standard check-in later than the arrival does not push the rest. Tours the plan could not place come back in `excluded` and show on the card as notes. `_ensure_visa_party_total` stays out of turns that built a plan.
 - Plan cache across restarts: `_LAST_PLANS` is in memory, so the chat API seeds it from the latest saved itinerary card (`api.main._seed_plan_from_history` → `agent_tools.seed_plan`) before each turn. When the PDF is for the same trip as the plan, the plan's days and lines are used, not the model's.
+- Visa timing: a question like "will the visa be ready for my 22 Oct flight" answered without a `get_visa_info` call this turn is re-asked (`agent._recheck_visa_timing`, both paths) so the lookup runs for that date and `_enforce_visa_timeline` can add the timeline; the model had answered a 4-days-away flight with "plenty of time" from an older lookup.
+- Hotel by name: `_resolve_hotel_by_name` prefers the autocomplete hit whose name equals the query ("Pullman Dubai Creek City Centre" had resolved to "... Residences", a different property).
+- Search first: on the first step of a turn whose customer message names a service and a date (`agent._search_tools_asked`), the model is bound with only the matching search tools and `tool_choice="required"` (`_search_first_model`, a LangGraph dynamic model). Unforced, gemma-4-26b answered "tours in Bangkok on 12 Dec" with invented prices; the unsourced-price guard re-asked (+~7 s) and the fake table showed first. Offered every tool, it opened with display_options_tool or list_packages. Turns went from 37-48 s to 14-25 s.
+- Supplier retries: a 5xx is retried after 0.5 s x attempt (was 2 s then 4 s, as for timeouts); `optionRate` gets one retry (`BookingApiClient.request(retries=...)`). An option the supplier cannot price returns 500 every time and held the whole tour search up 7 s.
+- City spellings: the supplier's city search does not fold accents ("Zurich" finds no city, "Zürich" does). `reference_data/city_spellings.json` maps a plain name to the supplier's spelling (Zürich, Malé for Male/Maldives, São Paulo, Bogotá, Málaga, Düsseldorf, Medellín, Kraków); `supplier_city` asks in that spelling and matches rows accent-free. Add a city only after checking the plain name finds no city row. `scripts/build_airports.py` applies `PREFERRED` even when the airport is filed under another town (KUL under Sepang; Kuala Lumpur had resolved to Subang SZB).
 - `agent_tools` has a module `logger` (the `except` branches that logged used to raise NameError).
 - Web: `formatInr` shows paisa as two digits (₹5,606.20, never ₹5,606.2); whole amounts stay without decimals. Hotel cards show the property type next to the stars.
 - "Build a package" form (`web/src/components/PackageBuilder.tsx`, logic in `lib/packageBuilder.ts`) on the Packages home screen sends one plain request in Plan mode; Plan mode plans only the parts listed.
@@ -412,3 +419,273 @@ Rules for agents:
 - Tour search gives one photo per tour and no supplier API we hold returns the gallery; `booking_api.endpoints.call_tour_page` reads `tourImages` from the website's tour page (resolves by id, any slug) when a card is opened.
 - Flight options carry `airline_logos` (CDN `/uploads` + the segment's `airlinelogoPath`, UI-only). While streaming, a half-written markdown table is held back and shown as the loader (`web/src/lib/pendingTable.ts`).
 - The website adds a hotel markup that varies by hotel (4.0% to 11.4% seen; 8-27%, median ~11.7%, across all of Dubai on 6-10 Nov 2026); the chatbot quotes the supplier rate until the client confirms the rule. The website's own search is public: `POST www.gujjutours.com/api/x-hotels/search-stream` (NDJSON, needs the city `locationId` from `/api/x-hotels/hotel-lookup`), price = `StartPrice` (AED) x sellingROE; its star buttons default to 3-5 and its Refundable filter judges the cheapest rate only. The website's visa cards (3-4 working days, Express 1 working day) disagree with its own visa article (2–4 days, 24–48 hours); the chatbot follows the article.
+
+---
+
+## 17. All countries, admin panel, OpenTelemetry (Nov 2026)
+Built on `feat/global-admin-otel` (plan: `docs/PLAN-global-admin-otel.md`). Where these notes and an earlier section disagree, these notes are newer. QA screenshots: `docs/all-countries-qa/`, `docs/admin-qa/`, `docs/otel-qa/`.
+
+### 17.1 All countries
+
+Facts this change adds or changes, for the lead to merge into AGENTS.md.
+
+#### §1 What this is
+- No longer "focused on Dubai": the supplier sells worldwide and every tool now takes any city it knows. Dubai keeps its curated data (areas, attractions, airport zones, hotel list).
+
+#### §3 Layout
+- `reference_data_loader.py` also reads `reference_data/airports.json` and, for a city not in `cities.json`, asks the supplier (lazy import of `booking_api.endpoints.call_entity_search`, the same pattern as `geo.py`).
+- `reference_data/airports.json`: generated by `python -m scripts.build_airports` (OurAirports, public domain; large + medium airports with scheduled service and an IATA code; ~3,250 airports, ~440 KB, short keys `n,c,cc,lat,lng,s`). Main airport per city: a `PREFERRED` choice for multi-airport cities (London LHR, Paris CDG, Bangkok BKK, Dubai DXB...), then large before medium; `ALIASES` add names like Bali -> DPS, Maldives -> MLE. Do not edit by hand; re-run the script.
+- New `mcp_tools/city_support.py`: `unknown_city(city, service)`, `nothing_in_city(city, service)`, `require_city(...)`. One wording for every tool; both keep `error_type: "UnsupportedRoute"`.
+
+#### §4 Tools
+- `reference_data_loader.resolve_city(name, *, supplier=True)`: cities.json first (exact, IATA of a curated city, close spelling >= 6 letters); then `supplier_city(name)`: autocomplete rows of type city (hotels service, then tours) whose name IS the query (or a close spelling), returning the same dict shape plus `source: "supplier"` and `iata` (by name from airports.json, else the nearest large airport within 120 km / medium within 60 km). A curated city without a supplier id (the Indian origins) gets the supplier's `city_id`/`country_id` merged in (India is country 245 at the supplier, not cities.json's 105). Cached per process (hits and confirmed misses; a failed call is not cached). `supplier=False` is offline: use it whenever arbitrary words are scanned (`search_flights._origin_from_conversation` does).
+- `CITY_SUPPLIER_LOOKUP=0` turns the supplier fallback off (also the visa country table); `tests/conftest.py::_offline_city_lookup` sets it for every test. Tests that need the supplier path set it to 1 and mock `booking_api.endpoints.call_entity_search` / `booking_api.call_visa_countries` (see `tests/test_all_countries.py`).
+- Verified ids (Nov 2026): London 17745/215, Bangkok 245585/133, Singapore 70926/115, Paris 7359/181, Bali 314293/153 (tours list only), Mumbai 271805/245. Hotel and tour autocomplete share one city id space.
+- `resolve_iata(name)`: cities.json, a raw 3-letter code found in airports.json (LGW, DMK), the city's main airport in airports.json, then the supplier city's airport. The 13 Indian origins keep their codes. The supplier has no airport lookup (`call_entity_search` services flights/airports/cities return nothing; hotels rows of type airport exist but are not used).
+- Tours / packages / restaurants / hotels: the "Dubai only, offer the Dubai equivalent" refusals are gone. An unknown name says "We could not find a city called X"; a real city the supplier sells nothing in says "The supplier has no <service> in X". `list_packages` no longer crashes on `int(None)` for a row whose city has no supplier id (it prices under the searched city).
+- Restaurants: `restaurant_catalog.resolve_destination` tries cities.json, then a Dubai place ("Dubai Marina"), then the supplier city. The supplier's "No record found for the given criteria" (Singapore) is an empty city, answered with `nothing_in_city`, not `RestaurantSearchFailed`. Restaurants still exist only in Dubai.
+- Hotels: `_resolve_hotel_by_name(name, city_id, city_name="")` uses the resolved city's name (no Dubai/Abu Dhabi/Sharjah loop, no "dubai" curated fallback). `area=` outside Dubai matches the area against the hotel's address text (`_address_names_area`); Dubai keeps `dubai_areas.json`. The transfer `next_step` carries `destination_city`.
+- Transfers: tool renamed `search_airport_transfer_dubai` -> `search_airport_transfer` (module `search_transfers.py`), new arg `destination_city` (default "Dubai", second positional after `arrival_date`). Dubai uses `cities.json` `default_dubai_airport` (DXB with its Google place id) exactly as before; any other city uses its main airport from airports.json with an empty place id and the name `"<airport name>(<iata>)"`. Hotel queries are `"<hotel> <city>"` and prefer rows in the city. Live 17 Nov 2026: Singapore (Changi) and Bangkok (Suvarnabhumi) return 20 vehicles each. `agent._RENAMED_TOOLS` maps the old name so saved chats still work; `agent._TOOL_NAMES_RE` accepts both.
+- Visa: `get_visa_info` resolves the destination through the supplier's own visa table (`resolve_visa_country`, `visa_countries()` cached 6 h; failure not cached): country name, 2-letter code, aliases (UAE, UK, USA...), or a city through its country (Dubai -> 213). Supplier visa ids differ from cities.json (Singapore 115, not 191). Table on 17 Nov 2026: Australia 2, Egypt 109, France 181, Oman 87, Singapore 115, Thailand 133 (Visa on Arrival), UAE 213, UK 215, Vietnam 219. A country not in it: "We do not sell visas for X" plus the list; table unreadable: `VisaInfoFailed` "could not check", never a "no". Offline fallback still resolves the UAE. Result carries `country`.
+- `visa_timeline(..., country="UAE", country_code="")`: wording "(<country> weekends excluded)" and "Approval is decided by <country> immigration"; default weekend Fri-Sat for EG, OM, SA, QA, KW, BH, JO, else Sat-Sun (the supplier's own weekend list still wins).
+- `get_destination_tips_tool`: a city without curated tips returns `curated: False` and a neutral message, not an error.
+
+#### §5 / prompts
+- v3 persona is "a senior trip planner" (title "Trip Planner (Gujju Tours)"), sells "worldwide"; wave 2 is `search_airport_transfer` (city + best hotel). Prompt estimate 2,994 of the 3,000 cap: no room left, trim before adding. Voice persona "Senior Trip Planner". v1/v2 prompts only had the tool renamed.
+
+#### §7 Chat API
+- Itinerary card payload (`options` kind `itinerary`) carries `destination`; `_seed_plan_from_history` passes it back to `seed_plan`.
+- Follow-up chips no longer name Dubai ("Find hotels there", "Find flights there", "Only vegetarian places").
+- PDF download name follows the trip: `itinerary_store.save_itinerary_pdf` writes `<id>.name` next to the PDF (`download_name(destination)` -> "Singapore-itinerary.pdf"); `/itinerary/{id}.pdf` (chat API and WhatsApp) and Streamlit use `get_itinerary_filename(id)`. App titles say "GujjuTours Trip Planner".
+
+#### §8 Pricing
+- Unchanged: supplier money is AED-based for every destination (it is the account, not the city); same ROE rules.
+
+#### §10 Web
+- `lib/itinerary.ts`: `Itinerary.destination` (from the card, "" on older cards); `visaNote(note)` names the country from the agent note ("The Singapore visa is needed; ..."). `ItineraryView` title "Your <destination> itinerary" or "Your itinerary".
+- `lib/services.ts` quick starts and starters cover Dubai, Singapore, London, Bangkok, Bali, Thailand visa. `packageBuilder.defaultPackageForm().city` is "" (the form asks for a destination, placeholder "e.g. Dubai, Singapore, Bangkok"). `layout.tsx` description and signup subtitle no longer say Dubai.
+- `components/Markdown.tsx` `PRICE` accepts ₹/INR/AED/USD/EUR/GBP/SGD/THB/MYR/IDR/JPY/AUD/OMR/QAR/SAR and $ € £ ¥ ฿. The old pattern contained literal backspace bytes (0x08) where `\b` was meant, so "INR 500" was never a price cell.
+
+#### §16 Gotchas
+- `plan_itinerary_tool(destination_city=...)` now drives everything: `_tour_facts_index`, `_catalogue`, `_tour_slots_cached`, `_display_name`, `_tour_id_for`, `_fill_candidate`, `_mark_dinner_tours`, `_exact_tour_totals`, `_hotel_record`, `_airport_legs`, `_annotate_meals` all take `city` (default "Dubai"); the visa is the destination's (`get_visa_info(destination_country=<city>)`, line "<Country> tourist visa", `visa_note` names the country); the output and the remembered plan carry `destination`; `generate_itinerary_pdf_tool(destination="")` falls back to the plan's city.
+- `mcp_tools/plan_pricing.py`: `place_of`, `meal_venue`, `_restaurants`, `airport_transfer` take `city`. Attractions and areas are Dubai-only; elsewhere meals are placed from the hotel's position (a supplier restaurant within 6 km if any, else the hotel). Airport legs outside Dubai use the city's "Airport Pickup/Dropoff" per-vehicle tours when their options name no zone.
+- `scheduling.build_itinerary(destination=...)`: "Arrive in <destination>".
+- `tour_pricing.tour_image_url(tour_id, date, tour_name="")`: Dubai's catalogue first, then the tour's own city found via autocomplete by name.
+- Supplier gaps by country (17 Nov 2026): restaurants only in Dubai; visas only for the 9 countries above (Indian passport only); hotel availability was down for our account everywhere (NOCOUNT_ERROR) so non-Dubai hotel pricing is unverified, but catalogues are there (London 5,585, Bangkok 2,631, Singapore 483 properties). Packages: Singapore lists 25.
+- Plan guards added after the Singapore QA run (hotel availability down): `search_hotels` remembers every quoted stay price (`quote_registry.remember("hotel", ...)`); `plan_itinerary_tool` ignores a `hotel_total_inr` no hotel search quoted (it re-searches, and says why in `hotel_note`); the model had billed "Marina Bay Sands Rs 1,50,000". A placeholder `hotel_name` ("Unavailable", "TBD", "hotel"...) is no hotel (`_NO_HOTEL_NAMES`). Auto-filled tours are capped at 4x the city catalogue's median per-adult price (`_filler_price_cap`; a Rs 1,17,758 fishing charter had filled a day).
+- QA screenshots: `docs/all-countries-qa/` (Singapore and Bangkok tours, Mumbai-London flights, UAE visa, Singapore plan at 1440 and 390 px, Dubai tours).
+- Known model gap (not this change; same with the old prompt in an A/B of 4 runs each): gemma-4-26b answers a first "Show me tours in X" turn with an invented table and no tool call; a regenerate searches. Worth a guard like `_research_unsourced` for result tables without prices.
+
+### 17.2 Admin panel
+
+Facts to fold into AGENTS.md when `feat/global-admin-otel` merges. AGENTS.md itself was
+not edited on this branch (parallel branches touch it).
+
+#### §3 Repository layout
+
+- `api/` gains `admin.py` (router `/admin-api`, `require_admin`), `admin_repository.py`
+  (admin SQL + `add_search_rows`), `search_log.py` (pure: tool calls -> search_log rows).
+- `migrations/` now runs 001..009.
+
+#### §7 Chat API
+
+Endpoints (all GET, read-only, `require_admin`: signed-in AND email in `ADMIN_EMAILS`,
+else **404** `{"detail":"Not Found"}`, also when signed out; bad UUIDs 404 too):
+
+| Path | Purpose |
+|---|---|
+| `/admin-api/overview?days=30` (1-365) | KPIs (total/new/active users, chats, turns, searches, failed, thumbs up/down), `daily` series (active_users, signups, turns, searches, failed_searches; days in Asia/Kolkata), `searches_by_tool`, `top_destinations` (top 10, case-insensitive), `recent_failed` (10) |
+| `/admin-api/users?q=&page=&page_size=` (≤100) | accounts with last active (last customer message), chats, messages, searches; sorted by last active |
+| `/admin-api/users/{id}` | profile, `facts` (user_memory), saved cards count, searches, `last_active`, sessions (title, pinned, created, updated, messages, searches) |
+| `/admin-api/sessions/{id}/messages` | full transcript: messages with `options` (cards), `feedback`, `tool_calls` (input + `output_preview` cut to 2,000 chars, `output_chars`); writes one `admin_audit` row (`view_transcript`, session id) per read |
+| `/admin-api/searches?tool=&user_id=&q=&errors_only=&from=&to=&page=&page_size=` (≤200) | search_log rows newest first with the customer email; `q` matches destination, origin, email, error, args text; `from`/`to` are IST calendar days; also returns `tools` (distinct tool names) |
+
+- `/auth/me` returns `user.is_admin` (bool). Login/register responses do not.
+- `search_log` rows are written in `_turn_events` right after the assistant reply is saved,
+  from the same `tool_calls` list (`search_rows()` → `admin_repository.add_search_rows`),
+  inside try/except: a failure logs `search_log_write_failed` and never fails the turn.
+- Admin endpoints are the one deliberate exception to "every query has user_id in WHERE";
+  they read across accounts and are reachable only through `require_admin`.
+
+Migration `009_search_log` (idempotent):
+
+- `search_log`: id, user_id (CASCADE), session_id (CASCADE: deleting a chat deletes its
+  searches), message_id (SET NULL: a regenerated reply keeps its searches), call_index,
+  tool, args JSONB (args > 8,000 chars stored as `{"_truncated": true}`), origin,
+  destination, start_date, party, result_count, error, latency_ms (always NULL for now),
+  created_at. Indexes: (created_at), (user_id, created_at), (tool), UNIQUE
+  (message_id, call_index) so a reply is never logged twice.
+- `admin_audit`: admin_email, action, target, created_at.
+- Backfill on every boot for assistant replies that have no search_log rows yet
+  (`NOT EXISTS` + `ON CONFLICT DO NOTHING`). Helper SQL functions `search_log_try_jsonb`,
+  `search_log_int`, `search_log_party` mirror `api/search_log.py`: keep both in step.
+- Derivation rules: destination = destination_city | destination_country | destination |
+  city (NOT hotel_name: transfers name a hotel); origin = origin_city | origin; start date =
+  check_in | travel_date | departure_date | arrival_date | search_date | start_date | date;
+  party = "2 adults, 1 child, 1 infant, 1 room" from adults (or sum of `rooms[].adults`),
+  children (or `len(child_ages)`), infants, rooms (int or list length); result_count =
+  len(options) | total_results | len(results) | len(items); error = output `message` when
+  `error` is truthy (else the error string, else "failed"), or plain-text output starting
+  with "Error".
+- Every tool call is logged, including helpers (plan, lookup, exchange rate); the UI groups
+  tools into services (`lib/admin.ts serviceOfTool`).
+
+Data table addition: "What each customer searched | `search_log`"; "Admin transcript reads |
+`admin_audit`".
+
+#### §9/§10 Web
+
+- `next.config.ts` rewrites also proxy `/admin-api/:path*`.
+- Routes: `src/app/admin/layout.tsx` (guard: `api.me()`, not `is_admin` → `/chat`,
+  401 → `/login`; desktop 240 px sidebar, phones a sticky top bar with tabs; the page
+  itself scrolls), `admin/page.tsx` (Overview: 8 KPI tiles with sparklines, columns per
+  day for active users, messages, searches with failed inside, bars per service and top
+  destinations, recent failures), `admin/users/page.tsx` (search + table, cards below
+  `md`), `admin/users/[id]/page.tsx`, `admin/chats/[id]/page.tsx` (read-only transcript),
+  `admin/searches/page.tsx` (filters in the URL: text, tool via custom `Select`, from/to,
+  "Failed only"; table below `md` becomes cards; 50 per page).
+- `components/admin/AdminUi.tsx`: `PageHeader`, `Panel`, `KpiTile`, `Sparkline` (SVG),
+  `ColumnChart` and `BarList` (CSS), `Pager`, `StatusPill`, `Loading` (TravelLoader),
+  `ErrorNote`, `Empty`. No chart library. `.admin-bar` / `.admin-bar-x` grow-in animations
+  in globals.css (cut by the reduced-motion rule).
+- `MessageList` takes `readOnly` (no edit, retry, regenerate, rating buttons or
+  suggestion chips; shows "Customer rated this reply good/bad") and `extraFor(m)`
+  (the admin transcript puts each reply's time and tool calls there).
+- `CardActions.readOnly`: `HeartButton` and `BookButton` render nothing.
+- `Sidebar` shows an "Admin" item (ShieldCheck) above Settings only when `user.is_admin`.
+- `User.is_admin?: boolean` in `lib/types.ts`. `lib/admin.ts` holds the admin response
+  types and pure helpers (tested in `admin.test.ts`). `api.ts`: `adminOverview`,
+  `adminUsers`, `adminUser`, `adminTranscript`, `adminSearches`; mock mode stubs in
+  `mock.ts` build them from the browser's mock chats, and the mock user is an admin.
+
+#### §11 Testing
+
+- `tests/test_search_log.py` (pure extraction).
+- `tests/test_admin_api.py`: access rule without a DB; with a LOCAL Postgres in
+  `DATABASE_URL` (127.0.0.1/localhost) it also runs migrations twice, checks the backfill
+  equals `search_rows()` and adds no duplicates, and calls every endpoint as admin,
+  customer and signed out (skipped when no local DB). It creates and deletes its own users.
+- Web: `src/lib/admin.test.ts`.
+- QA screenshots: `docs/admin-qa/` (1440 px and 390 px).
+
+#### §12 Environment
+
+- Chat API: `ADMIN_EMAILS` (comma separated, case-insensitive; read per request; empty
+  or unset = nobody is an admin). Set it on the chat-api Railway service before deploying.
+
+#### Gaps
+
+- `latency_ms` is not filled (the agent's tool_calls carry no timing); the OpenTelemetry
+  branch can supply it.
+- The live write path was not exercised by a real agent turn locally (the local
+  OpenRouter key returned 401); it is covered by `add_search_rows` tests and the same
+  extraction the backfill test checks.
+- The backfill re-checks replies without rows on every boot; cheap at today's volume.
+
+### 17.3 OpenTelemetry
+
+Local stack: `docker compose -f observability/docker-compose.yml up -d` (Grafana LGTM on http://localhost:3005, OTLP on 4317/4318) and `python observability/load_dashboard.py` (dashboard `observability/grafana-dashboard.json`). See `docs/OBSERVABILITY.md`.
+
+Facts to merge into AGENTS.md when this branch lands (the lead edits AGENTS.md).
+
+#### §3 Repository layout
+
+- Add: `observability.py   OpenTelemetry setup + helpers (spans, metrics, log bridge); off unless OTEL_EXPORTER_OTLP_ENDPOINT is set`.
+- Architecture boundaries: `observability.py` imports only the standard library and
+  OpenTelemetry (LangChain's callback base lazily). `booking_api/`, `mcp_tools/`,
+  `llm.py`, `agent*.py` and `api/` may import it; it imports none of them.
+
+#### §7 Chat API
+
+- `api/main.py` calls `observability.init_telemetry("gujjutours-chat-api")` and
+  `observability.instrument_fastapi(app)` at module level (the middleware and the
+  psycopg hook must exist before the first request / connection), and
+  `observability.bridge_logging()` in `lifespan` right after `configure_logging`
+  (attaching earlier would make `logging.basicConfig` a no-op and silence the console).
+- A turn is wrapped in `observability.turn_span(...)` inside `_stream_turn.run()`;
+  `_produce` runs via `observability.bind_context(_produce)` so the worker thread
+  joins the turn's trace; `annotate_turn(tools=..., reply=...)` after the turn;
+  `turn_failed(e)` in `_produce`'s except.
+- `/health` and `/health/db` are excluded from server spans. ASGI `send`/`receive`
+  spans are off (an SSE turn sends hundreds of chunks).
+- Incoming `traceparent` is honoured, so a turn from the web is one trace.
+
+#### §4 Tools / §6 ui_payload
+
+- `ui_payload.wrap_tool` runs each tool through `observability.traced_tool(name, ...)`:
+  span `agent.tool <name>` with `agent.tool.result_count`, `agent.tool.outcome`
+  (ok / error / exception), metrics `agent.tool.calls`, `agent.tool.duration`.
+
+#### booking_api
+
+- `BookingApiClient.request` is now a wrapper around `_request(..., call=...)` inside
+  `observability.supplier_span(method, path, host)`: one span per supplier call
+  (retries included) with `supplier.endpoint`, `http.response.status_code`,
+  `supplier.error_code` (from the body, e.g. `NOCOUNT_ERROR`: hotel availability answers
+  HTTP 200 with `error.code` NOCOUNT_ERROR when a chunk has no rooms), `supplier.body_status`,
+  `supplier.attempts`. Metric `supplier.errors{endpoint,code}`. Headers are never recorded.
+  Tests that monkeypatch `BookingApiClient.request` still work.
+
+#### llm.py
+
+- Every chat model gets `callbacks=observability.llm_callbacks("<provider>")`
+  (None while off): span `llm.chat <model>` with `gen_ai.*` model, finish reason and
+  token usage (OpenRouter returns usage on the streamed final chunk), errors with
+  `http.response.status_code` (401 when the key is revoked), metrics `llm.calls`,
+  `llm.duration`, `llm.tokens`, `llm.errors`. Streamed chunks concatenate strings, so
+  `_unrepeat` turns "stopstop" back into "stop".
+
+#### Threading
+
+- Supplier fan-outs use `ThreadPoolExecutor` in many tools; the
+  `opentelemetry-instrumentation-threading` package (enabled with the rest) carries the
+  OTel context into pool threads so those spans stay under their tool. It carries only
+  the OpenTelemetry context, not the `rules` ContextVars.
+
+#### §11 Testing
+
+- `tests/test_observability.py` (12 tests): disabled = no-op in a fresh interpreter;
+  enabled with in-memory span/metric/log exporters (`init_telemetry(span_exporter=...,
+  metric_reader=..., log_exporter=..., instrument_libraries=False)`); supplier span has
+  endpoint/status/NOCOUNT_ERROR and no Authorization; tool, turn and LLM spans; content
+  not captured by default. The global tracer provider can be set once per process, so
+  the enabled tests share one module fixture.
+- Web: `web/src/lib/telemetry.test.ts`.
+
+#### §12 Environment variables
+
+- Add **Telemetry (chat-api and web):** `OTEL_EXPORTER_OTLP_ENDPOINT` (unset = off),
+  `OTEL_EXPORTER_OTLP_HEADERS` (secret; Python needs URL-encoded values, `%20` for a
+  space), `OTEL_SERVICE_NAME`, `OTEL_CAPTURE_CONTENT` (chat-api; default off),
+  `OTEL_TRACES_SAMPLER` / `_ARG`, `OTEL_METRIC_EXPORT_INTERVAL`, `OTEL_LOGS_LEVEL`,
+  `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS`, `OTEL_SDK_DISABLED`. Setup per backend:
+  `docs/OBSERVABILITY.md`.
+
+#### §9 Web
+
+- `web/src/instrumentation.ts` (in `src/`, because the app uses the `src/` layout; Next
+  ignores a root `instrumentation.ts` then): registers `@vercel/otel` only when
+  `NEXT_RUNTIME === "nodejs"` and an OTLP endpoint is set; service `gujjutours-web`;
+  fetch propagates `traceparent` only to the `API_PROXY_TARGET` origin.
+  `src/app/chat/stream/route.ts` also injects `traceparent` explicitly
+  (`propagation.inject`, a no-op without a registered SDK).
+- Deps (exact): `@vercel/otel` 2.1.3, `@opentelemetry/api` 1.9.1, `api-logs` 0.223.0,
+  `sdk-logs` 0.223.0, `instrumentation` 0.223.0, `resources` 2.12.0, `sdk-metrics` 2.12.0,
+  `sdk-trace-base` 2.12.0 (npm warns it is deprecated in favour of `sdk-trace`; it is
+  the peer `@vercel/otel` 2.1.3 asks for).
+- Gotcha seen while testing: `next.config.ts` rewrites are resolved at BUILD time, so
+  `API_PROXY_TARGET` for the JSON endpoints must be set when running `npm run build`
+  (the SSE route reads it at runtime). On Windows `npm start` fails because the script
+  uses `${PORT:-3000}`; run `npx next start -p <port>` locally.
+
+#### §16 Gotchas
+
+- Python deps (exact, in requirements.txt): `opentelemetry-api/sdk/exporter-otlp-proto-http`
+  1.39.1, `opentelemetry-instrumentation(-fastapi/-requests/-httpx/-psycopg/-threading)` 0.60b1.
+  1.39.1 was already in the venv (pulled in by other packages); keep SDK and
+  instrumentation versions in step (1.39.x ↔ 0.60bx).
+- With psycopg instrumented, each turn has ~40 `INSERT` spans from the LangGraph
+  Postgres checkpointer; drop them with `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=psycopg`
+  if they cost too much at the backend.
+- The OTLP log handler's `flush` starts a thread; at interpreter exit that raises, so
+  `bridge_logging` uses a subclass that swallows the RuntimeError.

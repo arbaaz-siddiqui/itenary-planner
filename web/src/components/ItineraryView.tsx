@@ -45,7 +45,7 @@ export function ItineraryView({ plan, cards }: { plan: Itinerary; cards: CardRef
     <section className="card-in mt-3 overflow-hidden rounded-2xl border border-border bg-surface" aria-label="Your itinerary">
       <header className="flex flex-wrap items-end justify-between gap-3 border-b border-border bg-gradient-to-r from-brand-blue/15 via-transparent to-brand-red/10 px-4 py-4 sm:px-5">
         <div className="min-w-0">
-          <p className="text-xs font-medium text-fg-muted">Your Dubai itinerary</p>
+          <p className="text-xs font-medium text-fg-muted">{plan.destination ? `Your ${plan.destination} itinerary` : "Your itinerary"}</p>
           <h3 className="font-display text-lg font-semibold tracking-tight text-fg">
             {dayHeading(plan.startDate)} to {dayHeading(plan.endDate)}
           </h3>

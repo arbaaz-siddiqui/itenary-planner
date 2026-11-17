@@ -138,7 +138,9 @@ def _origin_from_conversation(destination_city: str) -> str:
     for token in reversed(re.findall(r"[a-z]{3,}", said)):
         if token == dest:
             continue
-        city = resolve_city(token)
+        # Offline only: every word of the conversation is tried, and a word
+        # must never cost a supplier call (or turn "nice" into Nice).
+        city = resolve_city(token, supplier=False)
         if not city or not city.get("iata"):
             continue
         if str(city.get("name", "")).strip().lower() == dest:
@@ -755,7 +757,7 @@ def _impl(
                          flying from, pass "" and ask them. Passing a plausible
                          city (Mumbai) for a customer who never named one showed
                          invented fares as fact.
-        destination_city: Destination (typically "Dubai").
+        destination_city: Destination city or 3-letter airport code ("Dubai", "London", "SIN").
         departure_date:  ISO yyyy-mm-dd — outbound date.
         return_date:     ISO yyyy-mm-dd — return date for round-trip. Omit for one-way.
         adults:          Adult passenger count.
@@ -855,10 +857,22 @@ def _impl(
 
         origin_iata = resolve_iata(origin_city)
         dest_iata = resolve_iata(destination_city)
-        if not origin_iata:
-            return {"error": True, "message": f"Unknown origin city: {origin_city!r}", "error_type": "UnsupportedRoute"}
-        if not dest_iata:
-            return {"error": True, "message": f"Unknown destination city: {destination_city!r}", "error_type": "UnsupportedRoute"}
+        # Any city with an airport resolves (airports.json, a raw IATA code, or
+        # the supplier's city and its nearest airport); only a name no airport
+        # serves is refused, and then the customer is asked, not turned away.
+        for _label, _name, _code in (("origin", origin_city, origin_iata),
+                                     ("destination", destination_city, dest_iata)):
+            if not _code:
+                return {
+                    "error": True,
+                    "error_type": "UnsupportedRoute",
+                    "message": f"Unknown {_label} city: {_name!r} (no airport found for it).",
+                    "agent_instructions": (
+                        f"We could not find an airport for {_name!r}. Ask the customer "
+                        "for the nearest city with an airport or its 3-letter airport "
+                        "code. Never imply a technical problem."
+                    ),
+                }
 
         trip_type = "round_trip" if return_date else "one_way"
         route = _Route(origin_iata, dest_iata, departure_date, return_date, cabin, max_stops)

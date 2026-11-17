@@ -166,7 +166,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     log.info("voice_service_stopping")
 
 
-app = FastAPI(title="Dubai Trip Planner — Voice Bridge", lifespan=lifespan)
+app = FastAPI(title="GujjuTours Trip Planner — Voice Bridge", lifespan=lifespan)
 
 
 @app.get("/health")

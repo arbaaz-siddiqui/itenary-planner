@@ -30,6 +30,15 @@ from scheduling import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _hotel_prices_were_quoted() -> None:
+    """A plan carries only a hotel price a hotel search quoted in the chat;
+    these tests pass the totals a search showed earlier."""
+    from mcp_tools.quote_registry import remember
+
+    remember("hotel", [46392, 11281.23])
+
+
 def _slots(*times_: str, available: int = 100) -> list[dict]:
     return [
         {"timeSlot": t, "available": available, "timeSlotId": f"id-{t}"} for t in times_

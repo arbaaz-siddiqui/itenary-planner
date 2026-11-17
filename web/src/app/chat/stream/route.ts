@@ -13,6 +13,8 @@
 // SameSite=none requires Secure, which plain http cannot provide. Keeping the
 // request same-origin sidesteps both.
 
+import { context, propagation } from "@opentelemetry/api";
+
 export const runtime = "nodejs";
 // Never cache or pre-render: this is a live stream.
 export const dynamic = "force-dynamic";
@@ -20,15 +22,19 @@ export const dynamic = "force-dynamic";
 const API = process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8000";
 
 export async function POST(req: Request): Promise<Response> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+    // Forward the session cookie; without it the API returns 401 and the
+    // customer sees a silent failure after a successful login.
+    cookie: req.headers.get("cookie") ?? "",
+  };
+  // W3C traceparent of this request's span, so the API's turn joins the same
+  // trace. A no-op unless src/instrumentation.ts registered OpenTelemetry.
+  propagation.inject(context.active(), headers);
   const upstream = await fetch(`${API}/chat/stream`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-      // Forward the session cookie; without it the API returns 401 and the
-      // customer sees a silent failure after a successful login.
-      cookie: req.headers.get("cookie") ?? "",
-    },
+    headers,
     body: await req.text(),
     // Node needs this to stream a request body; harmless when there is none.
     // @ts-expect-error -- duplex is valid at runtime, missing from the DOM types

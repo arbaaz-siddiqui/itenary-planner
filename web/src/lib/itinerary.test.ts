@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayHeading, toItinerary } from "./itinerary";
+import { dayHeading, toItinerary, visaNote } from "./itinerary";
 
 const plan = {
   start_date: "2026-11-06",
@@ -59,9 +59,24 @@ describe("toItinerary", () => {
     expect(d2.steps[1].price).toBe(3245.69);
   });
 
+  it("carries the trip's destination, empty on older cards", () => {
+    expect(toItinerary({ ...plan, destination: "Singapore" })!.destination).toBe("Singapore");
+    expect(toItinerary(plan)!.destination).toBe("");
+  });
+
   it("is null for anything that is not a plan", () => {
     expect(toItinerary({})).toBeNull();
     expect(toItinerary(null)).toBeNull();
+  });
+});
+
+describe("visaNote", () => {
+  it("names the destination's visa, not always the UAE's", () => {
+    const note = "The Singapore visa could not be priced just now, so it is NOT in the total.";
+    expect(visaNote(note)).toBe("The Singapore visa is needed; its price will be added to the total.");
+    expect(visaNote("The UAE visa could not be priced")).toBe("The UAE visa is needed; its price will be added to the total.");
+    expect(visaNote("Visa price pending")).toBe("The visa is needed; its price will be added to the total.");
+    expect(visaNote("Dubai Frame is not in the plan.")).toBe("Dubai Frame is not in the plan.");
   });
 });
 

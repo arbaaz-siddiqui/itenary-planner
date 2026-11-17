@@ -44,8 +44,8 @@ export const SERVICES: Service[] = [
     icon: Plane,
     starters: [
       "Flights from Ahmedabad to Dubai next month",
-      "Cheapest return flight Mumbai to Dubai",
-      "Direct flights from Delhi to Dubai",
+      "Cheapest return flight Mumbai to Singapore",
+      "Flights from Delhi to London in December",
     ],
   },
   {
@@ -53,9 +53,9 @@ export const SERVICES: Service[] = [
     label: "Tours",
     icon: Map,
     starters: [
-      "Desert safari options with private transfer",
-      "Burj Khalifa tickets for 2 adults",
-      "Things to do in Dubai with kids",
+      "Desert safari options in Dubai with private transfer",
+      "Things to do in Singapore with kids",
+      "Day trips from Bangkok",
     ],
   },
   {
@@ -64,8 +64,8 @@ export const SERVICES: Service[] = [
     icon: Package,
     starters: [
       "5-night Dubai holiday package for a family of 4",
-      "Dubai honeymoon package",
-      "Plan a 3-day Dubai trip for me",
+      "Bali honeymoon package",
+      "Plan a 4-day Singapore trip for me",
     ],
   },
   {
@@ -74,8 +74,8 @@ export const SERVICES: Service[] = [
     icon: BedDouble,
     starters: [
       "4-star hotels near Dubai Mall",
-      "Family hotels in Deira with breakfast",
-      "Budget hotels in Bur Dubai",
+      "Family hotels in Bangkok with breakfast",
+      "Budget hotels in London",
     ],
   },
   {
@@ -84,7 +84,7 @@ export const SERVICES: Service[] = [
     icon: CarFront,
     starters: [
       "Airport transfer from DXB to my hotel",
-      "Private car for 6 people from the airport",
+      "Private car for 6 people from Singapore airport",
       "Shared transfer to Downtown Dubai",
     ],
   },
@@ -94,8 +94,8 @@ export const SERVICES: Service[] = [
     icon: FileCheck2,
     starters: [
       "Dubai tourist visa for Indian passport holders",
-      "Documents needed for a UAE visa",
-      "Oman tourist visa",
+      "Documents needed for a Singapore visa",
+      "Thailand visa on arrival",
     ],
   },
 ];
@@ -107,10 +107,10 @@ export const serviceById = (id: ServiceId | null | undefined) =>
  * carries its service so the chip shows that service's icon. */
 export const QUICK_STARTS: { text: string; service: ServiceId }[] = [
   { text: "Plan a 4-day Dubai trip", service: "packages" },
-  { text: "Veg restaurants in Dubai", service: "restaurants" },
-  { text: "Flights Ahmedabad to Dubai", service: "flights" },
-  { text: "Desert safari with pickup", service: "tours" },
-  { text: "Dubai tourist visa", service: "visa" },
+  { text: "Things to do in Singapore", service: "tours" },
+  { text: "Flights Mumbai to London", service: "flights" },
+  { text: "Hotels in Bangkok", service: "hotels" },
+  { text: "Bali honeymoon package", service: "packages" },
 ];
 
 /** The name to greet with: the one given at sign-up, else one from the email. */

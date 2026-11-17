@@ -6,7 +6,7 @@ The full project guide for coding agents is in AGENTS.md: product, layout, agent
 
 ## Working rules (short form)
 
-- Branches: work on `fix/*` or `feat/*`; merge tested work into `release/2026.10`. Never merge or push to a deployment branch (`chat/nextjs/development`, `chat/development`, `voice/development`, `whatsapp/development`) unless the user says so in the conversation: a push there goes live on Railway.
+- Branches: work on `fix/*` or `feat/*`; merge tested work into `release/2026.11.17`. Never merge or push to a deployment branch (`chat/nextjs/development`, `chat/development`, `voice/development`, `whatsapp/development`) unless the user says so in the conversation: a push there goes live on Railway.
 - Never print or commit secrets (`.env`, `railway-env*.txt`); refer to variables by name.
 - Fix root causes; no hardcoded prices, rates or ids; keep changes backward compatible.
 - Prices: quote supplier figures, never compute them in prompts or UI; cards show per-person or per-unit prices, replies give the party total from the result.

@@ -1,7 +1,9 @@
-"""search_transfers — agent + MCP tool.
+"""search_transfers — agent + MCP tool (`search_airport_transfer`).
 
-Defaults to the airport→hotel pattern for Dubai. The agent passes hotel
-coordinates; we use the city's default airport from reference_data.
+Airport -> hotel transfers in the destination city. Dubai keeps its configured
+airport (DXB with its Google place id, cities.json `default_dubai_airport`);
+any other city uses its main airport from reference_data/airports.json. The
+supplier matches inventory on the hotel name, so a name alone is enough.
 
 Shared vs Private pricing logic (from client spec):
   - Shared: price is PER PERSON (vehicle cost ÷ pax count)
@@ -25,12 +27,30 @@ from booking_api import call_transfer_search
 from core import TripPlannerError
 from mcp_tools.server import mcp
 from parsers import parse_transfer_response
-from reference_data_loader import get_default_dubai_airport
+from reference_data_loader import city_airport, get_default_dubai_airport, resolve_city
 
 logger = logging.getLogger(__name__)
 
 
-def _hotel_name_from_coords(lat: float, lng: float) -> str | None:
+def _airport_for(city: dict[str, Any]) -> dict[str, Any]:
+    """{lat, lng, place_id, name} of the airport transfers start from."""
+    if str(city.get("name") or "").strip().lower() == "dubai":
+        return get_default_dubai_airport()
+    main = city_airport(str(city.get("name") or ""), lat=city.get("lat"), lng=city.get("lng"))
+    if not main:
+        return {}
+    return {
+        "lat": main["lat"],
+        "lng": main["lng"],
+        # No Google place id outside Dubai; the supplier matches on position
+        # and name.
+        "place_id": "",
+        "name": f"{main['name']}({str(main['iata']).lower()})",
+        "iata": main["iata"],
+    }
+
+
+def _hotel_name_from_coords(lat: float, lng: float, city_name: str = "Dubai") -> str | None:
     """Reverse-resolve the EXACT hotel name at (lat, lng) via the public
     autocomplete API, which covers ALL hotels (not just the ~60 discovered ones).
 
@@ -44,10 +64,11 @@ def _hotel_name_from_coords(lat: float, lng: float) -> str | None:
     try:
         from booking_api import call_entity_search
 
-        # A broad, generic query returns many Dubai hotels with their coords.
-        # We then pick the one whose coordinates match the target almost exactly.
+        # A broad, generic query returns many of the city's hotels with their
+        # coords. We then pick the one whose coordinates match the target
+        # almost exactly.
         candidates: list[dict] = []
-        for q in ("hotel dubai", "dubai"):
+        for q in (f"hotel {city_name.lower()}", city_name.lower()):
             res = call_entity_search(service="hotels", query=q, size=40)
             for h in res.get("data") or []:
                 if (
@@ -96,6 +117,7 @@ def _transfers_table(options: list[dict[str, Any]]) -> str:
 
 def _impl(
     arrival_date: str,
+    destination_city: str = "Dubai",
     hotel_name: str = "",
     hotel_lat: float | None = None,
     hotel_lng: float | None = None,
@@ -108,10 +130,13 @@ def _impl(
     max_results: int = 20,
     force_refresh: bool = False,
 ) -> dict[str, Any]:
-    """Search Dubai airport ↔ hotel transfers with shared/private pricing logic.
+    """Search airport ↔ hotel transfers in the destination city, with
+    shared/private pricing logic.
 
     Args:
         arrival_date:   Arrival date ISO (yyyy-mm-dd) — REQUIRED.
+        destination_city: The city of the hotel ("Dubai", "Singapore"). The
+                        transfer starts at that city's main airport.
         hotel_name:     The hotel the customer picked (from search_hotels). STRONGLY
                         preferred — with a good name the tool resolves coords itself.
         hotel_lat:      Hotel latitude (optional) — the `latitude` from search_hotels.
@@ -122,8 +147,8 @@ def _impl(
         return_time:    Return pickup time HH:MM (default "12:00")
         adults:         Total number of passengers — IMPORTANT for per-person cost calculation
         transfer_type:  Filter results — "Shared", "Private", or "" for all types.
-                        Leave "" and DO NOT ask the customer first. Dubai airport
-                        inventory is currently Private-only, so asking "shared or
+                        Leave "" and DO NOT ask the customer first. Airport
+                        inventory is mostly Private-only, so asking "shared or
                         private?" wastes a turn and then disappoints. Search, then
                         state what actually came back.
         hotel_place_id: Google Place ID of the hotel. Optional — leave empty string if unknown.
@@ -146,13 +171,17 @@ def _impl(
         transfers are for. Re-run if they later choose a different hotel.
     """
     try:
-        airport = get_default_dubai_airport()
+        city = resolve_city(destination_city or "Dubai")
+        if city is None:
+            from mcp_tools.city_support import unknown_city
+
+            return unknown_city(destination_city, "airport transfers")
+        city_name = str(city.get("name") or destination_city)
+        airport = _airport_for(city)
         if not airport:
-            return {
-                "error": True,
-                "message": "Dubai airport coordinates not configured",
-                "error_type": "MissingReferenceData",
-            }
+            from mcp_tools.city_support import nothing_in_city
+
+            return nothing_in_city(city_name, "airport transfers")
 
         # The supplier matches on the destination NAME ("Hotel" → 2 rows, real
         # name → 60+), so resolve a real hotel name ourselves: canonicalise a
@@ -165,10 +194,10 @@ def _impl(
                 # coords. This is why coords are OPTIONAL: a good name is enough.
                 # City-scope the query FIRST. Entity search is worldwide, so a
                 # generic name ("Social Hotel") matches Portugal/Jaipur/Bogota
-                # long before the Dubai property. Try "<name> Dubai", then fall
-                # back to the bare name.
+                # long before the property in the destination. Try
+                # "<name> <city>", then fall back to the bare name.
                 _q = hotel_name.strip()
-                _queries = [_q] if "dubai" in _q.lower() else [f"{_q} Dubai", _q]
+                _queries = [_q] if city_name.lower() in _q.lower() else [f"{_q} {city_name}", _q]
                 hits: list[dict] = []
                 for _query in _queries:
                     res = call_entity_search(service="hotels", query=_query, size=5)
@@ -177,6 +206,9 @@ def _impl(
                         if isinstance(h, dict) and h.get("type", "").lower() == "hotel"
                         and h.get("latitude") and h.get("longitude")
                     ]
+                    # A hotel in the destination city first.
+                    if city.get("city_id"):
+                        hits.sort(key=lambda h: h.get("cityId") != city.get("city_id"))
                     if hits:
                         break
                 if hits:
@@ -188,7 +220,7 @@ def _impl(
             elif hotel_lat is not None and hotel_lng is not None:
                 # No usable name but we have coords — reverse-resolve the nearest
                 # hotel so we can send a real toLocationName the supplier matches on.
-                resolved = _hotel_name_from_coords(hotel_lat, hotel_lng)
+                resolved = _hotel_name_from_coords(hotel_lat, hotel_lng, city_name)
                 if resolved:
                     hotel_name = resolved
                     logger.info("transfer_resolved_by_coords name=%s lat=%s lng=%s",
@@ -217,9 +249,9 @@ def _impl(
             from_lng=float(airport["lng"]),
             to_lat=hotel_lat,
             to_lng=hotel_lng,
-            from_place_id=str(airport.get("place_id", "ChIJaQ4mkwZdXz4R6e5IegDUleY")),
+            from_place_id=str(airport.get("place_id") or ""),
             to_place_id=hotel_place_id or "",
-            from_location_name=str(airport.get("name", "Dubai International Airport(dxb)")),
+            from_location_name=str(airport.get("name") or ""),
             to_location_name=hotel_name or "Hotel",
             departure_date=arrival_date,
             departure_time=arrival_time,
@@ -266,21 +298,22 @@ def _impl(
                 "options": [],
                 "total_results": 0,
                 "available": False,
+                "destination_city": city_name,
                 "message": (
-                    "No airport transfers are available from our supplier for this "
-                    "hotel/date. Tell the customer plainly that we don't have a "
-                    "transfer for this route right now."
+                    f"No airport transfers are available from our supplier for this "
+                    f"hotel/date in {city_name}. Tell the customer plainly that we "
+                    f"don't have a transfer for this route right now."
                 ),
                 "agent_instructions": (
                     # The website's own packages price their airport legs as
                     # tours sold per vehicle ("Dubai Airport Pickup by
                     # Gujjutours", "... Dropoff ..."), which the transfer
                     # inventory does not list.
-                    "GujjuTours also sells airport pickup and drop-off as tours, "
-                    "priced per vehicle: call search_tours ONCE with "
-                    "query='Airport' (it returns both 'Dubai Airport Pickup by "
-                    "Gujjutours' and '... Dropoff ...') and offer those two, quoting "
-                    "their prices. Only if those "
+                    f"GujjuTours also sells airport pickup and drop-off as tours, "
+                    f"priced per vehicle: call search_tours ONCE with "
+                    f"destination_city='{city_name}' and query='Airport' (e.g. "
+                    f"'{city_name} Airport Pickup by Gujjutours' and '... Dropoff ...') "
+                    f"and offer those, quoting their prices. Only if those "
                     "return nothing, say we have no transfer for these dates and "
                     "offer to try different dates. DO NOT invent Careem/Uber/private car "
                     "services or any provider we didn't search — we only sell what "
@@ -343,6 +376,8 @@ def _impl(
                 else ""
             ),
             "search_params": {
+                "destination_city": city_name,
+                "airport": airport.get("name"),
                 "hotel_lat": hotel_lat,
                 "hotel_lng": hotel_lng,
                 "arrival_date": arrival_date,
@@ -362,6 +397,6 @@ def _impl(
 
 from mcp_tools.result_cache import cache_impl
 
-search_transfers_tool = tool(cache_impl("search_airport_transfer_dubai")(_impl))
-search_transfers_tool.name = "search_airport_transfer_dubai"
-mcp.tool(name="search_airport_transfer_dubai")(_impl)
+search_transfers_tool = tool(cache_impl("search_airport_transfer")(_impl))
+search_transfers_tool.name = "search_airport_transfer"
+mcp.tool(name="search_airport_transfer")(_impl)

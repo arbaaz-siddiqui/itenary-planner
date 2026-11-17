@@ -2,6 +2,15 @@
 // Swapping mock -> real, or changing routes/auth, is a one-file change.
 
 import { mockApi } from "./mock";
+import {
+  searchQuery,
+  type AdminOverview,
+  type AdminSearchList,
+  type AdminTranscript,
+  type AdminUserDetail,
+  type AdminUserList,
+  type SearchFilters,
+} from "./admin";
 import { parseSSE } from "./sse";
 import type {
   ChatSession,
@@ -229,6 +238,27 @@ export const api = {
   /** Every photo of a tour, loaded when its card opens (search carries one). */
   tourImages: (tourId: number): Promise<{ images: string[] }> =>
     MOCK_MODE ? Promise.resolve({ images: [] }) : request(`/tours/${tourId}/images`),
+
+  // --- admin panel (read-only; the server answers 404 to non-admins) ---
+  adminOverview: (days = 30): Promise<AdminOverview> =>
+    MOCK_MODE ? mockApi.adminOverview(days) : request(`/admin-api/overview?days=${days}`),
+
+  adminUsers: (q = "", page = 1, pageSize = 25): Promise<AdminUserList> => {
+    const p = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    if (q.trim()) p.set("q", q.trim());
+    return MOCK_MODE ? mockApi.adminUsers(q, page, pageSize) : request(`/admin-api/users?${p}`);
+  },
+
+  adminUser: (id: string): Promise<AdminUserDetail> =>
+    MOCK_MODE ? mockApi.adminUser(id) : request(`/admin-api/users/${encodeURIComponent(id)}`),
+
+  adminTranscript: (sessionId: string): Promise<AdminTranscript> =>
+    MOCK_MODE
+      ? mockApi.adminTranscript(sessionId)
+      : request(`/admin-api/sessions/${encodeURIComponent(sessionId)}/messages`),
+
+  adminSearches: (filters: SearchFilters): Promise<AdminSearchList> =>
+    MOCK_MODE ? mockApi.adminSearches(filters) : request(`/admin-api/searches${searchQuery(filters)}`),
 
   /**
    * Stream one assistant turn. Yields StreamEvents in arrival order; the

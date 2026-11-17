@@ -65,12 +65,21 @@ def resolve_destination(destination_city: str, near: str = "") -> Destination:
     from reference_data_loader import resolve_city
 
     near = (near or "").strip()
-    city = resolve_city(destination_city)
+    # Offline first: an area of a curated city ("Dubai Marina") must not be
+    # sent to the supplier's worldwide city list before it is tried as a place.
+    city = resolve_city(destination_city, supplier=False)
+    if city is not None and not city.get("city_id"):
+        city = resolve_city(destination_city)
     if city is None or not city.get("city_id"):
         # Maybe an area of a city we cover ("Dubai Marina", "Palm Jumeirah").
         place = locate_place(destination_city)
         if place is None:
-            return Destination(city=None, near_asked=near)
+            # Any other city the supplier knows (London, Singapore).
+            city = resolve_city(destination_city)
+            if city is None or not city.get("city_id"):
+                return Destination(city=None, near_asked=near)
+            place_near = locate_place(near, str(city.get("name") or "")) if near else None
+            return Destination(city=city, place=place_near, near_asked=near)
         city = resolve_city(place.city)
         if city is None or not city.get("city_id"):
             return Destination(city=None, near_asked=near)
@@ -107,6 +116,10 @@ def _list_city(city_id: int, search_date: str, adults: int, children: int) -> tu
         city_id=city_id, search_date=search_date, adults=adults, children=children
     )
     refusal = _supplier_refusal(raw)
+    # "No record found for the given criteria" is how the supplier says it
+    # sells no restaurants in a city (Singapore): an empty city, not a failure.
+    if refusal and "no record found" in refusal.lower():
+        return [], 0
     if refusal:
         raise RestaurantSearchFailed(refusal, endpoint=RESTAURANT_LIST_PATH)
     result = (raw or {}).get("result") if isinstance(raw, dict) else None

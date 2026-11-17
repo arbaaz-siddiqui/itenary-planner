@@ -195,7 +195,7 @@ class ItineraryDoc:
 
     # Header block
     customer_name: str = ""
-    destination: str = "Dubai"
+    destination: str = ""
     origin_city: str = ""
     start_date: str = ""  # human or ISO; rendered verbatim
     end_date: str = ""
@@ -291,7 +291,7 @@ def itinerary_doc_from_dict(data: dict[str, Any]) -> ItineraryDoc:
     nights_raw = _coerce_amount(data.get("nights"))
     return ItineraryDoc(
         customer_name=str(data.get("customer_name") or ""),
-        destination=str(data.get("destination") or "Dubai"),
+        destination=str(data.get("destination") or ""),
         origin_city=str(data.get("origin_city") or ""),
         start_date=str(data.get("start_date") or ""),
         end_date=str(data.get("end_date") or ""),
@@ -398,13 +398,13 @@ def _ascii(text: str) -> str:
 def build_itinerary_pdf(doc: ItineraryDoc) -> bytes:
     """Render the itinerary onto the branded letterhead and return PDF bytes."""
     pdf = _ItineraryPDF()
-    pdf.set_title(f"{doc.destination} Itinerary")
+    pdf.set_title(f"{doc.destination} Itinerary".strip())
     pdf.add_page()
 
     # Title block
     pdf.set_font("Helvetica", "B", 18)
     pdf.set_text_color(*INK)
-    pdf.cell(0, 9, _ascii(f"{doc.destination} Trip Itinerary"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 9, _ascii(f"{doc.destination} Trip Itinerary".strip()), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     if doc.customer_name:
         pdf.set_font("Helvetica", "", 11)
         pdf.set_text_color(*MUTED)
@@ -414,8 +414,9 @@ def build_itinerary_pdf(doc: ItineraryDoc) -> bytes:
 
     # Trip-at-a-glance
     _section_title(pdf, "Trip Summary")
-    route = (doc.origin_city and f"{doc.origin_city} -> {doc.destination}") or doc.destination
-    _kv(pdf, "Route", _ascii(route))
+    route = (doc.origin_city and doc.destination and f"{doc.origin_city} -> {doc.destination}") or doc.destination
+    if route:
+        _kv(pdf, "Route", _ascii(route))
     dates = " to ".join(d for d in (doc.start_date, doc.end_date) if d)
     if doc.nights:
         dates = f"{dates}  ({doc.nights} nights)" if dates else f"{doc.nights} nights"

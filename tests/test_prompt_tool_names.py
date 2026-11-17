@@ -6,7 +6,7 @@ told the model to call `generate_itinerary_pdf`, but the registered tool is
 
 Three more had drifted the same way — `display_options`, `build_trip_schedule`
 and `search_transfers` (which never existed under any name; the real tool is
-`search_airport_transfer_dubai`). MCP tools strip their `_tool` suffix while the
+`search_airport_transfer`). MCP tools strip their `_tool` suffix while the
 plain agent tools keep it, so a prompt author has to know which convention each
 tool follows. This test removes the guesswork.
 """

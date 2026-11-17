@@ -76,12 +76,12 @@ def test_every_kind_searched_in_a_turn_gets_its_cards():
     msgs = [
         AIMessage(content="", tool_calls=[
             {"id": "a", "name": "search_hotels", "args": {}},
-            {"id": "b", "name": "search_airport_transfer_dubai", "args": {}},
+            {"id": "b", "name": "search_airport_transfer", "args": {}},
         ]),
         ToolMessage(content=json.dumps(split({"options": [{"hotel_name": "Social Hotel", "image_urls": ["x"]}]})),
                     tool_call_id="a", name="search_hotels"),
         ToolMessage(content=json.dumps({"options": [{"vehicle_name": "Toyota Hiace"}]}),
-                    tool_call_id="b", name="search_airport_transfer_dubai"),
+                    tool_call_id="b", name="search_airport_transfer"),
     ]
     groups = extract_all_search_options({"messages": msgs})
     assert [g["kind"] for g in groups] == ["hotel", "transfer"]

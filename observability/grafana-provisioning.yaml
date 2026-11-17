@@ -1,0 +1,11 @@
+# Loads the GujjuTours dashboard when Grafana starts (no load script needed).
+apiVersion: 1
+
+providers:
+  - name: 'GujjuTours'
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 60
+    options:
+      path: /otel-lgtm/gujjutours-dashboard.json
+      foldersFromFilesStructure: false

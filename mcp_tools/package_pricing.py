@@ -119,7 +119,16 @@ def _option_meta(tour_id: int, option_id: int, travel_date: str) -> tuple[int, b
     return 1, False
 
 
-def _service_rate(svc: dict[str, Any], travel_date: str) -> tuple[float | None, str]:
+def _service_rate(
+    svc: dict[str, Any], travel_date: str, adults: int = 1, child_ages: list[int] | None = None
+) -> tuple[float | None, str]:
+    """One package service's supplier rate (AED) for the whole party.
+
+    The website prices each tour for the party it shows (paxDetails adults "2"
+    on its package pages, 17 Nov 2026). It priced one adult in October, which
+    this copied; the chatbot then quoted Dubai package 3 at Rs 24,207.16 for 2
+    where the website says Rs 34,604.99.
+    """
     from booking_api.endpoints import call_tour_option_rate
 
     unit = svc["transfer_type_id"] == 4
@@ -129,7 +138,8 @@ def _service_rate(svc: dict[str, Any], travel_date: str) -> tuple[float | None, 
         raw = call_tour_option_rate(
             tour_id=svc["tour_id"], option_id=svc["option_id"],
             supplier_id=supplier, travel_date=travel_date,
-            adults=1, transfer_id=svc["transfer_type_id"] or 3, units=1 if unit else 0,
+            adults=max(1, int(adults)), child_ages=list(child_ages or []),
+            transfer_id=svc["transfer_type_id"] or 3, units=1 if unit else 0,
             extra_units=extra,
         )
         row = ((raw or {}).get("result") or [{}])[0] or {}
@@ -140,12 +150,13 @@ def _service_rate(svc: dict[str, Any], travel_date: str) -> tuple[float | None, 
         if svc["transfer_type_id"] == 2:
             from mcp_tools.tour_pricing import _vehicle_for
 
-            vehicle = _vehicle_for(row, 1)
+            vehicle = _vehicle_for(row, max(1, int(adults)) + len(child_ages or []))
             if vehicle:
                 raw = call_tour_option_rate(
                     tour_id=svc["tour_id"], option_id=svc["option_id"],
                     supplier_id=supplier, travel_date=travel_date,
-                    adults=1, transfer_id=2, extra_units=extra, vehicle_id=vehicle,
+                    adults=max(1, int(adults)), child_ages=list(child_ages or []),
+                    transfer_id=2, extra_units=extra, vehicle_id=vehicle,
                    
                 )
                 row = ((raw or {}).get("result") or [{}])[0] or {}
@@ -203,7 +214,8 @@ def price_package(
             check_out=check_out, hotel_ids=[h["hotel_id"] for h in parts["hotels"]],
             rooms=room_list, nationality=nationality,
         ) if parts["hotels"] else None
-        rate_jobs = [pool.submit(_service_rate, s, day_date(s["day"])) for s in services]
+        rate_jobs = [pool.submit(_service_rate, s, day_date(s["day"]), int(adults), ages)
+                     for s in services]
         try:
             hotel_rates = parse_package_hotel_rates(hotel_job.result()) if hotel_job else {}
         except Exception as e:  # noqa: BLE001

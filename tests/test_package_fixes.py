@@ -195,6 +195,7 @@ class TestPlanMatchesThePackage:
         from mcp_tools.quote_registry import remember
 
         remember("visa", [args["visa_per_adult_inr"]])  # quoted earlier in the chat
+        remember("hotel", [args["hotel_total_inr"]])  # a hotel search quoted it
         with patch("agent_tools._tour_facts_lookup", return_value={}), \
              patch("agent_tools._tour_price_lookup", return_value=0.0):
             return plan_itinerary_tool.invoke(args)
