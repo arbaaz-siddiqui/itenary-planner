@@ -144,15 +144,21 @@ pick the stack's own datasources when Grafana asks, or edit the uids in
 **B. Self-hosted on Railway (same as local).**
 
 `observability/Dockerfile` builds `grafana/otel-lgtm:0.8.1` with the GujjuTours dashboard
-built in (provisioned at start, no load script); `observability/railway.toml` makes Railway
-build it.
+built in (provisioned at start, no load script) and with the base image's anonymous Admin
+access turned off, so only the `GF_SECURITY_ADMIN_*` login gets in. New Railway services cannot
+use `observability/railway.toml` (config as code is closed to new services), so set the build
+and health check by hand as below.
 
 1. In the Railway project: New > GitHub Repo > this repo. Name the service `grafana`.
 2. Settings > Source: Root Directory `/observability`; branch `chat/nextjs/development`
-   (or the branch you deploy from).
+   (or the branch you deploy from). Settings > Build: Builder `Dockerfile`, path
+   `/observability/Dockerfile`, Watch Paths `/observability/**`. Settings > Deploy:
+   Healthcheck Path `/api/health`, timeout 300. Serverless off, 1 replica.
 3. Variables: `GF_SECURITY_ADMIN_USER`, `GF_SECURITY_ADMIN_PASSWORD` (the Grafana login;
    use a strong password, the UI is public). Grafana keeps the password from its FIRST
    start; to change it later use Grafana's own "Change password" (or delete the volume).
+   Also `PORT=3000`: Railway health-checks the port in `PORT`, and without it the deploy
+   fails with "service unavailable" although Grafana is up.
 4. Add a Volume mounted at `/data` (Grafana, Loki, Tempo and Prometheus all store there).
 5. Settings > Networking: Generate Domain with target port `3000` (the Grafana UI). Do not
    add public domains for 4317/4318.
