@@ -129,6 +129,17 @@ _SUPPLIER_LOCK = threading.Lock()
 _CITY_SERVICES = ("hotels", "tours")
 
 
+@lru_cache(maxsize=1)
+def _supplier_spellings() -> dict[str, str]:
+    """Plain name -> the supplier's spelling (reference_data/city_spellings.json)."""
+    path = REFERENCE_DATA_ROOT / "city_spellings.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {_plain(k): str(v) for k, v in raw.items() if not k.startswith("_")}
+
+
 def supplier_city(name: str) -> dict[str, Any] | None:
     """The supplier's own record of a city, from its public autocomplete.
 
@@ -140,6 +151,10 @@ def supplier_city(name: str) -> dict[str, Any] | None:
     key = _plain(_city_key(name or ""))
     if len(key) < 3 or not supplier_lookup_enabled():
         return None
+    # The supplier's search does not fold accents: "Zurich" finds no city,
+    # "Zürich" does. Ask in its spelling; rows are matched accent-free.
+    query = _supplier_spellings().get(key) or _city_key(name)
+    want = _plain(query)
     with _SUPPLIER_LOCK:
         if key in _SUPPLIER_CITIES:
             return _SUPPLIER_CITIES[key]
@@ -151,14 +166,14 @@ def supplier_city(name: str) -> dict[str, Any] | None:
     complete = True
     for service in _CITY_SERVICES:
         try:
-            raw = call_entity_search(service=service, query=_city_key(name), size=10) or {}
+            raw = call_entity_search(service=service, query=query, size=10) or {}
         except Exception as e:  # noqa: BLE001
             logger.warning("supplier city lookup failed q=%r: %s", name, e)
             complete = False
             continue
         if raw.get("error"):
             complete = False
-        found = _pick_city_row(raw.get("data") or [], key)
+        found = _pick_city_row(raw.get("data") or [], want)
         if found:
             break
     if found or complete:

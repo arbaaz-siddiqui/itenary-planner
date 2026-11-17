@@ -450,3 +450,33 @@ class TestPlanGuards:
             })
         titles = " ".join(i["title"] for d in out["days"] for i in d["items"])
         assert "Unavailable" not in titles
+
+
+def test_supplier_is_asked_in_its_own_spelling(monkeypatch) -> None:
+    """"Zurich" found no city at the supplier; "Zürich" does (17 Nov 2026)."""
+    import booking_api.endpoints as ep
+    import reference_data_loader as rdl
+
+    monkeypatch.setenv("CITY_SUPPLIER_LOOKUP", "1")
+    asked: list[str] = []
+
+    def fake(*, service, query, size=10):
+        asked.append(query)
+        if query == "Zürich":
+            return {"data": [{"type": "city", "name_text": "Zürich", "cityId": 70665, "countryId": 129,
+                              "country": "Switzerland", "latitude": 47.37, "longitude": 8.54}]}
+        return {"data": []}
+
+    monkeypatch.setattr(ep, "call_entity_search", fake)
+    rdl._SUPPLIER_CITIES.clear()
+    found = rdl.supplier_city("Zurich")
+    assert asked and asked[0] == "Zürich"
+    assert found and found["city_id"] == 70665
+
+
+def test_a_preferred_airport_in_another_town_serves_the_city() -> None:
+    """KUL is filed under Sepang; "Kuala Lumpur" fell back to Subang (SZB)."""
+    from reference_data_loader import resolve_iata
+
+    assert resolve_iata("Kuala Lumpur") == "KUL"
+    assert resolve_iata("Maldives") == "MLE"

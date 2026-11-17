@@ -1,0 +1,24 @@
+# Local monitoring stack: logs, traces and metrics in one Grafana.
+#
+#   docker compose -f observability/docker-compose.yml up -d
+#   Grafana:  http://localhost:3005   (admin / admin)
+#   OTLP in:  http://localhost:4318 (HTTP), localhost:4317 (gRPC)
+#
+# Point the chat API and the web app at it:
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+# Grafana > Explore: Loki = logs, Tempo = traces, Prometheus = metrics.
+# A log line carries its trace id; "Logs for this span" jumps between them.
+services:
+  lgtm:
+    image: grafana/otel-lgtm:0.8.1
+    container_name: gt-otel-lgtm
+    ports:
+      - "127.0.0.1:3005:3000"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    volumes:
+      - gt-otel-lgtm-data:/data
+    restart: unless-stopped
+
+volumes:
+  gt-otel-lgtm-data:

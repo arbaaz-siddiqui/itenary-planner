@@ -97,6 +97,27 @@ cd web && OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 API_PROXY_TARGET=htt
 Jaeger UI: http://127.0.0.1:16686, service `gujjutours-chat-api`, operation
 `chat.turn`. Screenshots and the collector output are in `docs/otel-qa/`.
 
+### Local: logs, traces and metrics in one Grafana
+
+```
+docker compose -f observability/docker-compose.yml up -d     # Grafana LGTM (Loki, Tempo, Prometheus)
+python observability/load_dashboard.py                       # "GujjuTours chat: overview" dashboard
+```
+
+Then start the chat API and the web app with
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` (and `OTEL_SERVICE_NAME=gujjutours-web`
+for the web). Optional: `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=psycopg` drops the ~40
+database spans per turn.
+
+- Grafana: http://localhost:3005 (admin / admin). Dashboard: chat turns and p50/p95 time,
+  tool calls, supplier calls and errors by endpoint and code, AI model latency and tokens,
+  recent chat-turn traces (click to open the waterfall) and the API's live logs.
+- Explore: Loki for logs (`{service_name="gujjutours-chat-api"}`), Tempo for traces
+  (TraceQL `{name="chat.turn"}`), Prometheus for metrics (`chat_turns_total`,
+  `supplier_errors_total`, `llm_tokens_total`, ...). A log line carries its trace id.
+- The web app only exports when it was started with the OTEL_* env vars; a dev server that
+  was already running on port 3000 keeps running without them.
+
 ## What is captured
 
 ### One trace per chat turn

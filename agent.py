@@ -309,16 +309,87 @@ def build_react_agent(
     # Surface-scoped: voice has no screen and cannot receive a PDF, WhatsApp has
     # no image cards. Handing a surface tools it cannot use costs schema tokens
     # on every request and gives the model more ways to route wrong.
-    parallel_tools = ParallelToolNode(tools_for_surface(surface))
+    surface_tools = tools_for_surface(surface)
+    parallel_tools = ParallelToolNode(surface_tools)
+    model = _search_first_model(llm, surface_tools)
 
     return create_react_agent(
-        model=llm,
+        model=model,
         tools=parallel_tools,
         prompt=load_system_prompt(surface=surface),
         pre_model_hook=_supersede_earlier_searches,
         post_model_hook=_split_concatenated_args,
         checkpointer=checkpointer,
     )
+
+
+#: What a customer asks to be searched, and the search tool each ask needs.
+#: With a date in the same message, the turn must start with one of those
+#: tools (see _search_first_model).
+_SEARCH_ASKS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\b(tours?|activit(?:y|ies)|things to do|sightseeing|excursions?|attractions?)\b", re.I), "search_tours"),
+    (re.compile(r"\b(flights?|fly|flying|airfares?)\b", re.I), "search_flights"),
+    (re.compile(r"\b(hotels?|stays?|resorts?|apartments?|villas?|hostels?|accommodation)\b", re.I), "search_hotels"),
+    (re.compile(r"\b(visas?)\b", re.I), "get_visa_info"),
+    (re.compile(r"\b(transfers?|pick ?ups?|drop ?offs?|cabs?|taxis?)\b", re.I), "search_airport_transfer"),
+    (re.compile(r"\b(packages?|holiday deals?)\b", re.I), "list_packages"),
+    (re.compile(r"\b(restaurants?|dinner|lunch|places to eat)\b", re.I), "search_restaurants"),
+)
+
+
+def _search_tools_asked(messages: list[Any]) -> list[str]:
+    """The search tools the customer's message asks for, when the turn has just
+    started and the message gives a date; [] otherwise.
+
+    Asked "Show me tours in Bangkok on 12 Dec 2026", the model first wrote a
+    table of invented prices with no search; the unsourced-price guard then
+    re-asked it, which cost a second model call (about 7 s) and showed the
+    made-up table until it was replaced. Forced with every search tool on
+    offer, it opened a tour search with list_packages, so each ask maps to
+    its own tool.
+    """
+    if not messages or _message_role(messages[-1]) not in {"human", "user"}:
+        return []
+    from rules import _DATE_WORDS
+
+    said = _customer_part(_message_content(messages[-1]) or "")
+    if not said or not _DATE_WORDS.search(said):
+        return []
+    return [tool for pattern, tool in _SEARCH_ASKS if pattern.search(said)]
+
+
+def _must_search_first(messages: list[Any]) -> bool:
+    """The turn must open with a search (see _search_tools_asked)."""
+    return bool(_search_tools_asked(messages))
+
+
+def _search_first_model(llm: Any, tools: list[Any]) -> Any:
+    """The chat model for each step: on the first step of a turn that asks for a
+    dated search, one that must call a search the customer asked for; the usual
+    one otherwise. Falls back to the plain model when the provider cannot force
+    a tool.
+    """
+    bound = llm.bind_tools(tools)
+    by_name = {getattr(t, "name", ""): t for t in tools}
+    forced_cache: dict[tuple[str, ...], Any] = {}
+
+    def forced_for(names: tuple[str, ...]) -> Any:
+        if names not in forced_cache:
+            chosen = [by_name[n] for n in names if n in by_name]
+            try:
+                forced_cache[names] = (
+                    llm.bind_tools(chosen, tool_choice="required") if chosen else bound
+                )
+            except Exception:  # noqa: BLE001 - provider without tool_choice: never force
+                forced_cache[names] = bound
+        return forced_cache[names]
+
+    def pick(state: Any, runtime: Any = None) -> Any:
+        msgs = state.get("messages") if isinstance(state, dict) else getattr(state, "messages", None)
+        names = tuple(_search_tools_asked(list(msgs or [])))
+        return forced_for(names) if names else bound
+
+    return pick
 
 
 #: Searches whose earlier results the model must not reuse once the customer

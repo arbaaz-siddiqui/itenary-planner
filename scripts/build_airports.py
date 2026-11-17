@@ -109,6 +109,12 @@ def build(airports_csv: str, countries_csv: str) -> dict:
             codes.remove(pref)
             codes.insert(0, pref)
         index[key] = codes
+    # A preferred airport filed under another town (KUL is "Sepang") still
+    # serves the city: without this "Kuala Lumpur" fell back to Subang (SZB).
+    for city, code in PREFERRED.items():
+        if code in airports:
+            rest = [c for c in index.get(city, []) if c != code]
+            index[city] = [code, *rest]
     for alias, code in ALIASES.items():
         if code in airports:
             rest = [c for c in index.get(alias, []) if c != code]
