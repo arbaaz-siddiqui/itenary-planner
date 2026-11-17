@@ -168,6 +168,12 @@ and health check by hand as below.
    `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=psycopg`. They redeploy and start sending.
 7. Open the domain, sign in, Dashboards > "GujjuTours chat: overview".
 
+Dashboard counters: a counter series first reaches Prometheus already at its first value
+(a new deploy, a new tool, a new model), and `increase()` cannot see that first step, so a
+quiet hour showed "Chat turns 0" beside real tool calls. The dashboard therefore counts a
+window as `clamp_min(x - x offset W, 0) or x`: a series born inside the window counts from
+zero. Keep that form when adding counter panels.
+
 Logins: Grafana uses its own user (`GF_SECURITY_ADMIN_USER` / `GF_SECURITY_ADMIN_PASSWORD`).
 The chatbot's admin panel (`/admin`) uses the accounts listed in `ADMIN_EMAILS` on `chat-api`;
 each admin signs up in the chat app with that email first.
