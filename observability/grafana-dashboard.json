@@ -44,7 +44,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "round(sum(increase(chat_turns_total{service_name=\"gujjutours-chat-api\"}[1h]))) or vector(0)",
+          "expr": "round(sum((clamp_min(chat_turns_total{service_name=\"gujjutours-chat-api\"} - chat_turns_total{service_name=\"gujjutours-chat-api\"} offset 1h, 0) or chat_turns_total{service_name=\"gujjutours-chat-api\"}))) or vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -130,7 +130,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "round(sum(increase(agent_tool_calls_total{service_name=\"gujjutours-chat-api\"}[1h]))) or vector(0)",
+          "expr": "round(sum((clamp_min(agent_tool_calls_total{service_name=\"gujjutours-chat-api\"} - agent_tool_calls_total{service_name=\"gujjutours-chat-api\"} offset 1h, 0) or agent_tool_calls_total{service_name=\"gujjutours-chat-api\"}))) or vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -173,7 +173,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "round(sum(increase(supplier_errors_total{service_name=\"gujjutours-chat-api\"}[1h]))) or vector(0)",
+          "expr": "round(sum((clamp_min(supplier_errors_total{service_name=\"gujjutours-chat-api\"} - supplier_errors_total{service_name=\"gujjutours-chat-api\"} offset 1h, 0) or supplier_errors_total{service_name=\"gujjutours-chat-api\"}))) or vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -216,7 +216,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "round(sum(increase(llm_tokens_total{service_name=\"gujjutours-chat-api\"}[1h]))) or vector(0)",
+          "expr": "round(sum((clamp_min(llm_tokens_total{service_name=\"gujjutours-chat-api\"} - llm_tokens_total{service_name=\"gujjutours-chat-api\"} offset 1h, 0) or llm_tokens_total{service_name=\"gujjutours-chat-api\"}))) or vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -259,7 +259,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "round(sum(increase(llm_calls_total{service_name=\"gujjutours-chat-api\",outcome!=\"ok\"}[1h]))) or vector(0)",
+          "expr": "round(sum((clamp_min(llm_calls_total{service_name=\"gujjutours-chat-api\",outcome!=\"ok\"} - llm_calls_total{service_name=\"gujjutours-chat-api\",outcome!=\"ok\"} offset 1h, 0) or llm_calls_total{service_name=\"gujjutours-chat-api\",outcome!=\"ok\"}))) or vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -339,7 +339,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (outcome) (increase(chat_turns_total{service_name=\"gujjutours-chat-api\"}[5m]))",
+          "expr": "sum by (outcome) ((clamp_min(chat_turns_total{service_name=\"gujjutours-chat-api\"} - chat_turns_total{service_name=\"gujjutours-chat-api\"} offset 5m, 0) or chat_turns_total{service_name=\"gujjutours-chat-api\"}))",
           "legendFormat": "{{outcome}}",
           "datasource": {
             "type": "prometheus",
@@ -375,7 +375,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (tool, outcome) (increase(agent_tool_calls_total{service_name=\"gujjutours-chat-api\"}[5m]))",
+          "expr": "sum by (tool, outcome) ((clamp_min(agent_tool_calls_total{service_name=\"gujjutours-chat-api\"} - agent_tool_calls_total{service_name=\"gujjutours-chat-api\"} offset 5m, 0) or agent_tool_calls_total{service_name=\"gujjutours-chat-api\"}))",
           "legendFormat": "{{tool}} {{outcome}}",
           "datasource": {
             "type": "prometheus",
@@ -447,7 +447,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (endpoint, code) (increase(supplier_errors_total{service_name=\"gujjutours-chat-api\"}[5m]))",
+          "expr": "sum by (endpoint, code) ((clamp_min(supplier_errors_total{service_name=\"gujjutours-chat-api\"} - supplier_errors_total{service_name=\"gujjutours-chat-api\"} offset 5m, 0) or supplier_errors_total{service_name=\"gujjutours-chat-api\"}))",
           "legendFormat": "{{endpoint}} {{code}}",
           "datasource": {
             "type": "prometheus",
@@ -564,7 +564,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (type) (increase(llm_tokens_total{service_name=\"gujjutours-chat-api\"}[5m]))",
+          "expr": "sum by (type) ((clamp_min(llm_tokens_total{service_name=\"gujjutours-chat-api\"} - llm_tokens_total{service_name=\"gujjutours-chat-api\"} offset 5m, 0) or llm_tokens_total{service_name=\"gujjutours-chat-api\"}))",
           "legendFormat": "{{type}}",
           "datasource": {
             "type": "prometheus",
