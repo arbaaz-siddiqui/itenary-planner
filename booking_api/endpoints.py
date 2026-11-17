@@ -1466,8 +1466,10 @@ def call_tour_option_rate(
         "isCache": False,
     }
     try:
+        # One retry: the supplier's 500 for an option it cannot price is not
+        # transient, and each retry held the whole tour search up.
         return get_b2c_client().post(
-            TOUR_OPTION_RATE_PATH, json=payload, headers=base_headers()
+            TOUR_OPTION_RATE_PATH, json=payload, headers=base_headers(), retries=1
         )
     except Exception as e:
         raise BookingApiError(

@@ -162,13 +162,15 @@ class BookingApiClient:
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        retries: int | None = None,
     ) -> dict[str, Any]:
         # One span per supplier call (all retries): endpoint, status, the
         # supplier's error code, duration. Never the headers (bearer tokens).
         host = self.base_url.split("://", 1)[-1].split("/", 1)[0]
         with observability.supplier_span(method, path, host) as call:
             return self._request(
-                method, path, json=json, params=params, headers=headers, call=call
+                method, path, json=json, params=params, headers=headers, call=call,
+                retries=self.max_retries if retries is None else max(0, retries),
             )
 
     def _request(
@@ -180,12 +182,13 @@ class BookingApiClient:
         params: dict[str, Any] | None,
         headers: dict[str, str] | None,
         call: observability.SupplierCall,
+        retries: int,
     ) -> dict[str, Any]:
         url = self._url(path)
         attempt = 0
         last_exc: Exception | None = None
 
-        while attempt <= self.max_retries:
+        while attempt <= retries:
             attempt += 1
             call.attempts = attempt
             req_start = time.perf_counter()
@@ -212,9 +215,9 @@ class BookingApiClient:
                     duration_ms=(time.perf_counter() - req_start) * 1000,
                     error="timeout",
                 )
-                if attempt > self.max_retries:
+                if attempt > retries:
                     raise BookingApiTimeout(
-                        f"Timeout for {path} after {self.max_retries + 1} attempts",
+                        f"Timeout for {path} after {retries + 1} attempts",
                         endpoint=path,
                     ) from e
                 time.sleep(min(2**attempt, 5))
@@ -228,7 +231,7 @@ class BookingApiClient:
                     duration_ms=(time.perf_counter() - req_start) * 1000,
                     error=type(e).__name__,
                 )
-                if attempt > self.max_retries:
+                if attempt > retries:
                     raise BookingApiError(
                         f"Network error calling {path}: {e}", endpoint=path
                     ) from e
@@ -270,14 +273,17 @@ class BookingApiClient:
                     server_message=_server_msg(response),
                 )
             if 500 <= sc < 600:
-                if attempt > self.max_retries:
+                if attempt > retries:
                     raise BookingApiServerError(
                         f"{sc} Server error for {path}",
                         endpoint=path,
                         status_code=sc,
                         server_message=_server_msg(response),
                     )
-                time.sleep(min(2**attempt, 5))
+                # A server error answers at once; waiting 2 s then 4 s (as for
+                # a timeout) added 6 s to a turn for a tour option the supplier
+                # cannot price (optionRate 500, Singapore, 17 Nov 2026).
+                time.sleep(0.5 * attempt)
                 continue
             if 400 <= sc < 500:
                 raise BookingApiError(
@@ -315,8 +321,9 @@ class BookingApiClient:
         *,
         json: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        retries: int | None = None,
     ) -> dict[str, Any]:
-        return self.request("POST", path, json=json, headers=headers)
+        return self.request("POST", path, json=json, headers=headers, retries=retries)
 
     def get(
         self,
