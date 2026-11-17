@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import { THEME_BOOT_SCRIPT } from "@/lib/themeBoot";
 import "./globals.css";
 
@@ -7,15 +7,19 @@ import "./globals.css";
 // rupee sign (U+20B9). Headings: Bricolage Grotesque, a characterful
 // grotesque for display sizes. Both carry the rupee sign, so prices never
 // fall back to a system face mid-number.
-const sans = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+//
+// Self-hosted (src/app/fonts, OFL, Latin + Latin Extended + currency signs)
+// so the build never downloads from Google Fonts: a Railway build failed when
+// that download returned something next/font could not read.
+const sans = localFont({
+  src: "./fonts/PlusJakartaSans-var.woff2",
+  weight: "400 700",
   variable: "--font-sans-face",
   display: "swap",
 });
-const display = Bricolage_Grotesque({
-  subsets: ["latin"],
-  weight: ["500", "600", "700", "800"],
+const display = localFont({
+  src: "./fonts/BricolageGrotesque-var.woff2",
+  weight: "500 800",
   variable: "--font-display-face",
   display: "swap",
 });
