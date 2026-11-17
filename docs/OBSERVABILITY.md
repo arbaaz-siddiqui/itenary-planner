@@ -118,6 +118,45 @@ database spans per turn.
 - The web app only exports when it was started with the OTEL_* env vars; a dev server that
   was already running on port 3000 keeps running without them.
 
+### Deploying Grafana (production, Railway)
+
+The local stack above is one Docker image, `grafana/otel-lgtm` (Grafana with Loki for
+logs, Tempo for traces, Prometheus for metrics, and an OTLP receiver). Two ways to run it
+in production:
+
+**A. Grafana Cloud (recommended, nothing to run).** Create a free stack at grafana.com, open
+"OpenTelemetry" in the stack settings and copy the OTLP endpoint and the generated
+`Authorization=Basic ...` header. On Railway set, on both `chat-api` and `web`:
+
+```
+OTEL_EXPORTER_OTLP_ENDPOINT=<the stack's OTLP endpoint>
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic <token>
+OTEL_SERVICE_NAME=gujjutours-chat-api        # gujjutours-web on the web service
+OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=psycopg  # chat-api only, optional
+```
+
+Then load the dashboard into the stack (a Grafana service-account token with Editor role):
+`python observability/load_dashboard.py --url https://<stack>.grafana.net --token <token>`.
+The datasource uids in the dashboard are `prometheus`, `loki`, `tempo`; in Grafana Cloud,
+pick the stack's own datasources when Grafana asks, or edit the uids in
+`observability/grafana-dashboard.json` to the stack's (`grafanacloud-prom` etc.).
+
+**B. Self-hosted on Railway (same as local).**
+
+1. In the Railway project: New service > Docker image > `grafana/otel-lgtm:0.8.1`.
+2. Variables: `GF_SECURITY_ADMIN_USER` and `GF_SECURITY_ADMIN_PASSWORD` (the Grafana
+   login; use a strong password, the UI is public).
+3. Add a volume mounted at `/data` (keeps logs, traces and metrics across redeploys).
+4. Networking: generate a public domain for port `3000` (Grafana UI). Do not expose
+   4317/4318 publicly; the other services reach them over Railway's private network.
+5. On `chat-api` and `web`: `OTEL_EXPORTER_OTLP_ENDPOINT=http://<grafana-service>.railway.internal:4318`
+   and `OTEL_SERVICE_NAME` as above. Redeploy them.
+6. Load the dashboard once: `python observability/load_dashboard.py --url https://<grafana-domain> --auth <user>:<password>`.
+
+Logins: Grafana uses its own user (`GF_SECURITY_ADMIN_USER` / `GF_SECURITY_ADMIN_PASSWORD`).
+The chatbot's admin panel (`/admin`) uses the accounts listed in `ADMIN_EMAILS` on `chat-api`;
+each admin signs up in the chat app with that email first.
+
 ## What is captured
 
 ### One trace per chat turn

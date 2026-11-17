@@ -1,17 +1,22 @@
 # Local monitoring stack: logs, traces and metrics in one Grafana.
 #
 #   docker compose -f observability/docker-compose.yml up -d
-#   Grafana:  http://localhost:3005   (admin / admin)
+#   Grafana:  http://localhost:3005   (login from GRAFANA_ADMIN_USER / GRAFANA_ADMIN_PASSWORD,
+#                                      admin / admin when unset)
 #   OTLP in:  http://localhost:4318 (HTTP), localhost:4317 (gRPC)
 #
 # Point the chat API and the web app at it:
 #   OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
 # Grafana > Explore: Loki = logs, Tempo = traces, Prometheus = metrics.
 # A log line carries its trace id; "Logs for this span" jumps between them.
+# Production (Railway): see docs/OBSERVABILITY.md, "Deploying Grafana".
 services:
   lgtm:
     image: grafana/otel-lgtm:0.8.1
     container_name: gt-otel-lgtm
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
     ports:
       - "127.0.0.1:3005:3000"
       - "127.0.0.1:4317:4317"

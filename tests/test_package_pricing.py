@@ -109,7 +109,9 @@ def test_services_are_asked_as_the_website_asks(live):
     unit_calls = [c for c in live if c["transfer_id"] == 4]
     tour_calls = [c for c in live if c["transfer_id"] != 4]
     assert all(c["units"] == 1 for c in unit_calls)
-    assert all(c["adults"] == 1 and c["units"] == 0 for c in tour_calls)
+    # The whole party, as gujjutours.com asks since Nov 2026 (it asked for one
+    # adult in October; Dubai package 3 for 2 is Rs 34,604.99 priced this way).
+    assert all(c["adults"] == 2 and c["units"] == 0 for c in tour_calls)
     # Each service on its own day.
     assert {c["option_id"]: c["travel_date"] for c in live}[222574] == "2026-10-25"
 

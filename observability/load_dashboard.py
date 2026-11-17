@@ -22,12 +22,13 @@ DASHBOARD = Path(__file__).with_name("grafana-dashboard.json")
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="http://127.0.0.1:3005")
-    ap.add_argument("--auth", default="admin:admin")
+    ap.add_argument("--auth", default="admin:admin", help="user:password (local or self-hosted)")
+    ap.add_argument("--token", help="Grafana service-account token (Grafana Cloud); used instead of --auth")
     a = ap.parse_args()
-    user, _, pw = a.auth.partition(":")
     dash = json.loads(DASHBOARD.read_text(encoding="utf-8"))
-    r = httpx.post(f"{a.url}/api/dashboards/db", auth=(user, pw), timeout=30,
-                   json={"dashboard": dash, "overwrite": True, "folderId": 0})
+    kwargs: dict = {"headers": {"Authorization": f"Bearer {a.token}"}} if a.token else {"auth": tuple(a.auth.partition(":")[::2])}
+    r = httpx.post(f"{a.url.rstrip('/')}/api/dashboards/db", timeout=30,
+                   json={"dashboard": dash, "overwrite": True, "folderId": 0}, **kwargs)
     if r.status_code != 200:
         print("failed:", r.status_code, r.text[:300])
         return 1
