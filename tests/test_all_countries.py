@@ -480,3 +480,144 @@ def test_a_preferred_airport_in_another_town_serves_the_city() -> None:
 
     assert resolve_iata("Kuala Lumpur") == "KUL"
     assert resolve_iata("Maldives") == "MLE"
+
+
+# --- tour city ids, country qualifiers (website coverage check, 17 Nov 2026) --
+
+def _row(name: str, cid: int, country: str, country_id: int) -> dict[str, Any]:
+    return {"type": "city", "name_text": name, "cityId": cid, "countryId": country_id,
+            "country": country, "latitude": 0.0, "longitude": 0.0}
+
+
+class TestTourCityIds:
+    """The supplier files tours under their own city ids: Osaka hotels 4918 had
+    0 tours, tours 164147 has 291 (as gujjutours.com lists)."""
+
+    def test_tours_ask_the_tour_list_first(self, online) -> None:
+        import reference_data_loader as rdl
+
+        rdl._SUPPLIER_CITIES.clear()
+        fake = _entity({
+            ("hotels", "osaka"): {"data": [_row("Osaka", 4918, "Japan", 182)]},
+            ("tours", "osaka"): {"data": [_row("Osaka", 164147, "Japan", 182)]},
+        })
+        with patch("booking_api.endpoints.call_entity_search", fake):
+            assert rdl.resolve_city("Osaka", service="tours")["city_id"] == 164147
+            assert rdl.resolve_city("Osaka")["city_id"] == 4918
+
+    def test_an_indian_city_gets_its_tour_id_for_tours(self, online) -> None:
+        import reference_data_loader as rdl
+
+        rdl._SUPPLIER_CITIES.clear()
+        fake = _entity({
+            ("hotels", "jaipur"): {"data": [_row("Jaipur", 1117, "India", 245)]},
+            ("tours", "jaipur"): {"data": [_row("Jaipur", 236352, "India", 245)]},
+        })
+        with patch("booking_api.endpoints.call_entity_search", fake):
+            assert rdl.resolve_city("Jaipur", service="tours")["city_id"] == 236352
+
+    def test_search_tours_uses_the_tour_id(self, online) -> None:
+        from mcp_tools import search_tours
+
+        seen: dict[str, Any] = {}
+
+        def fake_resolve(name: str, **kw: Any) -> dict[str, Any]:
+            seen.update(kw)
+            return {"name": "Osaka", "city_id": 164147, "country_id": 182}
+
+        with patch.object(search_tours, "resolve_city", fake_resolve), \
+             patch.object(search_tours, "call_tour_search", lambda **_: {"result": {}}), \
+             patch.object(search_tours, "call_tour_rates", lambda **_: {"result": []}):
+            search_tours._impl(destination_city="Osaka", travel_date="2026-12-15", adults=2)
+        assert seen.get("service") == "tours"
+
+
+class TestCountryQualifier:
+    def test_the_named_country_wins(self, online) -> None:
+        import reference_data_loader as rdl
+
+        rdl._SUPPLIER_CITIES.clear()
+        fake = _entity({
+            ("hotels", "london"): {"data": [_row("London", 17745, "United Kingdom", 215)]},
+            ("hotels", "london canada"): {"data": [_row("London", 152518, "Canada", 39)]},
+        })
+        with patch("booking_api.endpoints.call_entity_search", fake):
+            assert rdl.resolve_city("London")["city_id"] == 17745
+            assert rdl.resolve_city("London, Canada")["city_id"] == 152518
+
+    def test_country_aliases(self, online) -> None:
+        import reference_data_loader as rdl
+
+        rdl._SUPPLIER_CITIES.clear()
+        fake = _entity({("hotels", "perth"): {"data": [
+            _row("Perth", 7387, "Australia", 14), _row("Perth", 299441, "United Kingdom", 215)]}})
+        with patch("booking_api.endpoints.call_entity_search", fake):
+            assert rdl.resolve_city("Perth")["city_id"] == 7387
+            assert rdl.resolve_city("Perth, UK")["city_id"] == 299441
+            assert rdl.resolve_city("Perth, Scotland")["city_id"] == 299441
+
+    def test_a_curated_city_in_another_country_is_not_used(self, online) -> None:
+        import reference_data_loader as rdl
+
+        rdl._SUPPLIER_CITIES.clear()
+        fake = _entity({})
+        with patch("booking_api.endpoints.call_entity_search", fake):
+            assert rdl.resolve_city("Dubai")["city_id"] == 244520
+            assert rdl.resolve_city("Dubai, UAE")["city_id"] == 244520
+            assert rdl.resolve_city("Dubai, Canada") is None
+
+
+def test_a_name_without_its_apostrophe_or_space_still_matches(online) -> None:
+    import reference_data_loader as rdl
+
+    rdl._SUPPLIER_CITIES.clear()
+    fake = _entity({("hotels", "hochiminh"): {"data": [_row("Ho Chi Minh", 89, "Viet Nam", 230)]},
+                    ("hotels", "xi'an"): {"data": [_row("Xi'an", 70903, "China", 161)]}})
+    with patch("booking_api.endpoints.call_entity_search", fake):
+        assert rdl.resolve_city("Hochiminh")["city_id"] == 89
+        # "Xian" finds no city at the supplier; city_spellings.json asks "Xi'an".
+        assert rdl.resolve_city("Xian")["city_id"] == 70903
+
+
+def test_a_city_with_no_tours_says_so(online) -> None:
+    """Cape Town had no priced tours; the reply asked to paste an empty table."""
+    from mcp_tools import search_tours
+
+    with patch.object(search_tours, "resolve_city",
+                      lambda *_a, **_k: {"name": "Cape Town", "city_id": 1, "country_id": 2}), \
+         patch.object(search_tours, "call_tour_search", lambda **_: {"result": {}}), \
+         patch.object(search_tours, "call_tour_rates", lambda **_: {"result": []}):
+        r = search_tours._impl(destination_city="Cape Town", travel_date="2026-12-15", adults=2)
+    assert r["error"] and r["error_type"] == "UnsupportedRoute"
+    assert "Cape Town" in r["message"] and "2026-12-15" in r["agent_instructions"]
+
+
+def _transfer_with_rows(rows: list[dict[str, Any]], hotel_name: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    from mcp_tools.search_transfers import _impl
+
+    sent: dict[str, Any] = {}
+    with patch("booking_api.call_entity_search", lambda **k: {"data": rows}), \
+         patch("mcp_tools.search_transfers.call_transfer_search",
+               lambda **k: sent.update(k) or {}), \
+         patch("mcp_tools.search_transfers.resolve_city",
+               lambda n: {"name": "Singapore", "city_id": 70926, "lat": None, "lng": None}):
+        out = _impl(arrival_date="2026-12-10", destination_city="Singapore", hotel_name=hotel_name)
+    return out, sent
+
+
+def test_a_hotel_known_only_as_a_point_of_interest_gets_a_transfer() -> None:
+    """Marina Bay Sands is only a point of interest at the supplier; the tool
+    said "you called transfers without a hotel" (17 Nov 2026)."""
+    rows = [{"type": "point_of_interest", "name_text": "Marina Bay Sands Skypark",
+             "latitude": 1.2834, "longitude": 103.8607, "cityId": 55362},
+            {"type": "point_of_interest", "name_text": "Gardens by the Bay",
+             "latitude": 1.28, "longitude": 103.86, "cityId": 70926}]
+    _out, sent = _transfer_with_rows(rows, "Marina Bay Sands")
+    assert round(sent["to_lat"], 3) == 1.283
+
+
+def test_a_named_hotel_that_cannot_be_found_is_not_called_missing() -> None:
+    out, sent = _transfer_with_rows([], "Zzqx Inn")
+    assert not sent
+    assert "without a hotel" not in out["agent_instructions"]
+    assert "Zzqx Inn" in out["message"]

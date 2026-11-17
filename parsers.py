@@ -355,8 +355,12 @@ def _parse_flight_itinerary(
     # Every marketing carrier on the trip, in flying order. Naming only the
     # first segment's carrier sold AI 2546 + FZ 442 / FZ 437 as "Air India"
     # when two of its three flights are flydubai.
+    # A segment with no carrier name (seen on a Bangkok fare, 17 Nov 2026)
+    # falls back to its airline code, so the card never shows a blank airline.
     carriers = list(dict.fromkeys(
-        s.marketing_airline for s in [*segs_out, *segs_ret] if s.marketing_airline
+        (s.marketing_airline or s.marketing_airline_code).strip()
+        for s in [*segs_out, *segs_ret]
+        if (s.marketing_airline or s.marketing_airline_code).strip()
     ))
     airline = " + ".join(carriers)
     airline_code = segs_out[0].marketing_airline_code if segs_out else ""
