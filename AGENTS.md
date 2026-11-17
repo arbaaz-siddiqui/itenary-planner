@@ -581,6 +581,8 @@ Data table addition: "What each customer searched | `search_log`"; "Admin transc
 
 ### 17.3 OpenTelemetry
 
+Local stack: `docker compose -f observability/docker-compose.yml up -d` (Grafana LGTM on http://localhost:3005, OTLP on 4317/4318) and `python observability/load_dashboard.py` (dashboard `observability/grafana-dashboard.json`). See `docs/OBSERVABILITY.md`.
+
 Facts to merge into AGENTS.md when this branch lands (the lead edits AGENTS.md).
 
 #### §3 Repository layout
