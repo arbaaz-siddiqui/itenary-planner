@@ -143,15 +143,24 @@ pick the stack's own datasources when Grafana asks, or edit the uids in
 
 **B. Self-hosted on Railway (same as local).**
 
-1. In the Railway project: New service > Docker image > `grafana/otel-lgtm:0.8.1`.
-2. Variables: `GF_SECURITY_ADMIN_USER` and `GF_SECURITY_ADMIN_PASSWORD` (the Grafana
-   login; use a strong password, the UI is public).
-3. Add a volume mounted at `/data` (keeps logs, traces and metrics across redeploys).
-4. Networking: generate a public domain for port `3000` (Grafana UI). Do not expose
-   4317/4318 publicly; the other services reach them over Railway's private network.
-5. On `chat-api` and `web`: `OTEL_EXPORTER_OTLP_ENDPOINT=http://<grafana-service>.railway.internal:4318`
-   and `OTEL_SERVICE_NAME` as above. Redeploy them.
-6. Load the dashboard once: `python observability/load_dashboard.py --url https://<grafana-domain> --auth <user>:<password>`.
+`observability/Dockerfile` builds `grafana/otel-lgtm:0.8.1` with the GujjuTours dashboard
+built in (provisioned at start, no load script); `observability/railway.toml` makes Railway
+build it.
+
+1. In the Railway project: New > GitHub Repo > this repo. Name the service `grafana`.
+2. Settings > Source: Root Directory `/observability`; branch `chat/nextjs/development`
+   (or the branch you deploy from).
+3. Variables: `GF_SECURITY_ADMIN_USER`, `GF_SECURITY_ADMIN_PASSWORD` (the Grafana login;
+   use a strong password, the UI is public). Grafana keeps the password from its FIRST
+   start; to change it later use Grafana's own "Change password" (or delete the volume).
+4. Add a Volume mounted at `/data` (Grafana, Loki, Tempo and Prometheus all store there).
+5. Settings > Networking: Generate Domain with target port `3000` (the Grafana UI). Do not
+   add public domains for 4317/4318.
+6. On `chat-api` and `web` add `OTEL_EXPORTER_OTLP_ENDPOINT=http://grafana.railway.internal:4318`
+   (use the service's private name shown under Networking) and `OTEL_SERVICE_NAME`
+   (`gujjutours-chat-api` / `gujjutours-web`); chat-api optionally
+   `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=psycopg`. They redeploy and start sending.
+7. Open the domain, sign in, Dashboards > "GujjuTours chat: overview".
 
 Logins: Grafana uses its own user (`GF_SECURITY_ADMIN_USER` / `GF_SECURITY_ADMIN_PASSWORD`).
 The chatbot's admin panel (`/admin`) uses the accounts listed in `ADMIN_EMAILS` on `chat-api`;
