@@ -254,7 +254,7 @@ Next.js 15.5, React 19.1, Tailwind v4 (`@tailwindcss/postcss`, no `tailwind.conf
 
 ### Routes (`src/app`)
 
-- `layout.tsx`: fonts via `next/font/google` (Plus Jakarta Sans 400-700 `--font-sans-face`; Bricolage Grotesque 500-800 `--font-display-face`; both have the ₹ glyph), viewport (`maximumScale 1`, `viewportFit: cover`), `<html data-theme="dark">` plus the inline `THEME_BOOT_SCRIPT`.
+- `layout.tsx`: fonts self-hosted via `next/font/local` from `src/app/fonts/` (variable woff2, Latin + Latin Extended + currency signs; never switch back to `next/font/google`: the Railway build fails whenever Google Fonts answers oddly) (Plus Jakarta Sans 400-700 `--font-sans-face`; Bricolage Grotesque 500-800 `--font-display-face`; both have the ₹ glyph), viewport (`maximumScale 1`, `viewportFit: cover`), `<html data-theme="dark">` plus the inline `THEME_BOOT_SCRIPT`.
 - `page.tsx` → redirect to `/chat`.
 - `login/page.tsx`, `signup/page.tsx` (first + last name, email, password ≥ 8, confirm; validates on blur/submit; 409 = email taken). Both skip to `/chat` when already signed in.
 - `chat/page.tsx`: the whole app shell (sidebar, drawer, home hero, messages, composer, dialogs, detail panel).
