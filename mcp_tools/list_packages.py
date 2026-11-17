@@ -92,7 +92,8 @@ def _impl(
     """List packages for the destination.
 
     Args:
-        destination_city: e.g. 'Dubai'.
+        destination_city: e.g. 'Dubai'; add the country after a comma when the
+            name exists in several countries ('Perth, UK').
         check_in: ISO yyyy-mm-dd.
         check_out: ISO yyyy-mm-dd.
         adults: Adults in one room.
