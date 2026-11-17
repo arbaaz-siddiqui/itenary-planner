@@ -135,7 +135,8 @@ def _impl(
 
     Args:
         arrival_date:   Arrival date ISO (yyyy-mm-dd) — REQUIRED.
-        destination_city: The city of the hotel ("Dubai", "Singapore"). The
+        destination_city: The city of the hotel ("Dubai", "Singapore"; "London,
+            Canada" when the name exists in several countries). The
                         transfer starts at that city's main airport.
         hotel_name:     The hotel the customer picked (from search_hotels). STRONGLY
                         preferred — with a good name the tool resolves coords itself.
@@ -201,11 +202,23 @@ def _impl(
                 hits: list[dict] = []
                 for _query in _queries:
                     res = call_entity_search(service="hotels", query=_query, size=5)
-                    hits = [
+                    rows = [
                         h for h in (res.get("data") or [])
-                        if isinstance(h, dict) and h.get("type", "").lower() == "hotel"
-                        and h.get("latitude") and h.get("longitude")
+                        if isinstance(h, dict) and h.get("latitude") and h.get("longitude")
                     ]
+                    hits = [h for h in rows if str(h.get("type") or "").lower() == "hotel"]
+                    if not hits:
+                        # Marina Bay Sands is not in the supplier's hotel list,
+                        # only as a point of interest at the same address; a
+                        # transfer to that point is a transfer to the hotel.
+                        # It used to fall through to "you called transfers
+                        # without a hotel" although the customer named one.
+                        words = [w for w in _q.lower().split() if len(w) > 2]
+                        hits = [
+                            h for h in rows
+                            if str(h.get("type") or "").lower() == "point_of_interest"
+                            and all(w in str(h.get("name_text") or "").lower() for w in words)
+                        ]
                     # A hotel in the destination city first.
                     if city.get("city_id"):
                         hits.sort(key=lambda h: h.get("cityId") != city.get("city_id"))
@@ -230,6 +243,19 @@ def _impl(
 
         # Neither a usable name NOR coordinates → we can't search. Ask the agent to
         # get the hotel first (graceful — no crash, no fake "unavailable").
+        if (hotel_lat is None or hotel_lng is None) and hotel_name.strip():
+            return {
+                "options": [],
+                "total_results": 0,
+                "available": False,
+                "message": f"Could not place {hotel_name!r} in {city_name} on the map.",
+                "agent_instructions": (
+                    f"We could not find {hotel_name!r} in {city_name}. Ask the customer "
+                    "for the hotel's exact name or its area, or offer a nearby hotel "
+                    "from search_hotels, then search again. Do NOT say transfers are "
+                    "unavailable in this city."
+                ),
+            }
         if hotel_lat is None or hotel_lng is None:
             return {
                 "options": [],

@@ -154,6 +154,18 @@ class TestFlightParser:
         assert o.price_per_adult_inr == pytest.approx(o.price_inr / 2, rel=0.01)
         assert o.currency_original == "USD"
 
+    def test_blank_airline_name_falls_back_to_the_code(self) -> None:
+        """A Bangkok fare (17 Nov 2026) came with no carrier name and showed a
+        blank airline; the code is shown instead."""
+        it = self._itin(2553.65, "USD", 1276.82, pax=2)
+        it["originDestinationOptions"] = [{"flightSegments": [{
+            "departureAirportLocationCode": "DEL", "arrivalAirportLocationCode": "DXB",
+            "departureDateTime": "2026-12-15T10:00:00", "arrivalDateTime": "2026-12-15T13:00:00",
+            "marketingAirlineName": "", "marketingAirlineCode": "TG", "flightNumber": "1"}]}]
+        opts = parse_flight_response({"data": {"pricedItineraries": [it]}},
+                                     expected_origin="DEL", expected_destination="DXB")
+        assert opts and opts[0].airline == "TG"
+
     def test_realistic_inr_fare_survives(self) -> None:
         """A genuine INR fare above the per-adult floor is kept."""
         raw = {"data": {"pricedItineraries": [self._itin(40000.0, "INR", 20000.0, pax=2)]}}

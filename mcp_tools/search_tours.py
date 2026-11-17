@@ -293,6 +293,11 @@ def _impl(
     customer how many exist ("270 tours available, here are the first 10").
 
     Args:
+        destination_city: the city, as the customer names it ("Osaka",
+            "Bali"). Add the country after a comma when the customer names it
+            or the name exists in several countries ("London, Canada",
+            "Perth, UK", "Cambridge, New Zealand"): without it the best-known
+            city of that name is searched.
         max_results: page size. Default 10.
         offset: how many to SKIP. This is what makes "show me more" work — the
             next page must be NEW tours, not the same ones again. Escalate the
@@ -337,7 +342,9 @@ def _impl(
         return needs_input_error(missing)
 
     try:
-        city = resolve_city(destination_city)
+        # The tour catalogue files cities under their own ids (Osaka: hotels
+        # 4918 has no tours, tours 164147 has 291), so ask for the tour id.
+        city = resolve_city(destination_city, service="tours")
         if city is None:
             return unknown_city(destination_city, "tours")
         if not city.get("city_id") or not city.get("country_id"):
@@ -357,6 +364,15 @@ def _impl(
         # Parse the FULL list first (no cap) so a keyword filter can reach tours
         # beyond the 5 cheapest. Only cap after filtering.
         all_options = parse_tour_response(list_raw, rate_raw, max_results=None)
+        if not all_options:
+            # Cape Town (17 Nov 2026): no priced tours, and the reply said to
+            # paste "the finished table for all 0 options".
+            out = nothing_in_city(str(city.get("name") or destination_city), "tours")
+            out["agent_instructions"] += (
+                f" (Checked for {travel_date}; another date may have tours, so offer "
+                f"to check a different date too.)"
+            )
+            return out
         q = query.strip().lower()
         if q:
             terms = [w for w in q.split() if len(w) > 2]

@@ -81,7 +81,7 @@ def _resolve_local(name: str) -> dict[str, Any] | None:
     return None
 
 
-def resolve_city(name: str, *, supplier: bool = True) -> dict[str, Any] | None:
+def resolve_city(name: str, *, supplier: bool = True, service: str | None = None) -> dict[str, Any] | None:
     """A city record: {name, city_id, country_id, country_name, lat, lng, iata}.
 
     cities.json first (curated, offline). Anything else the supplier sells is
@@ -90,14 +90,25 @@ def resolve_city(name: str, *, supplier: bool = True) -> dict[str, Any] | None:
     supplier id (the Indian origins) gets the supplier's ids added.
     `supplier=False` keeps the lookup offline: use it when scanning arbitrary
     words, which must never cost a network call.
+
+    `service="tours"` asks for the city id the supplier's TOUR catalogue uses.
+    The supplier keeps separate city ids for hotels and tours: Osaka is 4918
+    for hotels (0 tours) and 164147 for tours (291 tours, as gujjutours.com
+    lists), Jaipur 1117 (1 tour) against 236352 (29 tours).
+
+    "London, Canada" / "Perth, UK": a country after a comma picks the city in
+    that country; without it the supplier's first city of that name wins.
     """
     if not name or not name.strip():
         return None
+    _city, country = _split_place(name)
     local = _resolve_local(name)
+    if local is not None and country and not _country_matches(str(local.get("country_name") or ""), country):
+        local = None
     if local is not None:
         if local.get("city_id") or not supplier:
             return local
-        found = supplier_city(str(local.get("name") or name))
+        found = supplier_city(str(local.get("name") or name), service=service)
         if found and found.get("city_id"):
             return {**local, "city_id": found["city_id"], "country_id": found["country_id"],
                     "country_name": local.get("country_name") or found.get("country_name")}
@@ -107,9 +118,44 @@ def resolve_city(name: str, *, supplier: bool = True) -> dict[str, Any] | None:
     token = name.strip().upper()
     if len(token) == 3 and token.isalpha() and token in _load_airports().get("airports", {}):
         rec = airport(token) or {}
-        found = supplier_city(str(rec.get("city") or ""))
+        found = supplier_city(str(rec.get("city") or ""), service=service)
         return {**found, "iata": token} if found else None
-    return supplier_city(name)
+    return supplier_city(name, service=service)
+
+
+# Countries customers name differently from the supplier ("UK" for "United
+# Kingdom"). Keys and values are plain (see `_plain`).
+_COUNTRY_ALIASES = {
+    "uk": "united kingdom", "england": "united kingdom", "scotland": "united kingdom",
+    "wales": "united kingdom", "britain": "united kingdom", "great britain": "united kingdom",
+    "us": "united states of america", "usa": "united states of america",
+    "united states": "united states of america", "america": "united states of america",
+    "uae": "united arab emirates", "emirates": "united arab emirates",
+    "turkey": "turkiye", "holland": "netherlands", "the netherlands": "netherlands",
+    "korea": "south korea", "czech republic": "czechia", "vietnam": "viet nam",
+}
+
+
+def _split_place(name: str) -> tuple[str, str | None]:
+    """("London, Canada") -> ("London", "canada"); no comma -> (name, None)."""
+    parts = [p.strip() for p in str(name or "").split(",") if p.strip()]
+    if len(parts) < 2:
+        return (parts[0] if parts else ""), None
+    country = _plain(parts[-1])
+    return parts[0], (_COUNTRY_ALIASES.get(country, country) or None)
+
+
+def _country_matches(row_country: str, want: str | None) -> bool:
+    if not want:
+        return True
+    have = _plain(row_country)
+    have = _COUNTRY_ALIASES.get(have, have)
+    if not have:
+        return False
+    if have == want or have.startswith(want) or want.startswith(have):
+        return True
+    # "Viet Nam" vs "Vietnam", "Korea, Republic of" vs "south korea".
+    return have.replace(" ", "") == want.replace(" ", "") or want in have.split(" ")
 
 
 def _plain(text: str) -> str:
@@ -140,58 +186,78 @@ def _supplier_spellings() -> dict[str, str]:
     return {_plain(k): str(v) for k, v in raw.items() if not k.startswith("_")}
 
 
-def supplier_city(name: str) -> dict[str, Any] | None:
+def supplier_city(name: str, *, service: str | None = None) -> dict[str, Any] | None:
     """The supplier's own record of a city, from its public autocomplete.
 
     Only a row of type city whose name IS the query (or a close spelling of a
     long one) counts, so a word like "desert" never becomes "Palm Desert".
+    `service="tours"` asks the tours autocomplete first (its city ids are the
+    ones the tour catalogue is filed under); otherwise hotels first. A country
+    after a comma ("Perth, UK") must match the row's country.
     Answers are cached for the process; a failed call is not, so a supplier
     blip is retried next time.
     """
-    key = _plain(_city_key(name or ""))
+    city_part, country = _split_place(name or "")
+    key = _plain(_city_key(city_part))
     if len(key) < 3 or not supplier_lookup_enabled():
         return None
     # The supplier's search does not fold accents: "Zurich" finds no city,
     # "Zürich" does. Ask in its spelling; rows are matched accent-free.
-    query = _supplier_spellings().get(key) or _city_key(name)
+    query = _supplier_spellings().get(key) or _city_key(city_part)
     want = _plain(query)
+    services = ("tours", "hotels") if service == "tours" else _CITY_SERVICES
+    cache_key = f"{key}|{country or ''}|{services[0]}"
     with _SUPPLIER_LOCK:
-        if key in _SUPPLIER_CITIES:
-            return _SUPPLIER_CITIES[key]
+        if cache_key in _SUPPLIER_CITIES:
+            return _SUPPLIER_CITIES[cache_key]
     try:
         from booking_api.endpoints import call_entity_search
     except Exception:  # noqa: BLE001 - no client means no supplier answer
         return None
     found: dict[str, Any] | None = None
     complete = True
-    for service in _CITY_SERVICES:
-        try:
-            raw = call_entity_search(service=service, query=query, size=10) or {}
-        except Exception as e:  # noqa: BLE001
-            logger.warning("supplier city lookup failed q=%r: %s", name, e)
-            complete = False
-            continue
-        if raw.get("error"):
-            complete = False
-        found = _pick_city_row(raw.get("data") or [], want)
+    # With a country, a second pass asks "London Canada": the plain name's
+    # first page holds only the best-known London.
+    queries = [query] + ([f"{query} {country}"] if country else [])
+    for q in queries:
+        for svc in services:
+            try:
+                # 20 rows: a short name ("Kos") shares its first page with
+                # longer cities that start the same way.
+                raw = call_entity_search(service=svc, query=q, size=20) or {}
+            except Exception as e:  # noqa: BLE001
+                logger.warning("supplier city lookup failed q=%r: %s", name, e)
+                complete = False
+                continue
+            if raw.get("error"):
+                complete = False
+            found = _pick_city_row(raw.get("data") or [], want, country)
+            if found:
+                break
         if found:
             break
     if found or complete:
         with _SUPPLIER_LOCK:
-            _SUPPLIER_CITIES[key] = found
+            _SUPPLIER_CITIES[cache_key] = found
             while len(_SUPPLIER_CITIES) > 2000:
                 _SUPPLIER_CITIES.pop(next(iter(_SUPPLIER_CITIES)))
     return found
 
 
-def _pick_city_row(rows: list[Any], key: str) -> dict[str, Any] | None:
+def _pick_city_row(rows: list[Any], key: str, country: str | None = None) -> dict[str, Any] | None:
     cities = [r for r in rows if isinstance(r, dict) and str(r.get("type") or "").lower() == "city"
               and r.get("cityId")]
+    if country:
+        cities = [r for r in cities if _country_matches(str(r.get("country") or ""), country)]
 
     def named(r: dict[str, Any]) -> str:
         return _plain(str(r.get("name_text") or r.get("city") or ""))
 
     row = next((r for r in cities if named(r) == key), None)
+    if row is None:
+        # "Xian" for "Xi'an", "Sharm el Sheikh" for "Sharm El-Sheikh".
+        bare = key.replace(" ", "")
+        row = next((r for r in cities if named(r).replace(" ", "") == bare), None)
     if row is None and len(key) >= FUZZY_MIN_LEN:
         row = next((r for r in cities if close_spelling(named(r), key)), None)
     if row is None:
