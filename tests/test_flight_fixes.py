@@ -839,3 +839,31 @@ class TestNudgedRetryMustBeGrounded:
         agent._save_final_reply(_Agent(), {}, {"messages": [reply]})
         assert saved == [reply]
 
+
+
+# --- 23 Nov 2026: USD-labelled AED fares; a refused token read as "no fares" --
+
+def test_a_usd_labelled_fare_is_converted_at_the_supplier_roe() -> None:
+    """HYD-DXB Emirates came labelled USD 1999.35387795; gujjutours.com showed
+    Rs 50,949.85 = 1999.35 x sellingROE 25.4831576387, not x the USD rate."""
+    from parsers import _flight_to_inr
+
+    rates = {"INR": 1.0, "AED": 25.4831576387, "USD": 97.5}
+    assert round(_flight_to_inr(1999.35387795, "USD", rates), 2) == 50949.85
+    assert round(_flight_to_inr(1999.35387795, "AED", rates), 2) == 50949.85
+    # INR-labelled rows keep their own handling.
+    assert _flight_to_inr(40000, "INR", rates) == 40000
+
+
+def test_a_refused_flight_search_is_not_called_no_fares(monkeypatch) -> None:
+    from core import BookingApiError
+    from mcp_tools import search_flights
+
+    def refuse(**_k):
+        raise BookingApiError("403 Client error for /api/Flight/search",
+                              endpoint="/api/Flight/search", status_code=403)
+
+    monkeypatch.setattr(search_flights, "call_flight_search", refuse)
+    code, options, error = search_flights._search_one_provider(
+        "EK", "HYD", "DXB", "2026-12-01", "2026-12-15", 1, 0, None, "Y", 2)
+    assert options == [] and error == search_flights.ACCESS_DENIED

@@ -45,7 +45,8 @@ class TestFlightParser:
         from parsers import FLIGHT_PRICE_INR_FLOOR
 
         options = parse_flight_response(raw)
-        assert all(o.price_inr >= FLIGHT_PRICE_INR_FLOOR for o in options)
+        inr = [o for o in options if o.currency_original.upper() == "INR"]
+        assert all(o.price_inr >= FLIGHT_PRICE_INR_FLOOR for o in inr)
 
     def test_destination_filter_drops_wrong_route(self, raw: dict) -> None:
         """When asking for DEL→BOM, NMI (Saipan) results should not appear."""
@@ -77,14 +78,16 @@ class TestFlightParser:
         assert any(r for _, r in labels)
 
     def test_currency_conversion_from_usd(self, raw: dict) -> None:
-        """USD-priced itineraries should convert to realistic INR amounts."""
+        """A USD-labelled fare is AED-based (supplier rule): it converts at the
+        AED rate (the live sellingROE), as gujjutours.com does, not at USD."""
+        from settings import get_currency_settings
+
+        aed = get_currency_settings().as_rate_map()["AED"]
         options = parse_flight_response(raw)
         usd_opts = [o for o in options if o.currency_original == "USD"]
         assert usd_opts, "Expected at least one USD-priced itinerary"
-        # $279 * 84 = ~₹23,400. Sanity check the conversion.
         for o in usd_opts:
-            ratio = o.price_inr / o.price_original
-            assert 70 <= ratio <= 100, f"FX ratio out of range: {ratio}"
+            assert abs(o.price_inr / o.price_original - aed) < 0.01
 
     def test_max_results(self, raw: dict) -> None:
         options = parse_flight_response(raw, max_results=1)
