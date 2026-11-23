@@ -147,7 +147,7 @@ Each `mcp_tools/<name>.py` defines an `_impl` and registers it with `mcp.tool(na
   - checkpointer: memory by default, `build_postgres_checkpoint` (chat API) or `build_sqlite_checkpoint` (WhatsApp).
 - **Recursion limit:** 33 for chat (`_STEPS_PER_TOOL_ROUND * PLAN_TOOL_ROUNDS + 1`, 8 tool rounds; a built package needs 6+), 25 for voice.
 - **Streaming:** `stream_and_log` returns a `StreamResult` (`text`, `messages`, `tool_event_log`, `latency_seconds`, `on_update` callback fired after every update chunk, `.response`). Stream modes `messages` + `updates`. `on_update` is how the chat API emits live tool steps.
-- **Guards** (both paths): injection guard, malformed-args repair, empty-turn and unfulfilled-promise nudges (a lookup offered on the customer's answer is not a broken promise), `_apply_reply_guards` (invented results, fake PDF links, claiming an unbuilt PDF, visa guarantees removed and the tight-timeline note added, a missing visa party total added).
+- **Guards** (both paths): injection guard, malformed-args repair, empty-turn and unfulfilled-promise nudges (a lookup offered on the customer's answer is not a broken promise, and neither is a reply whose last sentence is a question: "Would you like me to try checking the flights again...?" was answered twice), `_apply_reply_guards` (invented results, fake PDF links, claiming an unbuilt PDF, visa guarantees removed and the tight-timeline note added, a missing visa party total added).
 - **`_customer_part`** strips stacked leading `[system]` blocks the API prepends (mode, regenerate, memory) so rules see only the customer's words.
 - **`extract_all_search_options`** returns the latest result **per kind** (one card group per kind), resolved through `ui_payload.full_result`.
 

@@ -1631,6 +1631,12 @@ def _is_unfulfilled_promise(response: dict[str, Any]) -> bool:
     if not text:
         return False
     last = re.split(r"(?<=[.!?])\s+", text)[-1]
+    # A question waits for the customer: "Would you like me to try checking the
+    # flights again in a little while, or shall we move on?" matched
+    # "checking the" and the retry appended a second, reworded answer
+    # (production, 23 Nov 2026).
+    if last.rstrip().endswith("?"):
+        return False
     return bool(_PROMISE.search(last)) and not _WAITS_FOR_CUSTOMER.search(last)
 
 
