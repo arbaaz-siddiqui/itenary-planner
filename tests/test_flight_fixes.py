@@ -870,3 +870,32 @@ def test_a_refused_flight_search_is_not_called_no_fares(monkeypatch) -> None:
     code, options, error = search_flights._search_one_provider(
         "EK", "HYD", "DXB", "2026-12-01", "2026-12-15", 1, 0, None, "Y", 2)
     assert options == [] and error == search_flights.ACCESS_DENIED
+
+
+def _fare_code(total: float) -> str:
+    """A Techno_Flight fareSourceCode: base64 of '...' + SEP + base64(JSON)."""
+    import base64
+    import json
+
+    sep = "$" * 2
+    inner = json.dumps({"suppItinTotalFare": {"TotalFare": {"Amount": total, "CurrencyCode": "INR"}}})
+    b = base64.b64encode(inner.encode()).decode()
+    return base64.b64encode(sep.join(["1", "0", "Techno", "conv", b]).encode()).decode()
+
+
+def test_an_aed_amount_labelled_inr_is_converted() -> None:
+    """HYD-PEK Thai TG330+TG668+CA1340 came as 24,150.20 "INR" with a fare
+    code saying Rs 5,48,452; it was shown as Rs 24,150 (23 Nov 2026)."""
+    from parsers import _flight_fare_currency
+
+    pricing = {"fareSourceCode": _fare_code(548452)}
+    assert _flight_fare_currency(24150.2047, "INR", pricing) == "AED"
+
+
+def test_a_true_inr_amount_keeps_its_label() -> None:
+    """October fixtures: the amount equals the encoded fare (84,296)."""
+    from parsers import _flight_fare_currency
+
+    assert _flight_fare_currency(84296, "INR", {"fareSourceCode": _fare_code(84296)}) == "INR"
+    assert _flight_fare_currency(84296, "INR", {}) == "INR"
+    assert _flight_fare_currency(1999.35, "USD", {}) == "USD"
