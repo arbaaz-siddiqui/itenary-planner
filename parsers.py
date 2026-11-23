@@ -311,6 +311,66 @@ def parse_flight_response(
     return options[:max_results] if max_results else options
 
 
+_FSC_TOTAL = re.compile(r'"TotalFare"\s*:\s*\{\s*"Amount"\s*:\s*([\d.]+)')
+_B64 = re.compile(r"[A-Za-z0-9+/=]{40,}")
+
+
+def _fare_code_total(fare_source_code: str) -> float | None:
+    """The supplier's own fare total carried inside a fareSourceCode.
+
+    Techno_Flight rows encode their source fare (base64, "$$"-separated, the
+    JSON nested a layer or two down): {"suppItinTotalFare": {"TotalFare":
+    {"Amount": 73314, "CurrencyCode": "INR"}}}. None when there is none.
+    """
+    import base64
+
+    cur = str(fare_source_code or "")
+    for _ in range(4):
+        try:
+            cur = base64.b64decode(cur + "=" * (-len(cur) % 4)).decode("utf-8", "ignore")
+        except Exception:  # noqa: BLE001 - not a code we can read
+            return None
+        m = _FSC_TOTAL.search(cur)
+        if m:
+            try:
+                return float(m.group(1))
+            except ValueError:
+                return None
+        parts = [x for x in cur.split("$$") if _B64.fullmatch(x)]
+        if not parts:
+            return None
+        cur = parts[-1]
+    return None
+
+
+# An INR-labelled amount this many times smaller than the fare inside its own
+# fareSourceCode is AED (the ratio seen is ~22.7, rupees per dirham).
+_AED_AS_INR_RATIO = 5.0
+
+
+def _flight_fare_currency(amount: Any, currency: str, pricing: dict[str, Any]) -> str:
+    """The currency the amount is really in.
+
+    Techno_Flight rows come labelled "INR" with AED amounts (since Nov 2026):
+    HYD-PEK Thai Airways TG330+TG668+CA1340 showed 24,150.20 "INR" while its
+    fareSourceCode says TotalFare Rs 5,48,452; Cathay CX672+CX386 3,228.26
+    "INR" against Rs 73,314. Shown as rupees, a Rs 5.5 lakh fare read
+    Rs 24,150. In October the two agreed (84,296 = 84,296), so the label is
+    only overridden when the encoded fare proves it wrong.
+    """
+    code = str(currency or "").strip().upper()
+    if code != "INR":
+        return code
+    try:
+        value = float(amount)
+    except (TypeError, ValueError):
+        return code
+    inner = _fare_code_total(str(pricing.get("fareSourceCode") or ""))
+    if inner and value > 0 and inner / value >= _AED_AS_INR_RATIO:
+        return "AED"
+    return code
+
+
 def _flight_to_inr(amount: Any, currency: str, rates: dict[str, float]) -> float | None:
     """A flight fare in INR, converted as gujjutours.com converts it.
 
@@ -346,6 +406,8 @@ def _parse_flight_itinerary(
     if amount is None or currency is None:
         return None
 
+    # The label is not always the currency (see _flight_fare_currency).
+    currency = _flight_fare_currency(amount, currency, pricing)
     price_inr = _flight_to_inr(amount, currency, rates)
     if price_inr is None:
         return None  # skip exotic currencies rather than fabricate
