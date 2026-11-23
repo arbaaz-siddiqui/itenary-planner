@@ -58,17 +58,27 @@ class TestUndatedPriceIsRefused:
         assert out["missing_fields"] == ["travel_date"]
         priced.assert_not_called()
 
-    def test_search_tours_asks_for_the_date(self, said):
+    def test_search_tours_without_a_date_gives_from_prices(self, said):
+        """The website answers "how much is the Burj Khalifa ticket" with
+        "From Rs ..." and no date (client ask, 23 Nov 2026): the search runs
+        for tomorrow, never the date the model invented, and drops party
+        totals."""
         from mcp_tools.search_tours import search_tours_tool
 
         said("show me desert safaris")
-        with patch("mcp_tools.search_tours._cached_impl") as searched:
+        result = {"options": [{"name": "Desert Safari", "price_per_adult_inr": 1500.0,
+                               "party_total_display": "Rs 3,000"}],
+                  "party_totals_markdown": "**Total for 2 adults:** ..."}
+        with patch("mcp_tools.search_tours._cached_impl", return_value=result) as searched:
             out = search_tours_tool.invoke({
                 "destination_city": "Dubai", "travel_date": "2026-10-22",
                 "adults": 2,
             })
-        assert out["error_type"] == "NeedsCustomerInput"
-        searched.assert_not_called()
+        assert searched.call_args.kwargs["travel_date"] != "2026-10-22"
+        assert out["price_basis_note"] == "from_price_per_adult"
+        assert "party_totals_markdown" not in out
+        assert "party_total_display" not in out["options"][0]
+        assert "from" in out["agent_instructions"].lower()
 
     def test_the_model_cannot_waive_the_date_for_the_customer(self, said):
         from mcp_tools.get_tour_options import get_tour_options

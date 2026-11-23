@@ -1996,6 +1996,7 @@ def generate_itinerary_pdf_tool(
 # =============================================================================
 def _build_all_tools() -> list[BaseTool]:
     # Import MCP tools here (they have decorator side effects)
+    from mcp_tools.get_distance import get_distance_tool
     from mcp_tools.get_exchange_rate import get_exchange_rate_tool
     from mcp_tools.get_flight_details import get_flight_details_tool
     from mcp_tools.lookup_entity import lookup_entity_tool
@@ -2032,6 +2033,7 @@ def _build_all_tools() -> list[BaseTool]:
         list_visa_countries_tool,
         list_packages_tool,
         get_exchange_rate_tool,
+        get_distance_tool,
         # Detail tools (MCP-exposed)
         get_flight_details_tool,
         get_tour_details_tool,
