@@ -527,6 +527,9 @@ class TestTurnGuards:
         assert agent._is_unfulfilled_promise(stalled)
 
     @pytest.mark.parametrize("reply", [
+        # Production, 23 Nov 2026: answered twice because "checking the" matched.
+        "Would you like me to try checking the flights to Beijing again in a "
+        "little while, or shall we move ahead with hotels?",
         "Let me know if you'd like hotels too.",
         "Which date would you like to fly?",
     ])
