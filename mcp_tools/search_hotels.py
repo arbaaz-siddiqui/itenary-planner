@@ -674,10 +674,57 @@ def _fetch_amenities_text(hotel_ids: list[int]) -> dict[str, str]:
     return out
 
 
+def _hotel_facts(hotel_name: str, destination_city: str) -> dict[str, Any] | None:
+    """A named hotel's static facts, for a question that needs no dates.
+
+    "Does Atlantis The Palm have a swimming pool?" was refused for want of
+    check-in dates (23 Nov 2026). Its description ("2 outdoor swimming
+    pools") answers it. Prices still need dates; this says so.
+    """
+    from mcp_tools.get_hotel_description import _impl as describe
+    from mcp_tools.get_hotel_info import _impl as info
+
+    city = resolve_city(destination_city) or {}
+    city_id = int(city.get("city_id") or 0)
+    try:
+        hotel_id = _resolve_hotel_by_name(hotel_name, city_id, str(city.get("name") or ""))
+    except Exception as e:  # noqa: BLE001 - fall back to asking for dates
+        logger.warning("hotel facts lookup failed for %r: %s", hotel_name, e)
+        return None
+    if not hotel_id:
+        return None
+    static = (info([hotel_id], city_id).get("hotels") or [{}])[0]
+    text = next((d.get("description") for d in describe([hotel_id], city_id).get("descriptions") or []
+                 if d.get("description")), "")
+    return {
+        "hotel_facts": {
+            "hotel_id": hotel_id,
+            "name": static.get("hotel_name") or hotel_name,
+            "stars": static.get("stars"),
+            "address": static.get("full_address"),
+            "latitude": static.get("latitude"),
+            "longitude": static.get("longitude"),
+            "facilities": static.get("facilities") or [],
+            "description": text,
+        },
+        "options": [],
+        "total_results": 0,
+        "agent_instructions": (
+            "No dates were given, so no prices or availability were checked. If the "
+            "customer asked about this hotel itself (facilities, pool, location, "
+            "stars, what it is like), answer now from `hotel_facts` and do not ask "
+            "for dates; say only what the facts state. Ask for check-in, check-out "
+            "and party only if they want prices, availability or to book."
+        ),
+    }
+
+
 def _impl(
     destination_city: str,
-    check_in: str,
-    check_out: str,
+    # Optional in the schema so a question about a named hotel ("does it have
+    # a pool?") reaches `_hotel_facts`; the schema used to reject it first.
+    check_in: str = "",
+    check_out: str = "",
     adults: int = 2,
     children: int = 0,
     child_ages: list[int] | None = None,
@@ -761,6 +808,10 @@ def _impl(
         **({} if rooms else {"adults": adults}),
     )
     if missing and not assume_missing:
+        if hotel_name and hotel_name.strip():
+            facts = _hotel_facts(hotel_name, destination_city)
+            if facts is not None:
+                return facts
         return needs_input_error(missing)
 
     try:

@@ -57,6 +57,7 @@ _TOOL_TTL = {
     "list_visa_countries": _STATIC_TTL,
     "list_city_hotels": _STATIC_TTL,
     "lookup_entity": _STATIC_TTL,
+    "get_distance": _STATIC_TTL,  # places do not move
     "lookup_hotel_city": _STATIC_TTL,
 }
 

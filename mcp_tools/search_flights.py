@@ -59,6 +59,10 @@ _MAX_PAX_PER_SEARCH = 9
 _INFANT_MAX_AGE = 1
 
 
+# Marker for a supplier refusal (HTTP 401/403): our credentials, not the route.
+ACCESS_DENIED = "flight search refused by the supplier (access denied)"
+
+
 def _search_one_provider(
     airline_code: str,
     origin_iata: str,
@@ -103,6 +107,14 @@ def _search_one_provider(
         )
         return airline_code, options, _supplier_error(raw)
     except Exception as e:
+        status = (getattr(e, "fields", None) or {}).get("status_code")
+        if status in (401, 403):
+            # The account's token is not allowed to search flights. This was
+            # swallowed and every route read "no economy fares were found"
+            # (production, 23 Nov 2026: a BOOKING_TOKEN without flight access).
+            logger.error("flight search refused by the supplier (HTTP %s) provider=%s",
+                         status, airline_code or "all")
+            return airline_code, [], ACCESS_DENIED
         logger.debug("Provider %s failed: %s", airline_code, e)
         return airline_code, [], ""
 
@@ -1009,6 +1021,14 @@ def _answer(
             "clock times. Refundable is per fare; never say a whole list is "
             "refundable. Baggage 'not confirmed' means exactly that. Refund and "
             "change terms come only from get_flight_details penalties."
+        )
+    elif ACCESS_DENIED in supplier_errors:
+        instructions = (
+            "Live flight fares could not be loaded right now: the airline system "
+            "refused our request. Tell the customer fares are temporarily "
+            "unavailable and offer to try again shortly or help with the rest of "
+            "the trip. Never say there are no flights on this route or date, and "
+            "do not describe any flight or fare."
         )
     elif supplier_errors:
         instructions = (

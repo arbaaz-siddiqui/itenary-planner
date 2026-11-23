@@ -146,12 +146,14 @@ FLIGHT_INR_LABELED_PER_ADULT_FLOOR: int = 12000
 
 def _is_bogus_flight(opt: FlightOption) -> bool:
     """True if the fare looks like supplier test/mislabeled data, not a real fare."""
-    # Whole-party floor (any currency) — catches absurdly low totals.
-    if opt.price_inr < FLIGHT_PRICE_INR_FLOOR:
-        return True
     # INR-labeled fares are the ones the supplier mislabels; hold them to a
-    # realistic per-adult floor. Converted USD/AED fares are trusted.
+    # whole-party floor and a realistic per-adult floor. Fares converted at the
+    # supplier ROE (labelled USD/AED) are trusted: a real domestic one-way is
+    # under Rs 8,000 (HYD-BOM IndiGo Rs 6,847.80 on 23 Nov 2026) and the
+    # floor used to apply to every currency.
     if opt.currency_original.upper() == "INR":
+        if opt.price_inr < FLIGHT_PRICE_INR_FLOOR:
+            return True
         per_adult = opt.price_per_adult_inr
         if per_adult is None and opt.pax_count > 0:
             per_adult = opt.price_inr / opt.pax_count
@@ -309,6 +311,24 @@ def parse_flight_response(
     return options[:max_results] if max_results else options
 
 
+def _flight_to_inr(amount: Any, currency: str, rates: dict[str, float]) -> float | None:
+    """A flight fare in INR, converted as gujjutours.com converts it.
+
+    The supplier's money is AED-based whatever the row's label (the supplier
+    rule in `fx.convert_supplier_price`): a label other than the account's
+    currency means amount x sellingROE, which `rates["AED"]` carries. Around
+    20 Nov 2026 the label on our account's fares changed from "AED" to "USD"
+    while the amounts stayed AED-based; read as US dollars (x 97.5) HYD-DXB
+    Emirates 1999.35 became ~Rs 1.95 lakh against the website's Rs 50,949.85
+    (1999.35 x 25.4832). INR-labelled rows keep their own handling (and the
+    bogus-INR filter).
+    """
+    code = str(currency or "").strip().upper()
+    if code and code != "INR" and "AED" in rates:
+        code = "AED"
+    return _safe_to_inr(amount, code, rates)
+
+
 def _parse_flight_itinerary(
     item: dict[str, Any],
     rates: dict[str, float],
@@ -326,12 +346,12 @@ def _parse_flight_itinerary(
     if amount is None or currency is None:
         return None
 
-    price_inr = _safe_to_inr(amount, currency, rates)
+    price_inr = _flight_to_inr(amount, currency, rates)
     if price_inr is None:
         return None  # skip exotic currencies rather than fabricate
 
-    base_fare_inr = _safe_to_inr(itin.get("baseFare", {}).get("amount"), currency, rates)
-    total_tax_inr = _safe_to_inr(itin.get("totalTax", {}).get("amount"), currency, rates)
+    base_fare_inr = _flight_to_inr(itin.get("baseFare", {}).get("amount"), currency, rates)
+    total_tax_inr = _flight_to_inr(itin.get("totalTax", {}).get("amount"), currency, rates)
 
     # Per-adult fare + total pax come straight from the supplier's per-passenger
     # breakdown — so we quote a REAL per-person number, never total ÷ pax guessed
@@ -346,7 +366,7 @@ def _parse_flight_itinerary(
         pax_count += qty
         if str(ptq.get("code") or "").upper() == "ADT":
             adt_fare = (b.get("passengerFare") or {}).get("totalFare") or {}
-            price_per_adult_inr = _safe_to_inr(adt_fare.get("amount"), currency, rates)
+            price_per_adult_inr = _flight_to_inr(adt_fare.get("amount"), currency, rates)
 
     od_options = item.get("originDestinationOptions") or []
     segs_out = _parse_segments(od_options[0]) if len(od_options) > 0 else []

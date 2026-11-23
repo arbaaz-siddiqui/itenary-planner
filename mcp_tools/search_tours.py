@@ -273,8 +273,11 @@ def _attach_timeslots(options: list, travel_date: str, adults: int) -> None:
 
 def _impl(
     destination_city: str,
-    travel_date: str,
-    adults: int,
+    # Optional in the schema: a dateless question ("how much is the Burj
+    # Khalifa ticket?") gets the website's "from" prices (`_from_prices`)
+    # instead of a schema error.
+    travel_date: str = "",
+    adults: int = 1,
     tour_category_id: int = 1,
     max_results: int = 10,
     query: str = "",
@@ -706,8 +709,50 @@ def _dated_impl(*args: Any, **kwargs: Any) -> dict[str, Any]:
 
     waived = kwargs.get("assume_missing") and customer_waived_field()
     if not waived and not customer_gave_date():
-        return needs_input_error(["travel_date"])
+        return _from_prices(*args, **kwargs)
     return _cached_impl(*args, **kwargs)
+
+
+def _from_prices(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """The catalogue with "from" prices, for a customer who named no day.
+
+    "What's included in the desert safari?", "Burj Khalifa timings?" and "How
+    much is the Burj Khalifa ticket?" were all answered with "when would you
+    like to go?" (23 Nov 2026). gujjutours.com answers them on the tour page
+    with no date: the facts plus "From Rs 5,415.17". This does the same: it
+    lists tours for tomorrow (IST) and presents each price as a per-adult
+    starting price, with no party totals. Exact prices for a party still need
+    the customer's date (get_tour_options keeps asking for it).
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from rules import needs_input_error
+
+    ist = timezone(timedelta(hours=5, minutes=30))
+    kwargs = dict(kwargs)
+    kwargs["travel_date"] = (datetime.now(ist).date() + timedelta(days=1)).isoformat()
+    kwargs["assume_missing"] = False
+    out = _cached_impl(*args, **kwargs)
+    if not isinstance(out, dict) or out.get("error"):
+        return out if isinstance(out, dict) and out.get("error_type") != "NeedsCustomerInput"             else needs_input_error(["travel_date"])
+    out = dict(out)
+    for key in ("party_totals_markdown", "party_total_display"):
+        out.pop(key, None)
+    out["options"] = [
+        {k: v for k, v in o.items() if not k.startswith("party_total")} if isinstance(o, dict) else o
+        for o in out.get("options") or []
+    ]
+    out["price_basis_note"] = "from_price_per_adult"
+    out["agent_instructions"] = (
+        "The customer named no travel date. Answer what they asked now: tour "
+        "names, what is included, duration and timings (call get_tour_details "
+        "with the tour_id for inclusions or timings), and prices as 'from "
+        "<price_per_adult> per adult', exactly as gujjutours.com shows a starting "
+        "price. Say the exact price depends on the date and party. Do not give "
+        "party totals and do not ask for the date unless they want an exact price "
+        "or to book."
+    )
+    return out
 
 
 search_tours_tool = tool(_dated_impl)
